@@ -9,7 +9,8 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 # Replace with your actual bot token
-TOKEN = "MTM2OTM1NjQ2MzQ1Mjk3OTI0Mg.GhfNK9.6H0yg6VOclrQyaVDLronM5iasjml7suDHy5wZQ"
+import os
+TOKEN = os.getenv("TOKEN")
 
 # Replace with the channel ID of your war-status channel
 CHANNEL_ID = 1369071691111600168
