@@ -71,11 +71,11 @@ async def wargreen(ctx):
 @bot.command()
 @role_check()
 async def warfarm(ctx):
-    await ctx.send("✅ Command received: Setting status to 🌾 Go Farming...\n⚠️ *Channel rename may be delayed due to Discord rate limits.*")
+    await ctx.send("✅ Command received: Setting status to 🌾 Go Farm...\n⚠️ *Channel rename may be delayed due to Discord rate limits.*")
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         try:
-            await channel.edit(name="〘🌾〙war-status-go-farming")
+            await channel.edit(name="〘🌾〙war-status-go-farm")
         except discord.errors.HTTPException as e:
             print(f"Rename failed or delayed: {e}")
 
