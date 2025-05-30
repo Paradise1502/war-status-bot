@@ -71,7 +71,7 @@ async def wargreen(ctx):
 @bot.command()
 @role_check()
 async def warfarm(ctx):
-    await ctx.send("✅ Command received: Setting status to 🌾 Go Farm...\n⚠️ *Channel rename may be delayed due to Discord rate limits.*")
+    await ctx.send("🌾 Status set to *Go Farm Mana*.\nEnemies are too bad, dodged again — smh.\nGo stack that mana, RSS heal is expensive.")
     channel = bot.get_channel(CHANNEL_ID)
     if channel:
         try:
