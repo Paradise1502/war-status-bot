@@ -61,7 +61,7 @@ async def rssheal(ctx, lord_id: str):
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
 
         await ctx.send(
-            f"📊 RSS Spent by `{lord_id}` between `{previous.title}` → `{latest.title}`:\n"
+            f"📊 RSS Spent by `{username}` (`{lord_id}`) between `{previous.title}` → `{latest.title}`:\n"
             f"🪙 Gold: {gold:,}\n"
             f"🪵 Wood: {wood:,}\n"
             f"⛏️ Ore: {ore:,}\n"
