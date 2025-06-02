@@ -71,16 +71,6 @@ async def rssheal(ctx, lord_id: str):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-import discord
-from discord.ext import commands
-
-# Enable required intents
-intents = discord.Intents.default()
-intents.message_content = True
-
-# Set command prefix
-bot = commands.Bot(command_prefix='!', intents=intents)
-
 import os
 TOKEN = os.getenv("TOKEN")
 
