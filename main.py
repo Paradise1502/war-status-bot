@@ -33,6 +33,7 @@ async def rssheal(ctx, lord_id: str):
         previous_data = previous.get_all_values()
 
         headers = latest_data[0]
+        name_index = 1  # Column B
         id_index = headers.index("lord_id")
 
         # Column indices: AF=31, AG=32, AH=33, AI=34 (zero-indexed)
@@ -45,6 +46,7 @@ async def rssheal(ctx, lord_id: str):
             return None
 
         row_latest = find_row(latest_data)
+        username = row_latest[name_index]
         row_prev = find_row(previous_data)
 
         if not row_latest or not row_prev:
