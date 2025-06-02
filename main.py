@@ -1,3 +1,76 @@
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+import os
+import json
+import discord
+from discord.ext import commands
+
+# Google Sheets Auth
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds_json = os.getenv("CREDENTIALS_JSON")
+creds_dict = json.loads(creds_json)
+creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+client = gspread.authorize(creds)
+
+# Now your bot setup
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix='!', intents=intents)
+
+@bot.command()
+async def rssheal(ctx, lord_id: str):
+    try:
+        # Get the two latest sheet tabs
+        tabs = client.open("Copy SoS5").worksheets()  # Replace with your sheet name if needed
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        latest_data = latest.get_all_values()
+        previous_data = previous.get_all_values()
+
+        headers = latest_data[0]
+        id_index = headers.index("lord_id")
+
+        # Column indices: AF=31, AG=32, AH=33, AI=34 (zero-indexed)
+        gold_idx, wood_idx, ore_idx, mana_idx = 31, 32, 33, 34
+
+        def find_row(data):
+            for row in data[1:]:
+                if row[id_index] == lord_id:
+                    return row
+            return None
+
+        row_latest = find_row(latest_data)
+        row_prev = find_row(previous_data)
+
+        if not row_latest or not row_prev:
+            await ctx.send("❌ Lord ID not found in both sheets.")
+            return
+
+        def to_int(val):
+            try: return int(val)
+            except: return 0
+
+        gold = to_int(row_latest[gold_idx]) - to_int(row_prev[gold_idx])
+        wood = to_int(row_latest[wood_idx]) - to_int(row_prev[wood_idx])
+        ore  = to_int(row_latest[ore_idx])  - to_int(row_prev[ore_idx])
+        mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
+
+        await ctx.send(
+            f"📊 RSS Spent by `{lord_id}` between `{previous.title}` → `{latest.title}`:\n"
+            f"🪙 Gold: {gold:,}\n"
+            f"🪵 Wood: {wood:,}\n"
+            f"⛏️ Ore: {ore:,}\n"
+            f"💧 Mana: {mana:,}"
+        )
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import discord
 from discord.ext import commands
 
