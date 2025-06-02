@@ -134,6 +134,55 @@ async def stats(ctx, lord_id: str):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def mana(ctx, lord_id: str):
+    try:
+        tabs = client.open("Copy SoS5").worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        latest_data = latest.get_all_values()
+        previous_data = previous.get_all_values()
+
+        headers = latest_data[0]
+        id_index = headers.index("lord_id")
+        name_index = 1  # Column B
+        mana_idx = 26   # Column AA
+
+        def find_row(data):
+            for row in data[1:]:
+                if row[id_index] == lord_id:
+                    return row
+            return None
+
+        row_latest = find_row(latest_data)
+        row_prev = find_row(previous_data)
+
+        if not row_latest or not row_prev:
+            await ctx.send("❌ Lord ID not found in both sheets.")
+            return
+
+        username = row_latest[name_index]
+
+        def to_int(val): return int(val.replace(',', '')) if val else 0
+
+        mana_latest = to_int(row_latest[mana_idx])
+        mana_prev = to_int(row_prev[mana_idx])
+        mana_gain = mana_latest - mana_prev
+
+        await ctx.send(
+            f"🌿 Mana Gathered for `{username}` (`{lord_id}`): `{previous.title}` → `{latest.title}`\n"
+            f"💧 Total: {mana_latest:,}\n"
+            f"📈 Gained: +{mana_gain:,}"
+        )
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
