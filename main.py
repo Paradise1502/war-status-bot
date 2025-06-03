@@ -257,28 +257,42 @@ async def topheal(ctx, top_n: int = 10):
 
         id_index = headers.index("lord_id")
         name_index = 1
-        heal_idx = 18  # Column S
+        heal_idx = 18   # Column S
+        power_idx = 12  # Column M
 
         def to_int(val):
             try: return int(val.replace(',', '').replace('-', '').strip())
             except: return 0
 
-        prev_map = {row[id_index]: to_int(row[heal_idx]) for row in data_prev[1:] if len(row) > heal_idx}
+        prev_map = {
+            row[id_index]: {
+                "healed": to_int(row[heal_idx])
+            }
+            for row in data_prev[1:]
+            if len(row) > heal_idx and row[id_index]
+        }
+
         gains = []
 
         for row in data_latest[1:]:
-            if len(row) > heal_idx:
+            if len(row) > max(heal_idx, power_idx):
                 lord_id = row[id_index]
                 name = row[name_index]
+                if lord_id not in prev_map:
+                    continue  # skip if not in both sheets
+
                 healed_now = to_int(row[heal_idx])
-                healed_prev = prev_map.get(lord_id, 0)
+                healed_prev = prev_map[lord_id]["healed"]
                 gain = healed_now - healed_prev
-                gains.append((name, gain))
+                power = to_int(row[power_idx])
+
+                if power >= 25_000_000:
+                    gains.append((name, gain))
 
         gains.sort(key=lambda x: x[1], reverse=True)
         result = "\n".join([f"{i+1}. `{name}` — ❤️‍🩹 +{heal:,}" for i, (name, heal) in enumerate(gains[:top_n])])
 
-        await ctx.send(f"📊 **Top {top_n} Healed Gains** (`{previous.title}` → `{latest.title}`):\n{result}")
+        await ctx.send(f"📊 **Top {top_n} Healers (Gain)** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
