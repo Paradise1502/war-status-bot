@@ -447,10 +447,20 @@ async def kills(ctx, top_n: int = 10):
                 gains.append((full_name, total, t5, t4, t3, t2, t1))
 
         gains.sort(key=lambda x: x[1], reverse=True)
-        result = "\n".join([
+        lines = [
             f"{i+1}. `{name}` — ⚔️ +{total:,} (T5: {t5:,} | T4: {t4:,} | T3: {t3:,} | T2: {t2:,} | T1: {t1:,})"
             for i, (name, total, t5, t4, t3, t2, t1) in enumerate(gains[:top_n])
-        ])
+        ]
+
+        # Trim lines until the message is under 4000 characters
+        message = ""
+            for line in lines:
+               if len(message) + len(line) + 1 > 4000:
+        break
+        message += line + "\n"
+
+await ctx.send(f"📊 **Top Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{message}")
+
 
         await ctx.send(f"📊 **Top {top_n} Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
 
