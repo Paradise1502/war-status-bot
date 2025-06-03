@@ -207,18 +207,28 @@ async def topmana(ctx, top_n: int = 10):
             try: return int(val.replace(',', '').replace('-', '').strip())
             except: return 0
 
-        prev_map = {row[id_index]: to_int(row[mana_idx]) for row in data_prev[1:] if len(row) > mana_idx}
+        prev_map = {
+            row[id_index]: {
+                "mana": to_int(row[mana_idx])
+            }
+            for row in data_prev[1:]
+            if len(row) > mana_idx and row[id_index]
+        }
+
         gains = []
 
         for row in data_latest[1:]:
             if len(row) > max(mana_idx, power_idx):
                 lord_id = row[id_index]
                 name = row[name_index]
+                if lord_id not in prev_map:
+                    continue  # skip if not in previous sheet
+
                 mana_now = to_int(row[mana_idx])
-                mana_prev = prev_map.get(lord_id, 0)
+                mana_prev = prev_map[lord_id]["mana"]
                 gain = mana_now - mana_prev
                 power = to_int(row[power_idx])
-                
+
                 if power >= 25_000_000:
                     gains.append((name, gain))
 
