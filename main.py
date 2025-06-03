@@ -183,6 +183,58 @@ async def mana(ctx, lord_id: str):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command() 
+async def topmana(ctx, top_n: int = 10):
+    try:
+        latest = client.open("Copy SoS5").worksheets()[-1]
+        data = latest.get_all_values()
+        headers = data[0]
+        name_index = 1  # Column B
+        mana_idx = 26   # Column AA
+
+        def to_int(val): return int(val.replace(',', '')) if val else 0
+
+        rankings = []
+        for row in data[1:]:
+            if len(row) > mana_idx:
+                mana = to_int(row[mana_idx])
+                name = row[name_index]
+                rankings.append((name, mana))
+
+        rankings.sort(key=lambda x: x[1], reverse=True)
+        result = "\n".join([f"{i+1}. `{name}` — 💧 {mana:,}" for i, (name, mana) in enumerate(rankings[:top_n])])
+
+        await ctx.send(f"📊 **Top {top_n} Mana Gatherers**:\n{result}")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
+async def topheal(ctx, top_n: int = 10):
+    try:
+        latest = client.open("Copy SoS5").worksheets()[-1]
+        data = latest.get_all_values()
+        headers = data[0]
+        name_index = 1  # Column B
+        healed_idx = 18  # Column S
+
+        def to_int(val): return int(val.replace(',', '')) if val else 0
+
+        rankings = []
+        for row in data[1:]:
+            if len(row) > healed_idx:
+                healed = to_int(row[healed_idx])
+                name = row[name_index]
+                rankings.append((name, healed))
+
+        rankings.sort(key=lambda x: x[1], reverse=True)
+        result = "\n".join([f"{i+1}. `{name}` — ❤️‍🩹 {healed:,}" for i, (name, healed) in enumerate(rankings[:top_n])])
+
+        await ctx.send(f"📊 **Top {top_n} Healers**:\n{result}")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
