@@ -647,20 +647,18 @@ async def progress(ctx, lord_id: str):
         previous_data = previous.get_all_values()
         headers = latest_data[0]
 
-        def get_index(col_letter):
-            return ord(col_letter.upper()) - ord("A")
-
+        # Column indices (zero-based)
         id_idx = headers.index("lord_id")
         name_idx = 1
         alliance_idx = 3
-        power_idx = get_index("M")
-        kills_idx = get_index("J")
-        healed_idx = get_index("S")
-        dead_idx = get_index("R")
-        gold_idx = get_index("AF")
-        wood_idx = get_index("AG")
-        ore_idx = get_index("AH")
-        mana_idx = get_index("AI")
+        power_idx = 12    # Column M
+        kills_idx = 9     # Column J
+        healed_idx = 18   # Column S
+        dead_idx = 17     # Column R
+        gold_idx = 31     # Column AF
+        wood_idx = 32     # Column AG
+        ore_idx = 33      # Column AH
+        mana_idx = 34     # Column AI
 
         def find_row(data):
             for row in data[1:]:
@@ -694,13 +692,13 @@ async def progress(ctx, lord_id: str):
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
         total_rss = gold + wood + ore + mana
 
-        # Ranking logic
+        # Ranking logic for RSS within MFD
         rss_rank = None
         mfd_rss_totals = []
         for row_l, row_p in zip(latest_data[1:], previous_data[1:]):
             if len(row_l) <= mana_idx or len(row_p) <= mana_idx:
                 continue
-            if row_l[alliance_idx] != "MFD":
+            if row_l[alliance_idx].strip() != "MFD":
                 continue
             lid = row_l[id_idx]
             total = (
@@ -735,9 +733,9 @@ async def progress(ctx, lord_id: str):
             f"📦 Total: {total_rss:,}"
         )
 
-        if alliance == "MFD" and rss_rank:
+        if alliance.strip() == "MFD" and rss_rank:
             msg += f"\n🏅 MFD Rank by RSS Spent: #{rss_rank}"
-        elif alliance != "MFD":
+        elif alliance.strip() != "MFD":
             msg += "\n⚠️ Player is not in MFD."
 
         await ctx.send(msg)
