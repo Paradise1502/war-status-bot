@@ -455,13 +455,14 @@ async def kills(ctx, top_n: int = 10):
         ]
 
         # Trim lines until the message is under 4000 characters
+        header = f"📊 **Top Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
         message = ""
         for line in lines:
-            if len(message) + len(line) + 1 > 4000:
+            if len(header + message + line + "\n") > 2000:
                 break
             message += line + "\n"
 
-        await ctx.send(f"📊 **Top Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{message}")
+        await ctx.send(header + message)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
