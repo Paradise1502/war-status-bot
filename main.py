@@ -822,11 +822,11 @@ async def commands(ctx):
 - `!progress [lord_id]` — Full profile: power, kills, dead, heal, RSS, mana (+gain & rank)
 
 **🏆 Leaderboards**
-- `!topmana` — Top mana gatherers (MFD only)
-- `!topheal` — Top units healed (MFD only)
-- `!toprssheal` — Top RSS heal spenders (MFD only)
-- `!topkills` — Top kill gainers (MFD only)
-- `!topdeads` — Top dead units (MFD only)
+- `!topmana` — Top mana gatherers
+- `!topheal` — Top units healed
+- `!toprssheal` — Top RSS heal spenders
+- `!topkills` — Top kill gainers
+- `!topdeads` — Top dead units
 """
     await ctx.send(help_text)
 
