@@ -264,25 +264,24 @@ async def topheal(ctx, top_n: int = 10):
             try: return int(val.replace(',', '').replace('-', '').strip())
             except: return 0
 
-        prev_map = {
-            row[id_index]: {
-                "healed": to_int(row[heal_idx])
-            }
-            for row in data_prev[1:]
-            if len(row) > heal_idx and row[id_index]
-        }
+        # Clean and map previous sheet IDs
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > heal_idx:
+                raw_id = row[id_index].strip() if row[id_index] else ""
+                if raw_id:
+                    prev_map[raw_id] = to_int(row[heal_idx])
 
         gains = []
-
         for row in data_latest[1:]:
             if len(row) > max(heal_idx, power_idx):
-                lord_id = row[id_index]
-                name = row[name_index]
-                if lord_id not in prev_map:
-                    continue  # skip if not in both sheets
+                raw_id = row[id_index].strip() if row[id_index] else ""
+                if raw_id not in prev_map:
+                    continue  # skip if not in both
 
+                name = row[name_index]
                 healed_now = to_int(row[heal_idx])
-                healed_prev = prev_map[lord_id]["healed"]
+                healed_prev = prev_map[raw_id]
                 gain = healed_now - healed_prev
                 power = to_int(row[power_idx])
 
