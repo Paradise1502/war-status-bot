@@ -377,7 +377,7 @@ async def toprssheal(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def kills(ctx, top_n: int = 10):
+async def kills(ctx, lord_id: str):
     try:
         sheets = client.open("Copy SoS5").worksheets()
         if len(sheets) < 2:
@@ -394,14 +394,14 @@ async def kills(ctx, top_n: int = 10):
         id_index = headers.index("lord_id")
         name_index = 1
         alliance_index = 3
-        power_idx = 12  # Column M
+        power_index = 12
 
-        total_kills_idx = 9   # Column J
-        t5_idx = 36           # Column AK
-        t4_idx = 37           # Column AL
-        t3_idx = 38           # Column AM
-        t2_idx = 39           # Column AN
-        t1_idx = 40           # Column AO
+        total_idx = 9    # Column J
+        t5_idx = 36      # Column AK
+        t4_idx = 37      # Column AL
+        t3_idx = 38      # Column AM
+        t2_idx = 39      # Column AN
+        t1_idx = 40      # Column AO
 
         def to_int(val):
             try:
@@ -409,60 +409,57 @@ async def kills(ctx, top_n: int = 10):
             except:
                 return 0
 
-        # Build map of previous sheet
-        prev_map = {}
-        for row in data_prev[1:]:
-            if len(row) > t1_idx:
-                raw_id = row[id_index].strip() if row[id_index] else ""
-                if raw_id:
-                    prev_map[raw_id] = {
-                        "total": to_int(row[total_kills_idx]),
-                        "t5": to_int(row[t5_idx]),
-                        "t4": to_int(row[t4_idx]),
-                        "t3": to_int(row[t3_idx]),
-                        "t2": to_int(row[t2_idx]),
-                        "t1": to_int(row[t1_idx])
-                    }
+        def find_row(data):
+            for row in data[1:]:
+                if row[id_index] == lord_id:
+                    return row
+            return None
 
-        gains = []
-        for row in data_latest[1:]:
-            if len(row) > t1_idx:
-                raw_id = row[id_index].strip() if row[id_index] else ""
-                if raw_id not in prev_map:
-                    continue
+        row_latest = find_row(data_latest)
+        row_prev = find_row(data_prev)
 
-                power = to_int(row[power_idx])
-                if power < 25_000_000:
-                    continue
+        if not row_latest or not row_prev:
+            await ctx.send("❌ Lord ID not found in both sheets.")
+            return
 
-                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
-                name = row[name_index].strip()
-                full_name = f"[{alliance}] {name}"
+        power = to_int(row_latest[power_index])
+        if power < 25_000_000:
+            await ctx.send("❌ Player is below 25M power.")
+            return
 
-                total = to_int(row[total_kills_idx]) - prev_map[raw_id]["total"]
-                t5 = to_int(row[t5_idx]) - prev_map[raw_id]["t5"]
-                t4 = to_int(row[t4_idx]) - prev_map[raw_id]["t4"]
-                t3 = to_int(row[t3_idx]) - prev_map[raw_id]["t3"]
-                t2 = to_int(row[t2_idx]) - prev_map[raw_id]["t2"]
-                t1 = to_int(row[t1_idx]) - prev_map[raw_id]["t1"]
+        name = row_latest[name_index].strip()
+        alliance = row_latest[alliance_index].strip()
+        tag = f"[{alliance}] {name}"
 
-                gains.append((full_name, total, t5, t4, t3, t2, t1))
+        def get_diff(idx):
+            return to_int(row_latest[idx]) - to_int(row_prev[idx])
 
-        gains.sort(key=lambda x: x[1], reverse=True)
-        lines = [
-            f"{i+1}. `{name}` — ⚔️ +{total:,} (T5: {t5:,} | T4: {t4:,} | T3: {t3:,} | T2: {t2:,} | T1: {t1:,})"
-            for i, (name, total, t5, t4, t3, t2, t1) in enumerate(gains[:top_n])
-        ]
+        def get_now(idx):
+            return to_int(row_latest[idx])
 
-        # Trim lines until the message is under 4000 characters
-        header = f"📊 **Top Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
-        message = ""
-        for line in lines:
-            if len(header + message + line + "\n") > 2000:
-                break
-            message += line + "\n"
+        total = get_now(total_idx)
+        total_diff = get_diff(total_idx)
+        t5 = get_now(t5_idx)
+        t5_diff = get_diff(t5_idx)
+        t4 = get_now(t4_idx)
+        t4_diff = get_diff(t4_idx)
+        t3 = get_now(t3_idx)
+        t3_diff = get_diff(t3_idx)
+        t2 = get_now(t2_idx)
+        t2_diff = get_diff(t2_idx)
+        t1 = get_now(t1_idx)
+        t1_diff = get_diff(t1_idx)
 
-        await ctx.send(header + message)
+        await ctx.send(
+            f"📊 **Kill Stats for `{tag}`**\n"
+            f"`{previous.title}` → `{latest.title}`\n\n"
+            f"⚔️ **Total:** {total:,} (+{total_diff:,})\n"
+            f"T5: {t5:,} (+{t5_diff:,})\n"
+            f"T4: {t4:,} (+{t4_diff:,})\n"
+            f"T3: {t3:,} (+{t3_diff:,})\n"
+            f"T2: {t2:,} (+{t2_diff:,})\n"
+            f"T1: {t1:,} (+{t1_diff:,})"
+        )
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
