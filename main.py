@@ -329,7 +329,7 @@ async def toprssheal(ctx, top_n: int = 10):
             try: return int(val.replace(',', '').replace('-', '').strip())
             except: return 0
 
-        # Build previous data map
+        # Build previous sheet map
         prev_map = {}
         for row in data_prev[1:]:
             if len(row) > mana_idx:
@@ -347,13 +347,15 @@ async def toprssheal(ctx, top_n: int = 10):
             if len(row) > mana_idx:
                 raw_id = row[id_index].strip() if row[id_index] else ""
                 if raw_id not in prev_map:
-                    continue
+                    continue  # Skip users not in both sheets
 
-                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
-                name = f"[{alliance}] {row[name_index].strip()}"
                 power = to_int(row[power_idx])
                 if power < 25_000_000:
                     continue
+
+                name = row[name_index].strip() if len(row) > name_index else "?"
+                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
+                full_name = f"[{alliance}] {name}"
 
                 gold = to_int(row[gold_idx]) - prev_map[raw_id]["gold"]
                 wood = to_int(row[wood_idx]) - prev_map[raw_id]["wood"]
@@ -361,7 +363,7 @@ async def toprssheal(ctx, top_n: int = 10):
                 mana = to_int(row[mana_idx]) - prev_map[raw_id]["mana"]
                 total = gold + wood + ore + mana
 
-                gains.append((name, total, gold, wood, ore, mana))
+                gains.append((full_name, total, gold, wood, ore, mana))
 
         gains.sort(key=lambda x: x[1], reverse=True)
         result = "\n".join([
