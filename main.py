@@ -529,6 +529,71 @@ async def topkill(ctx, top_n: int = 10):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def topdead(ctx, top_n: int = 10):
+    try:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = sheets[-1]
+        previous = sheets[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_index = headers.index("lord_id")
+        name_index = 1
+        alliance_index = 3
+        power_index = 12  # Column M
+        dead_index = 17   # Column R
+
+        def to_int(val):
+            try:
+                return int(val.replace(',', '').replace('-', '').strip())
+            except:
+                return 0
+
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > dead_index:
+                raw_id = row[id_index].strip()
+                if raw_id:
+                    prev_map[raw_id] = to_int(row[dead_index])
+
+        results = []
+        for row in data_latest[1:]:
+            if len(row) > dead_index:
+                raw_id = row[id_index].strip()
+                if raw_id not in prev_map:
+                    continue
+
+                power = to_int(row[power_index])
+                if power < 25_000_000:
+                    continue
+
+                dead_now = to_int(row[dead_index])
+                dead_then = prev_map[raw_id]
+                gain = dead_now - dead_then
+
+                name = row[name_index].strip()
+                alliance = row[alliance_index].strip()
+                full_name = f"[{alliance}] {name}"
+                results.append((full_name, gain))
+
+        results.sort(key=lambda x: x[1], reverse=True)
+        output = "\n".join([f"{i+1}. `{name}` — 💀 +{gain:,}" for i, (name, gain) in enumerate(results[:top_n])])
+
+        if not output:
+            await ctx.send("No valid data found.")
+        else:
+            await ctx.send(f"**🏆 Top {top_n} Dead Units Gained:**\n{output}")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
