@@ -152,53 +152,42 @@ async def mana(ctx, lord_id: str):
         id_index = headers.index("lord_id")
         name_index = 1
         alliance_index = 3
-        mana_idx = 26  # Column AA
+        power_index = 12  # Column M
+        mana_index = 26   # Column AA (zero-indexed)
 
         def to_int(val):
-            try: return int(val.replace(',', '').replace('-', '').strip())
-            except: return 0
+            try:
+                return int(val.replace(',', '').replace('-', '').strip())
+            except:
+                return 0
 
-        def find_row(data, target_id):
+        def find_row(data):
             for row in data[1:]:
-                if len(row) > mana_idx and row[id_index] == target_id:
+                if len(row) > mana_index and row[id_index].strip() == lord_id:
                     return row
             return None
 
-        row_latest = find_row(data_latest, lord_id)
-        row_prev = find_row(data_prev, lord_id)
+        row_latest = find_row(data_latest)
+        row_prev = find_row(data_prev)
 
         if not row_latest or not row_prev:
             await ctx.send("❌ Lord ID not found in both sheets.")
             return
 
-        name = row_latest[name_index]
-        alliance = row_latest[alliance_index]
+        name = row_latest[name_index].strip()
+        alliance = row_latest[alliance_index].strip()
+        mana_latest = to_int(row_latest[mana_index])
+        mana_prev = to_int(row_prev[mana_index])
+        mana_gain = mana_latest - mana_prev
+
+        full_name = f"[{alliance}] {name}"
+        msg = f"🌿 Mana gathered by `{full_name}` between `{previous.title}` → `{latest.title}`:\n"
+        msg += f"💧 Mana: {mana_gain:,}"
 
         if alliance != "MFD":
-            await ctx.send(f"❌ `{name}` is not in MFD.")
-            return
+            msg += "\n❌ Not in MFD"
 
-        mana_gain = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
-
-        # MFD-only leaderboard
-        mfd_gains = []
-        prev_map = {row[id_index]: to_int(row[mana_idx]) for row in data_prev[1:] if len(row) > mana_idx}
-
-        for row in data_latest[1:]:
-            if len(row) > mana_idx and row[alliance_index].strip() == "MFD":
-                lid = row[id_index]
-                if lid in prev_map:
-                    gain = to_int(row[mana_idx]) - prev_map[lid]
-                    mfd_gains.append((lid, gain))
-
-        mfd_gains.sort(key=lambda x: x[1], reverse=True)
-        rank = next((i + 1 for i, (lid, _) in enumerate(mfd_gains) if lid == lord_id), "N/A")
-
-        await ctx.send(
-            f"📦 Mana gathered by `{name}` [{alliance}]:\n"
-            f"💧 {mana_gain:,} mana since `{previous.title}` → `{latest.title}`\n"
-            f"🏅 MFD Rank: #{rank}"
-        )
+        await ctx.send(msg)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
