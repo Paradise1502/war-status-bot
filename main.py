@@ -137,47 +137,62 @@ async def stats(ctx, lord_id: str):
 @bot.command()
 async def mana(ctx, lord_id: str):
     try:
-        tabs = client.open("Copy SoS5").worksheets()
-        if len(tabs) < 2:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
+        latest = sheets[-1]
+        previous = sheets[-2]
 
-        latest_data = latest.get_all_values()
-        previous_data = previous.get_all_values()
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
 
-        headers = latest_data[0]
         id_index = headers.index("lord_id")
-        name_index = 1  # Column B
-        mana_idx = 26   # Column AA
+        name_index = 1
+        alliance_index = 3
+        mana_idx = 26  # Column AA
 
-        def find_row(data):
+        def to_int(val):
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
+
+        def find_row(data, target_id):
             for row in data[1:]:
-                if row[id_index] == lord_id:
+                if len(row) > mana_idx and row[id_index] == target_id:
                     return row
             return None
 
-        row_latest = find_row(latest_data)
-        row_prev = find_row(previous_data)
+        row_latest = find_row(data_latest, lord_id)
+        row_prev = find_row(data_prev, lord_id)
 
         if not row_latest or not row_prev:
             await ctx.send("❌ Lord ID not found in both sheets.")
             return
 
-        username = row_latest[name_index]
+        name = row_latest[name_index]
+        alliance = row_latest[alliance_index]
+        mana_gain = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
 
-        def to_int(val): return int(val.replace(',', '')) if val else 0
+        # MFD-only leaderboard
+        mfd_gains = []
+        prev_map = {row[id_index]: to_int(row[mana_idx]) for row in data_prev[1:] if len(row) > mana_idx}
 
-        mana_latest = to_int(row_latest[mana_idx])
-        mana_prev = to_int(row_prev[mana_idx])
-        mana_gain = mana_latest - mana_prev
+        for row in data_latest[1:]:
+            if len(row) > mana_idx and row[alliance_index].strip() == "MFD":
+                lid = row[id_index]
+                if lid in prev_map:
+                    gain = to_int(row[mana_idx]) - prev_map[lid]
+                    mfd_gains.append((lid, gain))
+
+        mfd_gains.sort(key=lambda x: x[1], reverse=True)
+        rank = next((i + 1 for i, (lid, _) in enumerate(mfd_gains) if lid == lord_id), "N/A")
 
         await ctx.send(
-            f"🌿 Mana Gathered for `{username}` (`{lord_id}`): `{previous.title}` → `{latest.title}`\n"
-            f"💧 Total: {mana_latest:,}\n"
-            f"📈 Gained: +{mana_gain:,}"
+            f"📦 Mana gathered by `{name}` [{alliance}]:\n"
+            f"💧 {mana_gain:,} mana since `{previous.title}` → `{latest.title}`\n"
+            f"🏅 MFD Rank: #{rank}"
         )
 
     except Exception as e:
