@@ -183,28 +183,45 @@ async def mana(ctx, lord_id: str):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-@bot.command() 
+@bot.command()
 async def topmana(ctx, top_n: int = 10):
     try:
-        latest = client.open("Copy SoS5").worksheets()[-1]
-        data = latest.get_all_values()
-        headers = data[0]
-        name_index = 1  # Column B
-        mana_idx = 26   # Column AA
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
 
-        def to_int(val): return int(val.replace(',', '')) if val else 0
+        latest = sheets[-1]
+        previous = sheets[-2]
 
-        rankings = []
-        for row in data[1:]:
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_index = headers.index("lord_id")
+        name_index = 1
+        mana_idx = 26  # Column AA
+
+        def to_int(val):
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
+
+        prev_map = {row[id_index]: to_int(row[mana_idx]) for row in data_prev[1:] if len(row) > mana_idx}
+        gains = []
+
+        for row in data_latest[1:]:
             if len(row) > mana_idx:
-                mana = to_int(row[mana_idx])
+                lord_id = row[id_index]
                 name = row[name_index]
-                rankings.append((name, mana))
+                mana_now = to_int(row[mana_idx])
+                mana_prev = prev_map.get(lord_id, 0)
+                gain = mana_now - mana_prev
+                gains.append((name, gain))
 
-        rankings.sort(key=lambda x: x[1], reverse=True)
-        result = "\n".join([f"{i+1}. `{name}` — 💧 {mana:,}" for i, (name, mana) in enumerate(rankings[:top_n])])
+        gains.sort(key=lambda x: x[1], reverse=True)
+        result = "\n".join([f"{i+1}. `{name}` — 💧 +{mana:,}" for i, (name, mana) in enumerate(gains[:top_n])])
 
-        await ctx.send(f"📊 **Top {top_n} Mana Gatherers**:\n{result}")
+        await ctx.send(f"📊 **Top {top_n} Mana Gains** (`{previous.title}` → `{latest.title}`):\n{result}")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
@@ -212,25 +229,42 @@ async def topmana(ctx, top_n: int = 10):
 @bot.command()
 async def topheal(ctx, top_n: int = 10):
     try:
-        latest = client.open("Copy SoS5").worksheets()[-1]
-        data = latest.get_all_values()
-        headers = data[0]
-        name_index = 1  # Column B
-        healed_idx = 18  # Column S
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
 
-        def to_int(val): return int(val.replace(',', '')) if val else 0
+        latest = sheets[-1]
+        previous = sheets[-2]
 
-        rankings = []
-        for row in data[1:]:
-            if len(row) > healed_idx:
-                healed = to_int(row[healed_idx])
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_index = headers.index("lord_id")
+        name_index = 1
+        heal_idx = 18  # Column S
+
+        def to_int(val):
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
+
+        prev_map = {row[id_index]: to_int(row[heal_idx]) for row in data_prev[1:] if len(row) > heal_idx}
+        gains = []
+
+        for row in data_latest[1:]:
+            if len(row) > heal_idx:
+                lord_id = row[id_index]
                 name = row[name_index]
-                rankings.append((name, healed))
+                healed_now = to_int(row[heal_idx])
+                healed_prev = prev_map.get(lord_id, 0)
+                gain = healed_now - healed_prev
+                gains.append((name, gain))
 
-        rankings.sort(key=lambda x: x[1], reverse=True)
-        result = "\n".join([f"{i+1}. `{name}` — ❤️‍🩹 {healed:,}" for i, (name, healed) in enumerate(rankings[:top_n])])
+        gains.sort(key=lambda x: x[1], reverse=True)
+        result = "\n".join([f"{i+1}. `{name}` — ❤️‍🩹 +{heal:,}" for i, (name, heal) in enumerate(gains[:top_n])])
 
-        await ctx.send(f"📊 **Top {top_n} Healers**:\n{result}")
+        await ctx.send(f"📊 **Top {top_n} Healed Gains** (`{previous.title}` → `{latest.title}`):\n{result}")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
