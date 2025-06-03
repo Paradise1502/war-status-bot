@@ -503,7 +503,7 @@ async def kills(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topkill(ctx, top_n: int = 10):
+async def topkills(ctx, top_n: int = 10):
     try:
         sheets = client.open("Copy SoS5").worksheets()
         if len(sheets) < 2:
@@ -568,7 +568,7 @@ async def topkill(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topdead(ctx, top_n: int = 10):
+async def topdeads(ctx, top_n: int = 10):
     try:
         sheets = client.open("Copy SoS5").worksheets()
         if len(sheets) < 2:
@@ -798,24 +798,36 @@ async def warfarm(ctx):
 
 @bot.command()
 async def commands(ctx):
-    embed = discord.Embed(
-        title="📜 Available Commands",
-        description="Here’s what this bot can do:",
-        color=discord.Color.blue()
-    )
+    channel_id = ctx.channel.id
+    allowed_channel_id = 1378735765827358791  # your allowed channel ID
 
-    embed.add_field(name="!warred", value="🔴 Set war status to *Full War*", inline=False)
-    embed.add_field(name="!waryellow", value="🟡 Set war status to *Skirmishes*", inline=False)
-    embed.add_field(name="!wargreen", value="🟢 Set war status to *No Fighting*", inline=False)
-    embed.add_field(name="!warfarm", value="🌾 Set war status to *Go Farm Mana*", inline=False)
-    embed.add_field(name="!rssheal [lord_id]", value="📊 Show RSS spent for healing between last two sheets", inline=False)
-    embed.add_field(name="!stats [lord_id]", value="📈 Show highest power, kills, healed, and dead with gains", inline=False)
-    embed.add_field(name="!mana [lord_id]", value="💧 Show mana gathered since last sheet", inline=False)
-    embed.add_field(name="!topmana", value="🏆 Top 10 mana gatherers (gain only, ≥25M power)", inline=False)
-    embed.add_field(name="!topheal", value="💉 Top 10 units healed (gain only, ≥25M power)", inline=False)
-    embed.add_field(name="!toprssheal", value="📦 Top 10 RSS spent on healing (gain only, ≥25M power)", inline=False)
-    embed.add_field(name="!kills [lord_id]", value="⚔️ Show total kills and troop tier breakdown with gains", inline=False)
+    if channel_id != allowed_channel_id:
+        await ctx.send(f"❌ Commands are only allowed in <#{allowed_channel_id}>.")
+        return
 
-    await ctx.send(embed=embed)
+    help_text = """
+📜 **Available Commands:**
+
+**🟣 War Status**
+- `!warred` — Set status to 🔴 FULL WAR
+- `!waryellow` — Set status to 🟡 Skirmishes
+- `!wargreen` — Set status to 🟢 No Fighting
+- `!warfarm` — Set status to 🌾 Go Farm Mana
+
+**📊 Player Stats**
+- `!rssheal [lord_id]` — Show RSS spent on healing between last two sheets
+- `!stats [lord_id]` — Show power, kills, healed, dead stats + gain + MFD rank
+- `!kills [lord_id]` — Show kills and troop tier breakdown + gain + MFD rank
+- `!mana [lord_id]` — Mana gathered + gain + MFD rank
+- `!progress [lord_id]` — Full profile: power, kills, dead, heal, RSS, mana (+gain & rank)
+
+**🏆 Leaderboards**
+- `!topmana` — Top mana gatherers (MFD only)
+- `!topheal` — Top units healed (MFD only)
+- `!toprssheal` — Top RSS heal spenders (MFD only)
+- `!topkills` — Top kill gainers (MFD only)
+- `!topdeads` — Top dead units (MFD only)
+"""
+    await ctx.send(help_text)
 
 bot.run(TOKEN)
