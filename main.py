@@ -201,6 +201,7 @@ async def topmana(ctx, top_n: int = 10):
         id_index = headers.index("lord_id")
         name_index = 1
         mana_idx = 26  # Column AA
+        power_idx = 12  # Column M
 
         def to_int(val):
             try: return int(val.replace(',', '').replace('-', '').strip())
@@ -210,18 +211,21 @@ async def topmana(ctx, top_n: int = 10):
         gains = []
 
         for row in data_latest[1:]:
-            if len(row) > mana_idx:
+            if len(row) > max(mana_idx, power_idx):
                 lord_id = row[id_index]
                 name = row[name_index]
                 mana_now = to_int(row[mana_idx])
                 mana_prev = prev_map.get(lord_id, 0)
                 gain = mana_now - mana_prev
-                gains.append((name, gain))
+                power = to_int(row[power_idx])
+                
+                if power >= 25_000_000:
+                    gains.append((name, gain))
 
         gains.sort(key=lambda x: x[1], reverse=True)
         result = "\n".join([f"{i+1}. `{name}` — 💧 +{mana:,}" for i, (name, mana) in enumerate(gains[:top_n])])
 
-        await ctx.send(f"📊 **Top {top_n} Mana Gains** (`{previous.title}` → `{latest.title}`):\n{result}")
+        await ctx.send(f"📊 **Top {top_n} Mana Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
