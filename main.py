@@ -173,6 +173,11 @@ async def mana(ctx, lord_id: str):
 
         name = row_latest[name_index]
         alliance = row_latest[alliance_index]
+
+        if alliance != "MFD":
+            await ctx.send(f"❌ `{name}` is not in MFD.")
+            return
+
         mana_gain = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
 
         # MFD-only leaderboard
