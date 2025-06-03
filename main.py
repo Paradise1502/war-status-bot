@@ -200,6 +200,7 @@ async def topmana(ctx, top_n: int = 10):
 
         id_index = headers.index("lord_id")
         name_index = 1
+        alliance_index = 3
         mana_idx = 26  # Column AA
         power_idx = 12  # Column M
 
@@ -258,6 +259,7 @@ async def topheal(ctx, top_n: int = 10):
 
         id_index = headers.index("lord_id")
         name_index = 1
+        alliance_index = 3
         heal_idx = 18   # Column S
         power_idx = 12  # Column M
 
@@ -315,6 +317,7 @@ async def toprssheal(ctx, top_n: int = 10):
 
         id_index = headers.index("lord_id")
         name_index = 1
+        alliance_index = 3
         power_idx = 12  # Column M
 
         gold_idx = 31  # AF
