@@ -296,6 +296,78 @@ async def topheal(ctx, top_n: int = 10):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def toprssheal(ctx, top_n: int = 10):
+    try:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = sheets[-1]
+        previous = sheets[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_index = headers.index("lord_id")
+        name_index = 1
+        power_idx = 12  # Column M
+
+        gold_idx = 31  # AF
+        wood_idx = 32  # AG
+        ore_idx  = 33  # AH
+        mana_idx = 34  # AI
+
+        def to_int(val):
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
+
+        # Build previous data map
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > mana_idx:
+                raw_id = row[id_index].strip() if row[id_index] else ""
+                if raw_id:
+                    prev_map[raw_id] = {
+                        "gold": to_int(row[gold_idx]),
+                        "wood": to_int(row[wood_idx]),
+                        "ore": to_int(row[ore_idx]),
+                        "mana": to_int(row[mana_idx])
+                    }
+
+        gains = []
+        for row in data_latest[1:]:
+            if len(row) > mana_idx:
+                raw_id = row[id_index].strip() if row[id_index] else ""
+                if raw_id not in prev_map:
+                    continue
+
+                name = row[name_index]
+                power = to_int(row[power_idx])
+                if power < 25_000_000:
+                    continue
+
+                gold = to_int(row[gold_idx]) - prev_map[raw_id]["gold"]
+                wood = to_int(row[wood_idx]) - prev_map[raw_id]["wood"]
+                ore  = to_int(row[ore_idx])  - prev_map[raw_id]["ore"]
+                mana = to_int(row[mana_idx]) - prev_map[raw_id]["mana"]
+                total = gold + wood + ore + mana
+
+                gains.append((name, total, gold, wood, ore, mana))
+
+        gains.sort(key=lambda x: x[1], reverse=True)
+        result = "\n".join([
+            f"{i+1}. `{name}` — 💸 +{total:,} (🪙{gold:,} 🪵{wood:,} ⛏️{ore:,} 💧{mana:,})"
+            for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n])
+        ])
+
+        await ctx.send(f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
