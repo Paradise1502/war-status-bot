@@ -464,6 +464,71 @@ async def kills(ctx, lord_id: str):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def topkill(ctx, top_n: int = 10):
+    try:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = sheets[-1]
+        previous = sheets[-2]
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_index = headers.index("lord_id")
+        name_index = 1  # Column B
+        alliance_index = 3  # Column D
+        power_index = 12  # Column M
+        kills_index = 9   # Column J
+
+        def to_int(val):
+            try: return int(val.replace(",", "").replace("-", "").strip())
+            except: return 0
+
+        # Build map from previous sheet
+        prev_map = {
+            row[id_index].strip(): to_int(row[kills_index])
+            for row in data_prev[1:]
+            if len(row) > kills_index and row[id_index].strip()
+        }
+
+        gains = []
+        for row in data_latest[1:]:
+            if len(row) <= kills_index:
+                continue
+
+            raw_id = row[id_index].strip()
+            if not raw_id or raw_id not in prev_map:
+                continue
+
+            power = to_int(row[power_index])
+            if power < 25_000_000:
+                continue
+
+            name = row[name_index].strip()
+            alliance = row[alliance_index].strip()
+            kills_now = to_int(row[kills_index])
+            kills_then = prev_map[raw_id]
+            gain = kills_now - kills_then
+
+            full_name = f"[{alliance}] {name}"
+            gains.append((full_name, gain))
+
+        gains.sort(key=lambda x: x[1], reverse=True)
+
+        lines = [
+            f"{i+1}. `{name}` — ⚔️ +{gain:,}"
+            for i, (name, gain) in enumerate(gains[:top_n])
+        ]
+
+        await ctx.send("**🏆 Top Kill Gains:**\n" + "\n".join(lines))
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
