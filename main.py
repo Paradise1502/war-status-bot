@@ -76,60 +76,85 @@ async def rssheal(ctx, lord_id: str):
 @bot.command()
 async def stats(ctx, lord_id: str):
     try:
-        # Get the two most recent tabs
-        tabs = client.open("Copy SoS5").worksheets()
-        if len(tabs) < 2:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
+        latest, previous = sheets[-1], sheets[-2]
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
 
-        latest_data = latest.get_all_values()
-        previous_data = previous.get_all_values()
-
-        headers = latest_data[0]
         id_index = headers.index("lord_id")
-        name_index = 1  # Column B
+        name_index = 1
+        alliance_index = 3
+        power_idx = 12
+        kills_idx = 9
+        healed_idx = 18
+        dead_idx = 17
 
-        # Column indices
-        power_idx = 12   # M
-        killed_idx = 9   # J
-        dead_idx = 17    # R
-        healed_idx = 18  # S
+        def to_int(val):
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
 
-        def find_row(data):
-            for row in data[1:]:
-                if row[id_index] == lord_id:
-                    return row
-            return None
+        # Build prev map
+        prev_map = {row[id_index]: row for row in data_prev[1:] if len(row) > dead_idx}
 
-        row_latest = find_row(latest_data)
-        row_prev = find_row(previous_data)
+        # Find target rows
+        row_latest = next((row for row in data_latest[1:] if row[id_index] == lord_id), None)
+        row_prev = prev_map.get(lord_id)
 
         if not row_latest or not row_prev:
             await ctx.send("❌ Lord ID not found in both sheets.")
             return
 
-        username = row_latest[name_index]
+        name = row_latest[name_index].strip()
+        alliance = row_latest[alliance_index].strip()
 
-        def to_int(val): return int(val.replace(',', '')) if val else 0
+        power_latest = to_int(row_latest[power_idx])
+        power_gain = power_latest - to_int(row_prev[power_idx])
 
-        def diff(idx):
-            return to_int(row_latest[idx]) - to_int(row_prev[idx]), to_int(row_latest[idx])
+        kills_latest = to_int(row_latest[kills_idx])
+        kills_gain = kills_latest - to_int(row_prev[kills_idx])
 
-        power_gain, power_total = diff(power_idx)
-        killed_gain, killed_total = diff(killed_idx)
-        dead_gain, dead_total = diff(dead_idx)
-        healed_gain, healed_total = diff(healed_idx)
+        healed_latest = to_int(row_latest[healed_idx])
+        healed_gain = healed_latest - to_int(row_prev[healed_idx])
 
-        await ctx.send(
-            f"📊 Stats for `{username}` (`{lord_id}`): `{previous.title}` → `{latest.title}`\n"
-            f"🏆 Power: {power_total:,} (+{power_gain:,})\n"
-            f"⚔️ Kills: {killed_total:,} (+{killed_gain:,})\n"
-            f"☠️ Dead: {dead_total:,} (+{dead_gain:,})\n"
-            f"❤️‍🩹 Healed: {healed_total:,} (+{healed_gain:,})"
-        )
+        dead_latest = to_int(row_latest[dead_idx])
+        dead_gain = dead_latest - to_int(row_prev[dead_idx])
+
+        # Rankings by gain within MFD only
+        def build_rank_map(index):
+            return sorted([
+                (row[alliance_index], row[name_index], to_int(row[index]) - to_int(prev_map[row[id_index]][index]))
+                for row in data_latest[1:]
+                if row[id_index] in prev_map and row[alliance_index].strip() == "MFD"
+            ], key=lambda x: x[2], reverse=True)
+
+        power_rank = [x[1] for x in build_rank_map(power_idx)].index(name) + 1 if alliance == "MFD" else None
+        kills_rank = [x[1] for x in build_rank_map(kills_idx)].index(name) + 1 if alliance == "MFD" else None
+        dead_rank = [x[1] for x in build_rank_map(dead_idx)].index(name) + 1 if alliance == "MFD" else None
+        healed_rank = [x[1] for x in build_rank_map(healed_idx)].index(name) + 1 if alliance == "MFD" else None
+
+        msg = f"📊 Stats for `{lord_id}` ({name})\n"
+        msg += f"🔹 Alliance: [{alliance}]\n\n"
+        msg += f"🏆 Power:  {power_latest:,} (+{power_gain:,})"
+        msg += f" — Rank #{power_rank} in MFD\n" if power_rank else "\n"
+
+        msg += f"⚔️ Kills:  {kills_latest:,} (+{kills_gain:,})"
+        msg += f" — Rank #{kills_rank} in MFD\n" if kills_rank else "\n"
+
+        msg += f"💀 Dead:   {dead_latest:,} (+{dead_gain:,})"
+        msg += f" — Rank #{dead_rank} in MFD\n" if dead_rank else "\n"
+
+        msg += f"💉 Healed: {healed_latest:,} (+{healed_gain:,})"
+        msg += f" — Rank #{healed_rank} in MFD" if healed_rank else ""
+
+        if alliance != "MFD":
+            msg += "\n\n❌ Not in MFD — Ranks not available."
+
+        await ctx.send(msg)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
