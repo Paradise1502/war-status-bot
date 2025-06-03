@@ -404,8 +404,10 @@ async def kills(ctx, top_n: int = 10):
         t1_idx = 40           # Column AO
 
         def to_int(val):
-            try: return int(val.replace(',', '').replace('-', '').strip())
-            except: return 0
+            try:
+                return int(val.replace(',', '').replace('-', '').strip())
+            except:
+                return 0
 
         # Build map of previous sheet
         prev_map = {}
@@ -454,15 +456,12 @@ async def kills(ctx, top_n: int = 10):
 
         # Trim lines until the message is under 4000 characters
         message = ""
-            for line in lines:
-               if len(message) + len(line) + 1 > 4000:
-        break
-        message += line + "\n"
+        for line in lines:
+            if len(message) + len(line) + 1 > 4000:
+                break
+            message += line + "\n"
 
-await ctx.send(f"📊 **Top Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{message}")
-
-
-        await ctx.send(f"📊 **Top {top_n} Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
+        await ctx.send(f"📊 **Top Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{message}")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
