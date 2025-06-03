@@ -142,24 +142,18 @@ async def mana(ctx, lord_id: str):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        latest, previous = sheets[-1], sheets[-2]
+        data_latest, data_prev = latest.get_all_values(), previous.get_all_values()
         headers = data_latest[0]
 
         id_index = headers.index("lord_id")
         name_index = 1
         alliance_index = 3
-        power_index = 12  # Column M
-        mana_index = 26   # Column AA (zero-indexed)
+        mana_index = 26  # Column AA
 
         def to_int(val):
-            try:
-                return int(val.replace(',', '').replace('-', '').strip())
-            except:
-                return 0
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
 
         def find_row(data):
             for row in data[1:]:
@@ -174,20 +168,30 @@ async def mana(ctx, lord_id: str):
             await ctx.send("❌ Lord ID not found in both sheets.")
             return
 
+        alliance = row_latest[alliance_index].strip() if len(row_latest) > alliance_index else ""
         name = row_latest[name_index].strip()
-        alliance = row_latest[alliance_index].strip()
-        mana_latest = to_int(row_latest[mana_index])
-        mana_prev = to_int(row_prev[mana_index])
-        mana_gain = mana_latest - mana_prev
+        mana_gain = to_int(row_latest[mana_index]) - to_int(row_prev[mana_index])
 
-        full_name = f"[{alliance}] {name}"
-        msg = f"🌿 Mana gathered by `{full_name}` between `{previous.title}` → `{latest.title}`:\n"
-        msg += f"💧 Mana: {mana_gain:,}"
+        # Filter MFD players only for ranking
+        mfd_gains = []
+        for row in data_latest[1:]:
+            if len(row) > mana_index and row[alliance_index].strip() == "MFD":
+                id_val = row[id_index].strip()
+                row_old = next((r for r in data_prev[1:] if len(r) > mana_index and r[id_index].strip() == id_val), None)
+                if row_old:
+                    gain = to_int(row[mana_index]) - to_int(row_old[mana_index])
+                    mfd_gains.append((id_val, gain))
 
-        if alliance != "MFD":
-            msg += "\n❌ Not in MFD"
+        mfd_gains.sort(key=lambda x: x[1], reverse=True)
+        rank = next((i+1 for i, (lid, _) in enumerate(mfd_gains) if lid == lord_id), None)
 
-        await ctx.send(msg)
+        message = f"🌿 Mana gathered by `[{alliance}] {name}`:\n💧 Mana: {mana_gain:,}"
+        if alliance == "MFD" and rank:
+            message += f"\n🏅 MFD Rank: #{rank}"
+        else:
+            message += "\n❌ Not in MFD"
+
+        await ctx.send(message)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
