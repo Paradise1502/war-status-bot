@@ -74,28 +74,6 @@ async def rssheal(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def commands(ctx):
-    embed = discord.Embed(
-        title="📜 Available Commands",
-        description="Here’s what this bot can do:",
-        color=discord.Color.blue()
-    )
-
-    embed.add_field(name="!warred", value="🔴 Set war status to *Full War*", inline=False)
-    embed.add_field(name="!waryellow", value="🟡 Set war status to *Skirmishes*", inline=False)
-    embed.add_field(name="!wargreen", value="🟢 Set war status to *No Fighting*", inline=False)
-    embed.add_field(name="!warfarm", value="🌾 Set war status to *Go Farm Mana*", inline=False)
-    embed.add_field(name="!rssheal [lord_id]", value="📊 Show RSS spent for healing between last two sheets", inline=False)
-    embed.add_field(name="!stats [lord_id]", value="📈 Show highest power, kills, healed, and dead with gains", inline=False)
-    embed.add_field(name="!mana [lord_id]", value="💧 Show mana gathered since last sheet", inline=False)
-    embed.add_field(name="!topmana", value="🏆 Top 10 mana gatherers (gain only, ≥25M power)", inline=False)
-    embed.add_field(name="!topheal", value="💉 Top 10 units healed (gain only, ≥25M power)", inline=False)
-    embed.add_field(name="!toprssheal", value="📦 Top 10 RSS spent on healing (gain only, ≥25M power)", inline=False)
-    embed.add_field(name="!kills [lord_id]", value="⚔️ Show total kills and troop tier breakdown with gains", inline=False)
-
-    await ctx.send(embed=embed)
-
-@bot.command()
 async def stats(ctx, lord_id: str):
     try:
         # Get the two most recent tabs
@@ -557,5 +535,26 @@ async def warfarm(ctx):
         except discord.errors.HTTPException as e:
             print(f"Rename failed or delayed: {e}")
 
+@bot.command()
+async def commands(ctx):
+    embed = discord.Embed(
+        title="📜 Available Commands",
+        description="Here’s what this bot can do:",
+        color=discord.Color.blue()
+    )
+
+    embed.add_field(name="!warred", value="🔴 Set war status to *Full War*", inline=False)
+    embed.add_field(name="!waryellow", value="🟡 Set war status to *Skirmishes*", inline=False)
+    embed.add_field(name="!wargreen", value="🟢 Set war status to *No Fighting*", inline=False)
+    embed.add_field(name="!warfarm", value="🌾 Set war status to *Go Farm Mana*", inline=False)
+    embed.add_field(name="!rssheal [lord_id]", value="📊 Show RSS spent for healing between last two sheets", inline=False)
+    embed.add_field(name="!stats [lord_id]", value="📈 Show highest power, kills, healed, and dead with gains", inline=False)
+    embed.add_field(name="!mana [lord_id]", value="💧 Show mana gathered since last sheet", inline=False)
+    embed.add_field(name="!topmana", value="🏆 Top 10 mana gatherers (gain only, ≥25M power)", inline=False)
+    embed.add_field(name="!topheal", value="💉 Top 10 units healed (gain only, ≥25M power)", inline=False)
+    embed.add_field(name="!toprssheal", value="📦 Top 10 RSS spent on healing (gain only, ≥25M power)", inline=False)
+    embed.add_field(name="!kills [lord_id]", value="⚔️ Show total kills and troop tier breakdown with gains", inline=False)
+
+    await ctx.send(embed=embed)
 
 bot.run(TOKEN)
