@@ -640,32 +640,28 @@ async def progress(ctx, lord_id: str):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
-
-        latest_data = latest.get_all_values()
-        previous_data = previous.get_all_values()
+        latest, previous = sheets[-1], sheets[-2]
+        latest_data, previous_data = latest.get_all_values(), previous.get_all_values()
         headers = latest_data[0]
 
-        def col(col_letter):
-            # For letters like 'AF', 'AI'
-            col_letter = col_letter.upper()
-            total = 0
-            for char in col_letter:
-                total = total * 26 + (ord(char) - ord('A') + 1)
-            return total - 1
+        def get_index(col):
+            if len(col) == 1:
+                return ord(col) - ord("A")
+            elif len(col) == 2:
+                return (ord(col[0]) - ord("A") + 1) * 26 + ord(col[1]) - ord("A")
+            return -1
 
         id_idx = headers.index("lord_id")
         name_idx = 1
         alliance_idx = 3
-        power_idx = col("M")
-        kills_idx = col("J")
-        dead_idx = col("R")
-        healed_idx = col("S")
-        gold_idx = col("AF")
-        wood_idx = col("AG")
-        ore_idx = col("AH")
-        mana_idx = col("AI")
+        power_idx = get_index("M")
+        kills_idx = get_index("J")
+        dead_idx = get_index("R")
+        healed_idx = get_index("S")
+        gold_idx = get_index("AF")
+        wood_idx = get_index("AG")
+        ore_idx = get_index("AH")
+        mana_idx = get_index("AI")
 
         def find_row(data):
             for row in data[1:]:
@@ -688,7 +684,6 @@ async def progress(ctx, lord_id: str):
 
         name = row_latest[name_idx]
         alliance = row_latest[alliance_idx]
-
         power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
         kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
         dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
@@ -699,27 +694,61 @@ async def progress(ctx, lord_id: str):
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
         total_rss = gold + wood + ore + mana
 
-        embed = discord.Embed(
-            title=f"📈 Progress Report for  [{alliance}]  {name}",
-            color=0x2ECC71
-        )
-        embed.add_field(name="🟩 Power", value=f"+{power_gain:,}", inline=False)
-        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}", inline=False)
-        embed.add_field(name="💀 Dead", value=f"+{dead_gain:,}", inline=False)
-        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}", inline=False)
-        embed.add_field(
-            name="🧾 RSS Spent",
-            value=(
-                f"🪙 Gold: {gold:,}\n"
-                f"🪵 Wood: {wood:,}\n"
-                f"⛏️ Ore: {ore:,}\n"
-                f"💧 Mana: {mana:,}\n"
-                f"📦 Total: {total_rss:,}"
-            ),
-            inline=False
-        )
-        embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
+        # Rankings
+        mfd_gains = {
+            "rss": [],
+            "power": [],
+            "kills": [],
+            "dead": [],
+            "healed": []
+        }
 
+        for row_l, row_p in zip(latest_data[1:], previous_data[1:]):
+            if row_l[alliance_idx] != "MFD":
+                continue
+            lid = row_l[id_idx]
+            mfd_gains["rss"].append((lid, (
+                to_int(row_l[gold_idx]) - to_int(row_p[gold_idx]) +
+                to_int(row_l[wood_idx]) - to_int(row_p[wood_idx]) +
+                to_int(row_l[ore_idx]) - to_int(row_p[ore_idx]) +
+                to_int(row_l[mana_idx]) - to_int(row_p[mana_idx])
+            )))
+            mfd_gains["power"].append((lid, to_int(row_l[power_idx]) - to_int(row_p[power_idx])))
+            mfd_gains["kills"].append((lid, to_int(row_l[kills_idx]) - to_int(row_p[kills_idx])))
+            mfd_gains["dead"].append((lid, to_int(row_l[dead_idx]) - to_int(row_p[dead_idx])))
+            mfd_gains["healed"].append((lid, to_int(row_l[healed_idx]) - to_int(row_p[healed_idx])))
+
+        def find_rank(lid, category):
+            lst = sorted(mfd_gains[category], key=lambda x: x[1], reverse=True)
+            for i, (check_id, _) in enumerate(lst, 1):
+                if check_id == lid:
+                    return i
+            return None
+
+        timeframe = f"{previous.title} → {latest.title}"
+        embed = discord.Embed(
+            title=f"📈 Progress Report for 〔{alliance}〕 {name}",
+            color=discord.Color.green()
+        )
+        embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f"\n🏅Rank: #{find_rank(lord_id, 'power')}" if alliance == "MFD" else ""), inline=False)
+        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f"\n🏅Rank: #{find_rank(lord_id, 'kills')}" if alliance == "MFD" else ""), inline=False)
+        embed.add_field(name="💀 Dead", value=f"+{dead_gain:,}" + (f"\n🏅Rank: #{find_rank(lord_id, 'dead')}" if alliance == "MFD" else ""), inline=False)
+        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f"\n🏅Rank: #{find_rank(lord_id, 'healed')}" if alliance == "MFD" else ""), inline=False)
+
+        rss_text = (
+            f"🪙 Gold: {gold:,}\n"
+            f"🪵 Wood: {wood:,}\n"
+            f"⛏️ Ore: {ore:,}\n"
+            f"💧 Mana: {mana:,}\n"
+            f"📦 Total: {total_rss:,}"
+        )
+        if alliance == "MFD":
+            rank = find_rank(lord_id, "rss")
+            if rank:
+                rss_text += f"\n🏅Rank: #{rank}"
+
+        embed.add_field(name="📦 RSS Spent", value=rss_text, inline=False)
+        embed.set_footer(text=f"Timespan: {timeframe}")
         await ctx.send(embed=embed)
 
     except Exception as e:
