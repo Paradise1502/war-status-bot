@@ -220,7 +220,8 @@ async def topmana(ctx, top_n: int = 10):
         for row in data_latest[1:]:
             if len(row) > max(mana_idx, power_idx):
                 lord_id = row[id_index]
-                name = row[name_index]
+                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
+                name = f"[{alliance}] {row[name_index].strip()}"
                 if lord_id not in prev_map:
                     continue  # skip if not in previous sheet
 
@@ -279,7 +280,8 @@ async def topheal(ctx, top_n: int = 10):
                 if raw_id not in prev_map:
                     continue  # skip if not in both
 
-                name = row[name_index]
+                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
+                name = f"[{alliance}] {row[name_index].strip()}"
                 healed_now = to_int(row[heal_idx])
                 healed_prev = prev_map[raw_id]
                 gain = healed_now - healed_prev
@@ -344,7 +346,8 @@ async def toprssheal(ctx, top_n: int = 10):
                 if raw_id not in prev_map:
                     continue
 
-                name = row[name_index]
+                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
+                name = f"[{alliance}] {row[name_index].strip()}"
                 power = to_int(row[power_idx])
                 if power < 25_000_000:
                     continue
