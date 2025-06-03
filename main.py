@@ -376,6 +376,87 @@ async def toprssheal(ctx, top_n: int = 10):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def kills(ctx, top_n: int = 10):
+    try:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = sheets[-1]
+        previous = sheets[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_index = headers.index("lord_id")
+        name_index = 1
+        alliance_index = 3
+        power_idx = 12  # Column M
+
+        total_kills_idx = 9   # Column J
+        t5_idx = 36           # Column AK
+        t4_idx = 37           # Column AL
+        t3_idx = 38           # Column AM
+        t2_idx = 39           # Column AN
+        t1_idx = 40           # Column AO
+
+        def to_int(val):
+            try: return int(val.replace(',', '').replace('-', '').strip())
+            except: return 0
+
+        # Build map of previous sheet
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > t1_idx:
+                raw_id = row[id_index].strip() if row[id_index] else ""
+                if raw_id:
+                    prev_map[raw_id] = {
+                        "total": to_int(row[total_kills_idx]),
+                        "t5": to_int(row[t5_idx]),
+                        "t4": to_int(row[t4_idx]),
+                        "t3": to_int(row[t3_idx]),
+                        "t2": to_int(row[t2_idx]),
+                        "t1": to_int(row[t1_idx])
+                    }
+
+        gains = []
+        for row in data_latest[1:]:
+            if len(row) > t1_idx:
+                raw_id = row[id_index].strip() if row[id_index] else ""
+                if raw_id not in prev_map:
+                    continue
+
+                power = to_int(row[power_idx])
+                if power < 25_000_000:
+                    continue
+
+                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
+                name = row[name_index].strip()
+                full_name = f"[{alliance}] {name}"
+
+                total = to_int(row[total_kills_idx]) - prev_map[raw_id]["total"]
+                t5 = to_int(row[t5_idx]) - prev_map[raw_id]["t5"]
+                t4 = to_int(row[t4_idx]) - prev_map[raw_id]["t4"]
+                t3 = to_int(row[t3_idx]) - prev_map[raw_id]["t3"]
+                t2 = to_int(row[t2_idx]) - prev_map[raw_id]["t2"]
+                t1 = to_int(row[t1_idx]) - prev_map[raw_id]["t1"]
+
+                gains.append((full_name, total, t5, t4, t3, t2, t1))
+
+        gains.sort(key=lambda x: x[1], reverse=True)
+        result = "\n".join([
+            f"{i+1}. `{name}` — ⚔️ +{total:,} (T5: {t5:,} | T4: {t4:,} | T3: {t3:,} | T2: {t2:,} | T1: {t1:,})"
+            for i, (name, total, t5, t4, t3, t2, t1) in enumerate(gains[:top_n])
+        ])
+
+        await ctx.send(f"📊 **Top {top_n} Kill Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
