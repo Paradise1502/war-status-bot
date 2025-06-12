@@ -732,7 +732,7 @@ TOKEN = os.getenv("TOKEN")
 CHANNEL_ID = 1369071691111600168
 
 # Allowed role ID
-ALLOWED_ROLE_ID = 1258156722871337021
+ALLOWED_ROLE_ID = 1352014667589095624
 
 # Permission check decorator
 def role_check():
