@@ -806,19 +806,21 @@ async def lowperformer(ctx, threshold: float = 5.0):
             await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio in server 77.")
             return
 
-        message = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
-        chunks = [message]
-        current_chunk = message
+        header = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
+        chunks = []
+        current_chunk = header
 
         for line in low_performers:
             if len(current_chunk) + len(line) >= 2000:
-                current_chunk = ""
                 chunks.append(current_chunk)
-            chunks[-1] += line + "\n"
+                current_chunk = ""
+            current_chunk += line + "\n"
+
+        if current_chunk.strip():
+            chunks.append(current_chunk)
 
         for chunk in chunks:
-            if chunk.strip():
-                await ctx.send(chunk)
+            await ctx.send(chunk.strip())
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
