@@ -739,22 +739,31 @@ async def lowperformer(ctx, threshold: float = 5.0):
         data_prev = previous.get_all_values()
         headers = data_latest[0]
 
-        def get_index(col_letter):
-            return ord(col_letter.upper()) - ord("A")
+       from string import ascii_uppercase
+
+        def col_to_index(col):
+            col = col.upper()
+            index = 0
+            for char in col:
+                index = index * 26 + (ord(char) - ord('A') + 1)
+            return index - 1
 
         id_idx = headers.index("lord_id")
         name_idx = 1
         alliance_idx = 3
-        power_idx = get_index("M")
-        merit_idx = get_index("L")
-        kills_idx = get_index("J")
-        dead_idx = get_index("R")
-        healed_idx = get_index("S")
-        helps_idx = get_index("AE")
+        power_idx = col_to_index("M")
+        merit_idx = col_to_index("L")
+        kills_idx = col_to_index("J")
+        dead_idx = col_to_index("R")
+        healed_idx = col_to_index("S")
+        helps_idx = col_to_index("AE")
 
         def to_int(val):
             try:
-                return int(val.replace(",", "").replace("-", "").strip())
+                val = val.replace(",", "").strip()
+                if val == "-" or not val:
+                    return 0
+                return int(val)
             except:
                 return 0
 
