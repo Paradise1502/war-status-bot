@@ -779,7 +779,7 @@ async def lowperformer(ctx, threshold: float = 5.0):
             if lid not in prev_map:
                 continue
 
-            server = row[home_server_idx].strip() if len(row) > server_idx else ""
+            server = row[home_server_idx].strip() if len(row) > home_server_idx else ""
             if server != "77":
                 continue
 
