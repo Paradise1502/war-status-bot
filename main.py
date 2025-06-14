@@ -740,8 +740,6 @@ async def lowperformer(ctx, threshold: float = 5.0):
         data_prev = previous.get_all_values()
         headers = data_latest[0]
 
-       from string import ascii_uppercase
-
         def col_to_index(col):
             col = col.upper()
             index = 0
