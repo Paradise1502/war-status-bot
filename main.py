@@ -1,5 +1,6 @@
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from string import ascii_uppercase
 import os
 import json
 import discord
