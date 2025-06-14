@@ -748,7 +748,7 @@ async def lowperformer(ctx, threshold: float = 5.0):
         kills_idx = headers.index("units_killed")
         dead_idx = headers.index("units_dead")
         healed_idx = headers.index("units_healed")
-        helps_idx = headers.index("helps")
+        helps_idx = headers.index("helps_given")
 
         def to_int(val):
             try:
