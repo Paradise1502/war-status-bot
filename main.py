@@ -779,7 +779,7 @@ async def lowperformer(ctx, threshold: float = 5.0):
             if lid not in prev_map:
                 continue
 
-            if row[home_server_idx].strip() != "77":
+            if row[home_server_idx].strip() == "77":
                 continue
 
             power = to_int(row[power_idx])
