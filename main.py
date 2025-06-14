@@ -750,13 +750,13 @@ async def lowperformer(ctx, threshold: float = 5.0):
         id_idx = headers.index("lord_id")
         name_idx = 1
         alliance_idx = 3
-        home_server_idx = col_to_index("F")
         power_idx = col_to_index("M")
         merit_idx = col_to_index("L")
         kills_idx = col_to_index("J")
         dead_idx = col_to_index("R")
         healed_idx = col_to_index("S")
         helps_idx = col_to_index("AE")
+        server_idx = col_to_index("F")
 
         def to_int(val):
             try:
@@ -779,11 +779,12 @@ async def lowperformer(ctx, threshold: float = 5.0):
             if lid not in prev_map:
                 continue
 
-            if row[home_server_idx].strip() == "77":
-                continue
-
             power = to_int(row[power_idx])
             if power < 40_000_000:
+                continue
+
+            server = row[server_idx].strip() if len(row) > server_idx else ""
+            if server != "77":
                 continue
 
             merit = to_int(row[merit_idx])
@@ -802,10 +803,10 @@ async def lowperformer(ctx, threshold: float = 5.0):
                 )
 
         if not low_performers:
-            await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio in server 77.")
+            await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio.")
             return
 
-        message = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
+        message = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power, Server 77 only)**\n\n"
         chunks = [message]
         current_chunk = message
 
