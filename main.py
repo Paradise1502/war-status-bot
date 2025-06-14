@@ -725,6 +725,87 @@ async def progress(ctx, lord_id: str):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def lowperformer(ctx, threshold: float = 5.0):
+    try:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest, previous = sheets[-1], sheets[-2]
+        data_latest = latest.get_all_values()
+        data_previous = previous.get_all_values()
+        headers = data_latest[0]
+
+        id_idx = headers.index("lord_id")
+        name_idx = 1
+        alliance_idx = 3
+        power_idx = headers.index("power")
+        merit_idx = headers.index("merits")
+        kills_idx = headers.index("units_killed")
+        dead_idx = headers.index("units_dead")
+        healed_idx = headers.index("units_healed")
+        helps_idx = headers.index("helps") if "helps" in headers else 30  # fallback column index
+
+        def to_int(value):
+            try: return int(value.replace(",", "").strip())
+            except: return 0
+
+        def find_map(data):
+            mapping = {}
+            for row in data[1:]:
+                if len(row) > helps_idx:
+                    mapping[row[id_idx]] = row
+            return mapping
+
+        prev_map = find_map(data_previous)
+        results = []
+
+        for row in data_latest[1:]:
+            if len(row) <= helps_idx:
+                continue
+            lid = row[id_idx]
+            if lid not in prev_map:
+                continue
+
+            power = to_int(row[power_idx])
+            if power < 25_000_000:
+                continue
+
+            merit = to_int(row[merit_idx]) - to_int(prev_map[lid][merit_idx])
+            kills = to_int(row[kills_idx]) - to_int(prev_map[lid][kills_idx])
+            dead = to_int(row[dead_idx]) - to_int(prev_map[lid][dead_idx])
+            healed = to_int(row[healed_idx]) - to_int(prev_map[lid][healed_idx])
+            helps = to_int(row[helps_idx]) - to_int(prev_map[lid][helps_idx])
+            ratio = (merit / power) * 100 if power > 0 else 0
+
+            if ratio < threshold:
+                name = row[name_idx].strip()
+                results.append((name, power, merit, kills, dead, healed, helps, ratio))
+
+        if not results:
+            await ctx.send("✅ No underperformers found.")
+            return
+
+        results.sort(key=lambda x: x[-1])
+        lines = [
+            f"`{name}` — 💥 Power: {power:,} | 🧿 Merits: {merit:,} ({ratio:.2f}%) | ⚔️ {kills:,} | 💀 {dead:,} | ❤️ {healed:,} | 🤝 {helps:,}"
+            for name, power, merit, kills, dead, healed, helps, ratio in results
+        ]
+
+        # Trim message if too long
+        message = "**📉 Low Performers (Merits < {}% of Power)**\n\n".format(threshold)
+        for line in lines:
+            if len(message) + len(line) + 1 > 2000:
+                break
+            message += line + "\n"
+
+        await ctx.send(message)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
