@@ -735,70 +735,77 @@ async def lowperformer(ctx, threshold: float = 5.0):
 
         latest = sheets[-1]
         previous = sheets[-2]
-        latest_data = latest.get_all_values()
-        previous_data = previous.get_all_values()
-        headers = latest_data[0]
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        def get_index(col_letter):
+            return ord(col_letter.upper()) - ord("A")
 
         id_idx = headers.index("lord_id")
         name_idx = 1
         alliance_idx = 3
-        power_idx = headers.index("Highest Power") if "Highest Power" in headers else 12
-        merit_idx = headers.index("Merits") if "Merits" in headers else 11
-        kills_idx = headers.index("Units Killed") if "Units Killed" in headers else 9
-        dead_idx = headers.index("Units Dead") if "Units Dead" in headers else 17
-        healed_idx = headers.index("Units Healed") if "Units Healed" in headers else 18
-        helps_idx = headers.index("Help Count") if "Help Count" in headers else 30  # Column AE
+        power_idx = get_index("M")
+        merit_idx = get_index("L")
+        kills_idx = get_index("J")
+        dead_idx = get_index("R")
+        healed_idx = get_index("S")
+        helps_idx = get_index("AE")
 
-        # Build a map from previous sheet
-        prev_map = {
-            row[id_idx]: row
-            for row in previous_data[1:]
-            if len(row) > max(kills_idx, dead_idx, healed_idx, helps_idx)
-        }
+        def to_int(val):
+            try:
+                return int(val.replace(",", "").replace("-", "").strip())
+            except:
+                return 0
 
-        results = []
-        for row in latest_data[1:]:
-            if len(row) <= max(helps_idx, power_idx, merit_idx):
+        # Create lookup from previous data
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and row[id_idx].strip()}
+
+        low_performers = []
+        for row in data_latest[1:]:
+            if len(row) <= helps_idx:
                 continue
-            lord_id = row[id_idx]
-            if not lord_id or lord_id not in prev_map:
+
+            lid = row[id_idx]
+            if lid not in prev_map:
                 continue
 
-            name = row[name_idx]
-            alliance = row[alliance_idx]
-            power = int(row[power_idx].replace(",", "") or 0)
-            merits = int(row[merit_idx].replace(",", "") or 0)
-
+            power = to_int(row[power_idx])
             if power < 25_000_000:
                 continue
 
-            prev_row = prev_map[lord_id]
-            kills_gain = int(row[kills_idx].replace(",", "") or 0) - int(prev_row[kills_idx].replace(",", "") or 0)
-            dead_gain = int(row[dead_idx].replace(",", "") or 0) - int(prev_row[dead_idx].replace(",", "") or 0)
-            healed_gain = int(row[healed_idx].replace(",", "") or 0) - int(prev_row[healed_idx].replace(",", "") or 0)
-            helps_gain = int(row[helps_idx].replace(",", "") or 0) - int(prev_row[helps_idx].replace(",", "") or 0)
+            merit = to_int(row[merit_idx])
+            kills_gain = to_int(row[kills_idx]) - to_int(prev_map[lid][kills_idx])
+            dead_gain = to_int(row[dead_idx]) - to_int(prev_map[lid][dead_idx])
+            healed_gain = to_int(row[healed_idx]) - to_int(prev_map[lid][healed_idx])
+            helps_gain = to_int(row[helps_idx]) - to_int(prev_map[lid][helps_idx])
+            merit_ratio = (merit / power) * 100 if power > 0 else 0
 
-            ratio = (merits / power) * 100 if power > 0 else 0
-            if ratio < threshold:
-                results.append(
-                    f"🆔 `{lord_id}` — **[{alliance}] {name}**\n"
-                    f"Power: {power:,} | Merits: {merits:,} ({ratio:.2f}%)\n"
-                    f"Kills: +{kills_gain:,} | Dead: +{dead_gain:,} | Healed: +{healed_gain:,} | Helps: +{helps_gain:,}\n"
+            if merit_ratio < threshold:
+                name = row[name_idx]
+                low_performers.append(
+                    f"🆔 `{lid}` | **{name}** — 🧠 {merit:,} merits ({merit_ratio:.2f}%)\n"
+                    f"📊 Power: {power:,}\n"
+                    f"⚔️ Kills: +{kills_gain:,} | 💀 Dead: +{dead_gain:,} | ❤️ Healed: +{healed_gain:,} | 🤝 Helps: +{helps_gain:,}\n"
                 )
 
-        if not results:
-            await ctx.send(f"✅ No low performers found below {threshold:.1f}% merit-to-power ratio.")
+        if not low_performers:
+            await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio.")
             return
 
-        # Split into messages under 2000 characters
-        message = ""
-        for line in results:
-            if len(message) + len(line) > 2000:
-                await ctx.send(message)
-                message = ""
-            message += line + "\n"
-        if message:
-            await ctx.send(message)
+        message = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
+        chunks = [message]
+        current_chunk = message
+
+        for line in low_performers:
+            if len(current_chunk) + len(line) >= 2000:
+                current_chunk = ""
+                chunks.append(current_chunk)
+            chunks[-1] += line + "\n"
+
+        for chunk in chunks:
+            if chunk.strip():
+                await ctx.send(chunk)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
