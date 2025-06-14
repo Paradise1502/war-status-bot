@@ -736,14 +736,16 @@ async def lowperformer(ctx, threshold: float = 5.0):
 
         latest = sheets[-1]
         previous = sheets[-2]
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
+        latest_data = latest.get_all_values()
+        previous_data = previous.get_all_values()
+        headers = latest_data[0]
 
         def col_to_index(col):
             col = col.upper()
             index = 0
             for char in col:
+                if len(char) != 1 or not char.isalpha():
+                    raise ValueError(f"Invalid column: {col}")
                 index = index * 26 + (ord(char) - ord('A') + 1)
             return index - 1
 
@@ -766,11 +768,13 @@ async def lowperformer(ctx, threshold: float = 5.0):
             except:
                 return 0
 
-        # Create lookup from previous data
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and row[id_idx].strip()}
+        prev_map = {
+            row[id_idx]: row for row in previous_data[1:]
+            if len(row) > helps_idx and row[id_idx].strip()
+        }
 
-        low_performers = []
-        for row in data_latest[1:]:
+        results = []
+        for row in latest_data[1:]:
             if len(row) <= helps_idx:
                 continue
 
@@ -782,6 +786,7 @@ async def lowperformer(ctx, threshold: float = 5.0):
             if power < 25_000_000:
                 continue
 
+            name = row[name_idx]
             merit = to_int(row[merit_idx])
             kills_gain = to_int(row[kills_idx]) - to_int(prev_map[lid][kills_idx])
             dead_gain = to_int(row[dead_idx]) - to_int(prev_map[lid][dead_idx])
@@ -790,30 +795,26 @@ async def lowperformer(ctx, threshold: float = 5.0):
             merit_ratio = (merit / power) * 100 if power > 0 else 0
 
             if merit_ratio < threshold:
-                name = row[name_idx]
-                low_performers.append(
+                results.append(
                     f"🆔 `{lid}` | **{name}** — 🧠 {merit:,} merits ({merit_ratio:.2f}%)\n"
                     f"📊 Power: {power:,}\n"
                     f"⚔️ Kills: +{kills_gain:,} | 💀 Dead: +{dead_gain:,} | ❤️ Healed: +{healed_gain:,} | 🤝 Helps: +{helps_gain:,}\n"
                 )
 
-        if not low_performers:
+        if not results:
             await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio.")
             return
 
+        # Chunk and send messages under Discord's 2000 character limit
         message = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
-        chunks = [message]
-        current_chunk = message
-
-        for line in low_performers:
-            if len(current_chunk) + len(line) >= 2000:
-                current_chunk = ""
-                chunks.append(current_chunk)
-            chunks[-1] += line + "\n"
-
-        for chunk in chunks:
-            if chunk.strip():
+        chunk = message
+        for line in results:
+            if len(chunk) + len(line) >= 2000:
                 await ctx.send(chunk)
+                chunk = ""
+            chunk += line + "\n"
+        if chunk.strip():
+            await ctx.send(chunk)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
