@@ -735,7 +735,6 @@ async def lowperformer(ctx, threshold: float = 5.0):
 
         latest = sheets[-1]
         previous = sheets[-2]
-
         latest_data = latest.get_all_values()
         previous_data = previous.get_all_values()
         headers = latest_data[0]
@@ -743,64 +742,63 @@ async def lowperformer(ctx, threshold: float = 5.0):
         id_idx = headers.index("lord_id")
         name_idx = 1
         alliance_idx = 3
-        power_idx = headers.index("highest_power")
-        merits_idx = headers.index("merits")
-        kills_idx = headers.index("units_killed")
-        dead_idx = headers.index("units_dead")
-        healed_idx = headers.index("units_healed")
-        helps_idx = headers.index("helps_given")
+        power_idx = headers.index("Highest Power") if "Highest Power" in headers else 12
+        merit_idx = headers.index("Merits") if "Merits" in headers else 11
+        kills_idx = headers.index("Units Killed") if "Units Killed" in headers else 9
+        dead_idx = headers.index("Units Dead") if "Units Dead" in headers else 17
+        healed_idx = headers.index("Units Healed") if "Units Healed" in headers else 18
+        helps_idx = headers.index("Help Count") if "Help Count" in headers else 30  # Column AE
 
-        def to_int(val):
-            try:
-                return int(val.replace(",", "").strip())
-            except:
-                return 0
+        # Build a map from previous sheet
+        prev_map = {
+            row[id_idx]: row
+            for row in previous_data[1:]
+            if len(row) > max(kills_idx, dead_idx, healed_idx, helps_idx)
+        }
 
-        prev_map = {row[id_idx]: row for row in previous_data[1:] if len(row) > helps_idx}
-        report = []
-
+        results = []
         for row in latest_data[1:]:
-            if len(row) <= helps_idx:
+            if len(row) <= max(helps_idx, power_idx, merit_idx):
+                continue
+            lord_id = row[id_idx]
+            if not lord_id or lord_id not in prev_map:
                 continue
 
-            lord_id = row[id_idx]
             name = row[name_idx]
             alliance = row[alliance_idx]
-            power = to_int(row[power_idx])
-            merits = to_int(row[merits_idx])
+            power = int(row[power_idx].replace(",", "") or 0)
+            merits = int(row[merit_idx].replace(",", "") or 0)
 
             if power < 25_000_000:
                 continue
 
-            merit_ratio = (merits / power) * 100 if power > 0 else 0
-            if merit_ratio >= threshold:
-                continue
+            prev_row = prev_map[lord_id]
+            kills_gain = int(row[kills_idx].replace(",", "") or 0) - int(prev_row[kills_idx].replace(",", "") or 0)
+            dead_gain = int(row[dead_idx].replace(",", "") or 0) - int(prev_row[dead_idx].replace(",", "") or 0)
+            healed_gain = int(row[healed_idx].replace(",", "") or 0) - int(prev_row[healed_idx].replace(",", "") or 0)
+            helps_gain = int(row[helps_idx].replace(",", "") or 0) - int(prev_row[helps_idx].replace(",", "") or 0)
 
-            if lord_id in prev_map:
-                prev = prev_map[lord_id]
-                kills_gain = to_int(row[kills_idx]) - to_int(prev[kills_idx])
-                dead_gain = to_int(row[dead_idx]) - to_int(prev[dead_idx])
-                healed_gain = to_int(row[healed_idx]) - to_int(prev[healed_idx])
-                helps_gain = to_int(row[helps_idx]) - to_int(prev[helps_idx])
-            else:
-                continue
+            ratio = (merits / power) * 100 if power > 0 else 0
+            if ratio < threshold:
+                results.append(
+                    f"🆔 `{lord_id}` — **[{alliance}] {name}**\n"
+                    f"Power: {power:,} | Merits: {merits:,} ({ratio:.2f}%)\n"
+                    f"Kills: +{kills_gain:,} | Dead: +{dead_gain:,} | Healed: +{healed_gain:,} | Helps: +{helps_gain:,}\n"
+                )
 
-            report.append((lord_id, name, power, merits, kills_gain, dead_gain, healed_gain, helps_gain, merit_ratio))
-
-        if not report:
-            await ctx.send(f"✅ No players found under {threshold}% merit-to-power ratio.")
+        if not results:
+            await ctx.send(f"✅ No low performers found below {threshold:.1f}% merit-to-power ratio.")
             return
 
-        report.sort(key=lambda x: x[-1])  # sort by lowest merit ratio
-        message = f"📉 **Low Performers (<{threshold}% Merits/Power)**\n```"
-        message += f"{'ID':<10} {'Name':<15} {'Power':>10} {'Merits':>10} {'Kills':>10} {'Dead':>10} {'Healed':>10} {'Helps':>10} {'%':>6}\n"
-        message += "-" * 95 + "\n"
-
-        for lid, name, power, merits, kills, dead, healed, helps, ratio in report[:20]:
-            message += f"{lid:<10} {name:<15} {power:>10,} {merits:>10,} {kills:>10,} {dead:>10,} {healed:>10,} {helps:>10,} {ratio:>5.1f}%\n"
-
-        message += "```"
-        await ctx.send(message)
+        # Split into messages under 2000 characters
+        message = ""
+        for line in results:
+            if len(message) + len(line) > 2000:
+                await ctx.send(message)
+                message = ""
+            message += line + "\n"
+        if message:
+            await ctx.send(message)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
