@@ -784,7 +784,7 @@ async def lowperformer(ctx, threshold: float = 5.0):
                 continue
 
             power = to_int(row[power_idx])
-            if power < 40_000_000:
+            if power < 50_000_000:
                 continue
 
             merit = to_int(row[merit_idx])
