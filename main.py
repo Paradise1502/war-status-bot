@@ -836,7 +836,9 @@ async def lowperformer(ctx, threshold: float = 5.0):
             chunks.append(current_chunk)
 
         for chunk in chunks:
-            await ctx.send(chunk.strip())
+            if chunk.strip():
+                embed = discord.Embed(description=chunk.strip(), color=discord.Color.red())
+                await ctx.send(embed=embed)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
