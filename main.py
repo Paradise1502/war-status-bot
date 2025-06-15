@@ -794,13 +794,14 @@ async def lowperformer(ctx, threshold: float = 5.0):
             helps_gain = to_int(row[helps_idx]) - to_int(prev_map[lid][helps_idx])
             merit_ratio = (merit / power) * 100 if power > 0 else 0
 
-            if merit_ratio < threshold:
+             if merit_ratio < threshold:
                 name = row[name_idx]
-                low_performers.append(
+                line = (
                     f"🆔 `{lid}` | **{name}** — 🧠 {merit:,} merits ({merit_ratio:.2f}%)\n"
                     f"📊 Power: {power:,}\n"
                     f"⚔️ Kills: +{kills_gain:,} | 💀 Dead: +{dead_gain:,} | ❤️ Healed: +{healed_gain:,} | 🤝 Helps: +{helps_gain:,}\n"
                 )
+                low_performers.append((line, merit_ratio))
 
         if not low_performers:
             await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio in server 77.")
