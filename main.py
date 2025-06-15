@@ -749,7 +749,6 @@ async def lowperformer(ctx, threshold: float = 5.0):
 
         id_idx = headers.index("lord_id")
         name_idx = 1
-        alliance_idx = 3
         home_server_idx = col_to_index("F")
         power_idx = col_to_index("M")
         merit_idx = col_to_index("L")
@@ -767,10 +766,9 @@ async def lowperformer(ctx, threshold: float = 5.0):
             except:
                 return 0
 
-        # Create lookup from previous data
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and row[id_idx].strip()}
 
-        low_performers = []
+        raw_list = []
         for row in data_latest[1:]:
             if len(row) <= helps_idx:
                 continue
@@ -788,30 +786,47 @@ async def lowperformer(ctx, threshold: float = 5.0):
                 continue
 
             merit = to_int(row[merit_idx])
+            merit_ratio = (merit / power) * 100 if power > 0 else 0
+            if merit_ratio >= threshold:
+                continue
+
+            name = row[name_idx]
             kills_gain = to_int(row[kills_idx]) - to_int(prev_map[lid][kills_idx])
             dead_gain = to_int(row[dead_idx]) - to_int(prev_map[lid][dead_idx])
             healed_gain = to_int(row[healed_idx]) - to_int(prev_map[lid][healed_idx])
             helps_gain = to_int(row[helps_idx]) - to_int(prev_map[lid][helps_idx])
-            merit_ratio = (merit / power) * 100 if power > 0 else 0
 
-             if merit_ratio < threshold:
-                name = row[name_idx]
-                line = (
-                    f"🆔 `{lid}` | **{name}** — 🧠 {merit:,} merits ({merit_ratio:.2f}%)\n"
-                    f"📊 Power: {power:,}\n"
-                    f"⚔️ Kills: +{kills_gain:,} | 💀 Dead: +{dead_gain:,} | ❤️ Healed: +{healed_gain:,} | 🤝 Helps: +{helps_gain:,}\n"
-                )
-                low_performers.append((line, merit_ratio))
+            raw_list.append({
+                "lid": lid,
+                "name": name,
+                "merit": merit,
+                "ratio": merit_ratio,
+                "power": power,
+                "kills": kills_gain,
+                "dead": dead_gain,
+                "healed": healed_gain,
+                "helps": helps_gain
+            })
 
-        if not low_performers:
+        if not raw_list:
             await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio in server 77.")
             return
+
+        # Sort by merit ratio ascending
+        raw_list.sort(key=lambda x: x["ratio"])
 
         header = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
         chunks = []
         current_chunk = header
 
-        for line in low_performers:
+        for entry in raw_list:
+            line = (
+                f"🆔 `{entry['lid']}` | **{entry['name']}** — 🧠 {entry['merit']:,} merits ({entry['ratio']:.2f}%)\n"
+                f"📊 Power: {entry['power']:,}\n"
+                f"⚔️ Kills: +{entry['kills']:,} | 💀 Dead: +{entry['dead']:,} | "
+                f"❤️ Healed: +{entry['healed']:,} | 🤝 Helps: +{entry['helps']:,}\n"
+            )
+
             if len(current_chunk) + len(line) >= 2000:
                 chunks.append(current_chunk)
                 current_chunk = ""
