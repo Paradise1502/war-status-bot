@@ -801,7 +801,6 @@ async def progress2(ctx, lord_id: str):
         timeframe = f"{previous.title} → {latest.title}"
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name}", color=discord.Color.green())
-        embed.add_field(name="🕒 Timespan", value=timeframe, inline=False)
         embed.add_field(name="🟩 Power", value=f"+{power_gain:,}", inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}", inline=False)
         embed.add_field(
@@ -828,6 +827,7 @@ async def progress2(ctx, lord_id: str):
             ),
             inline=False
         )
+        embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
 
         await ctx.send(embed=embed)
 
