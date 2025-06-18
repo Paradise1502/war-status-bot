@@ -667,7 +667,6 @@ async def progress(ctx, lord_id: str):
         t2_idx = headers.index("killcount_t2")
         t1_idx = headers.index("killcount_t1")
 
-
         def to_int(v):
             try:
                 return int(v.replace(",", "").strip()) if v not in ("-", "") else 0
@@ -699,26 +698,29 @@ async def progress(ctx, lord_id: str):
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
         total_rss = gold + wood + ore + mana
 
-        def get_rank(col_idx, stat_map):
+        # Create lookup from previous sheet
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
+
+        def get_rank(col_idx):
             mfd_gains = []
-            for row in latest_data[1:]:
-                if len(row) > mana_idx and row[alliance_index] == "MFD":
-                    lid = row[id_index].strip()
-                    prev_row = prev_map.get(lid)
-                    if not prev_row:
-                        continue
-                    val = to_int(row[col_idx]) - to_int(prev_row[col_idx])
-                    mfd_gains.append((lid, val))
+            for row in data_latest[1:]:
+                if len(row) > mana_idx and row[alliance_idx] == "MFD":
+                lid = row[id_idx].strip()
+                prev_row = prev_map.get(lid)
+                if not prev_row:
+                    continue
+                val = to_int(row[col_idx]) - to_int(prev_row[col_idx])
+                mfd_gains.append((lid, val))
             mfd_gains.sort(key=lambda x: x[1], reverse=True)
             for rank, (lid, _) in enumerate(mfd_gains, 1):
                 if lid == lord_id:
                     return rank
-            return None
+        return None
 
-        rank_power = get_rank(power_idx, prev_map) if alliance == "MFD" else None
-        rank_kills = get_rank(kills_idx, prev_map) if alliance == "MFD" else None
-        rank_dead = get_rank(dead_idx, prev_map) if alliance == "MFD" else None
-        rank_healed = get_rank(healed_idx, prev_map) if alliance == "MFD" else None
+        rank_power = get_rank(power_idx) if alliance == "MFD" else None
+        rank_kills = get_rank(kills_idx) if alliance == "MFD" else None
+        rank_dead = get_rank(dead_idx,) if alliance == "MFD" else None
+        rank_healed = get_rank(healed_idx) if alliance == "MFD" else None
 
         t5 = to_int(row_latest[t5_idx]) - to_int(row_prev[t5_idx])
         t4 = to_int(row_latest[t4_idx]) - to_int(row_prev[t4_idx])
