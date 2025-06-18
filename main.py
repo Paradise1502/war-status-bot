@@ -746,19 +746,20 @@ async def progress2(ctx, lord_id: str):
         id_idx = col_idx("lord_id")
         name_idx = 1
         alliance_idx = 3
-        power_idx = col_idx("M")
-        kills_idx = col_idx("J")
-        dead_idx = col_idx("R")
-        healed_idx = col_idx("S")
-        gold_idx = col_idx("AF")
-        wood_idx = col_idx("AG")
-        ore_idx = col_idx("AH")
-        mana_idx = col_idx("AI")
-        t5_idx = col_idx("AK")
-        t4_idx = col_idx("AL")
-        t3_idx = col_idx("AM")
-        t2_idx = col_idx("AN")
-        t1_idx = col_idx("AO")
+        power_idx = headers.index("highest_power")
+        kills_idx = headers.index("units_killed")
+        dead_idx = headers.index("units_dead")
+        healed_idx = headers.index("units_healed")
+        gold_idx = headers.index("gold")
+        wood_idx = headers.index("wood")
+        ore_idx = headers.index("ore")
+        mana_idx = headers.index("mana")
+        t5_idx = headers.index("T5_kills")
+        t4_idx = headers.index("T4_kills")
+        t3_idx = headers.index("T3_kills")
+        t2_idx = headers.index("T2_kills")
+        t1_idx = headers.index("T1_kills")
+
 
         def to_int(v):
             try:
