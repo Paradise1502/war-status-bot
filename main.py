@@ -699,7 +699,7 @@ async def progress(ctx, lord_id: str):
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
         total_rss = gold + wood + ore + mana
 
-        def get_rank(col_idx, stat_map):Add commentMore actions
+        def get_rank(col_idx, stat_map):
             mfd_gains = []
             for row in latest_data[1:]:
                 if len(row) > mana_idx and row[alliance_index] == "MFD":
