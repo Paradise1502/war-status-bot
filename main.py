@@ -806,11 +806,11 @@ async def progress2(ctx, lord_id: str):
         embed.add_field(
             name="• Kill Breakdown",
             value=(
-                f"T5: (+{t5:,})\n"
-                f"T4: (+{t4:,})\n"
-                f"T3: (+{t3:,})\n"
-                f"T2: (+{t2:,})\n"
-                f"T1: (+{t1:,})"
+                f"T5: +{t5:,}\n"
+                f"T4: +{t4:,}\n"
+                f"T3: +{t3:,}\n"
+                f"T2: +{t2:,}\n"
+                f"T1: +{t1:,}"
             ),
             inline=True
         )
