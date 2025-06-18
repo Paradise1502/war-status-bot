@@ -727,6 +727,113 @@ async def progress(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
+async def progress2(ctx, lord_id: str):
+    try:
+        sheets = client.open("Copy SoS5").worksheets()
+        if len(sheets) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = sheets[-1]
+        previous = sheets[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        def col_idx(col): return headers.index(col)
+
+        id_idx = col_idx("lord_id")
+        name_idx = 1
+        alliance_idx = 3
+        power_idx = col_idx("M")
+        kills_idx = col_idx("J")
+        dead_idx = col_idx("R")
+        healed_idx = col_idx("S")
+        gold_idx = col_idx("AF")
+        wood_idx = col_idx("AG")
+        ore_idx = col_idx("AH")
+        mana_idx = col_idx("AI")
+        t5_idx = col_idx("AK")
+        t4_idx = col_idx("AL")
+        t3_idx = col_idx("AM")
+        t2_idx = col_idx("AN")
+        t1_idx = col_idx("AO")
+
+        def to_int(v):
+            try:
+                return int(v.replace(",", "").strip()) if v not in ("-", "") else 0
+            except:
+                return 0
+
+        def find_row(data):
+            for row in data[1:]:
+                if row[id_idx] == lord_id:
+                    return row
+            return None
+
+        row_latest = find_row(data_latest)
+        row_prev = find_row(data_prev)
+
+        if not row_latest or not row_prev:
+            await ctx.send("❌ Lord ID not found in both sheets.")
+            return
+
+        name = row_latest[name_idx]
+        alliance = row_latest[alliance_idx]
+        power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
+        kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
+        dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
+        healed_gain = to_int(row_latest[healed_idx]) - to_int(row_prev[healed_idx])
+        gold = to_int(row_latest[gold_idx]) - to_int(row_prev[gold_idx])
+        wood = to_int(row_latest[wood_idx]) - to_int(row_prev[wood_idx])
+        ore = to_int(row_latest[ore_idx]) - to_int(row_prev[ore_idx])
+        mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
+        total_rss = gold + wood + ore + mana
+
+        t5 = to_int(row_latest[t5_idx]) - to_int(row_prev[t5_idx])
+        t4 = to_int(row_latest[t4_idx]) - to_int(row_prev[t4_idx])
+        t3 = to_int(row_latest[t3_idx]) - to_int(row_prev[t3_idx])
+        t2 = to_int(row_latest[t2_idx]) - to_int(row_prev[t2_idx])
+        t1 = to_int(row_latest[t1_idx]) - to_int(row_prev[t1_idx])
+
+        timeframe = f"{previous.title} → {latest.title}"
+
+        embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name}", color=discord.Color.green())
+        embed.add_field(name="🕒 Timespan", value=timeframe, inline=False)
+        embed.add_field(name="🟩 Power", value=f"+{power_gain:,}", inline=False)
+        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}", inline=False)
+        embed.add_field(
+            name="• Kill Breakdown",
+            value=(
+                f"T5: {t5:,}\n"
+                f"T4: {t4:,}\n"
+                f"T3: {t3:,}\n"
+                f"T2: {t2:,}\n"
+                f"T1: {t1:,}"
+            ),
+            inline=True
+        )
+        embed.add_field(name="💀 Dead", value=f"+{dead_gain:,}", inline=True)
+        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}", inline=True)
+        embed.add_field(
+            name="📦 RSS Spent",
+            value=(
+                f"🪙 Gold: {gold:,}\n"
+                f"🪵 Wood: {wood:,}\n"
+                f"⛏️ Ore: {ore:,}\n"
+                f"💧 Mana: {mana:,}\n"
+                f"📦 Total: {total_rss:,}"
+            ),
+            inline=False
+        )
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def lowperformer(ctx, threshold: float = 5.0):
     try:
         sheets = client.open("Copy SoS5").worksheets()
