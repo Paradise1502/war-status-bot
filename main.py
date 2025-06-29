@@ -724,6 +724,7 @@ async def topdeads(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
 async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
         season = season.lower()
+        is_default_season = (season == DEFAULT_SEASON)
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
             await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
@@ -794,13 +795,11 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         ore = to_int(row_latest[ore_idx]) - to_int(row_prev[ore_idx])
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
         total_rss = gold + wood + ore + mana
-        gold_gathered = to_int(latest_row[gold_gathered_idx]) - to_int(previous_row[gold_gathered_idx])
-        wood_gathered = to_int(latest_row[wood_gathered_idx]) - to_int(previous_row[wood_gathered_idx])
-        ore_gathered = to_int(latest_row[ore_gathered_idx]) - to_int(previous_row[ore_gathered_idx])
-        mana_gathered = to_int(latest_row[mana_gathered_idx]) - to_int(previous_row[mana_gathered_idx])
+        gold_gathered = to_int(row_latest[gold_gathered_idx]) - to_int(row_prev[gold_gathered_idx])
+        wood_gathered = to_int(row_latest[wood_gathered_idx]) - to_int(row_prev[wood_gathered_idx])
+        ore_gathered = to_int(row_latest[ore_gathered_idx]) - to_int(row_prev[ore_gathered_idx])
+        mana_gathered = to_int(row_latest[mana_gathered_idx]) - to_int(row_prev[mana_gathered_idx])
         total_gathered = gold_gathered + wood_gathered + ore_gathered + mana_gathered
-
-
 
         # Create lookup from previous sheet
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
@@ -832,7 +831,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         t2 = to_int(row_latest[t2_idx]) - to_int(row_prev[t2_idx])
         t1 = to_int(row_latest[t1_idx]) - to_int(row_prev[t1_idx])
 
-        embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name}", color=discord.Color.green())
+        embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
         embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f" (#{rank_power})" if rank_power else ""), inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
@@ -870,7 +869,16 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             ),
             inline=False
         )
-        embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
+        if is_default_season:
+            embed.set_footer(
+                text=(
+                    f"📅 Timespan: {previous.title} → {latest.title}\n"
+                    "To view stats from the previous season, add 'sos2' at the end of the command.\n"
+                    "Example: !progress 123456 sos2"
+                )
+            )
+        else:
+            embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
 
         await ctx.send(embed=embed)
 
