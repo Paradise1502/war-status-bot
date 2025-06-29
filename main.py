@@ -759,6 +759,10 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         t3_idx = headers.index("killcount_t3")
         t2_idx = headers.index("killcount_t2")
         t1_idx = headers.index("killcount_t1")
+        gold_gathered_idx = headers.index("gold")
+        wood_gathered_idx = headers.index("wood")
+        ore_gathered_idx = headers.index("ore")
+        mana_gathered_idx = headers.index("mana")
 
         def to_int(v):
             try:
@@ -790,6 +794,13 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         ore = to_int(row_latest[ore_idx]) - to_int(row_prev[ore_idx])
         mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
         total_rss = gold + wood + ore + mana
+        gold_gathered = to_int(latest_row[gold_gathered_idx]) - to_int(previous_row[gold_gathered_idx])
+        wood_gathered = to_int(latest_row[wood_gathered_idx]) - to_int(previous_row[wood_gathered_idx])
+        ore_gathered = to_int(latest_row[ore_gathered_idx]) - to_int(previous_row[ore_gathered_idx])
+        mana_gathered = to_int(latest_row[mana_gathered_idx]) - to_int(previous_row[mana_gathered_idx])
+        total_gathered = gold_gathered + wood_gathered + ore_gathered + mana_gathered
+
+
 
         # Create lookup from previous sheet
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
@@ -823,9 +834,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name}", color=discord.Color.green())
         embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f" (#{rank_power})" if rank_power else ""), inline=False)
-        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
-        embed.add_field(name="💀 Dead", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
+        embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
         embed.add_field(
             name="• Kill Breakdown",
@@ -846,6 +856,17 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                 f"⛏️ Ore: {ore:,}\n"
                 f"💧 Mana: {mana:,}\n"
                 f"📦 Total: {total_rss:,}"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="📦 RSS Gathered",
+            value=(
+                f"🪙 Gold: {gold_gathered:,}\n"
+                f"🪵 Wood: {wood_gathered:,}\n"
+                f"⛏️ Ore: {ore_gathered:,}\n"
+                f"💧 Mana: {mana_gathered:,}\n"
+                f"📦 **Total**: {total_gathered:,}"
             ),
             inline=False
         )
