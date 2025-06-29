@@ -824,6 +824,9 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name}", color=discord.Color.green())
         embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f" (#{rank_power})" if rank_power else ""), inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=False)
+        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
+        embed.add_field(name="💀 Dead", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
+        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
         embed.add_field(
             name="• Kill Breakdown",
             value=(
@@ -835,8 +838,6 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             ),
             inline=True
         )
-        embed.add_field(name="💀 Dead", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
-        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
         embed.add_field(
             name="📦 RSS Spent",
             value=(
