@@ -102,7 +102,7 @@ async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest, previous = sheets[-1], sheets[-2]
+        latest, previous = tabs[-1], tabs[-2]
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
         headers = data_latest[0]
@@ -194,7 +194,7 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest, previous = sheets[-1], sheets[-2]
+        latest, previous = tabs[-1], tabs[-2]
         data_latest, data_prev = latest.get_all_values(), previous.get_all_values()
         headers = data_latest[0]
 
@@ -488,8 +488,8 @@ async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
@@ -734,8 +734,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
@@ -869,8 +869,8 @@ async def lowperformer(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
         headers = data_latest[0]
