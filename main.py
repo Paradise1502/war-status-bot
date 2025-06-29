@@ -89,10 +89,16 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def stats(ctx, lord_id: str):
+async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -175,10 +181,16 @@ async def stats(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def mana(ctx, lord_id: str):
+async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -237,10 +249,16 @@ async def mana(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topmana(ctx, top_n: int = 10):
+async def topmana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -296,10 +314,16 @@ async def topmana(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topheal(ctx, top_n: int = 10):
+async def topheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -354,10 +378,16 @@ async def topheal(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def toprssheal(ctx, top_n: int = 10):
+async def toprssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -430,10 +460,16 @@ async def toprssheal(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def kills(ctx, lord_id: str):
+async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -518,10 +554,16 @@ async def kills(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topkills(ctx, top_n: int = 10):
+async def topkills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -583,10 +625,16 @@ async def topkills(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topdeads(ctx, top_n: int = 10):
+async def topdeads(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -648,10 +696,16 @@ async def topdeads(ctx, top_n: int = 10):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def progress(ctx, lord_id: str):
+async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -777,10 +831,16 @@ async def progress(ctx, lord_id: str):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def lowperformer(ctx, threshold: float = 5.0):
+async def lowperformer(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        sheets = client.open("Copy SoS5").worksheets()
-        if len(sheets) < 2:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
@@ -983,11 +1043,11 @@ async def commands(ctx):
 - `!warfarm` — Set status to 🌾 Go Farm Mana
 
 **📊 Player Stats**
-- `!rssheal [lord_id]` — Show RSS spent on healing between last two sheets
-- `!stats [lord_id]` — Show power, kills, healed, dead stats + gain + MFD rank
-- `!kills [lord_id]` — Show kills and troop tier breakdown
-- `!mana [lord_id]` — Mana gathered + gain + MFD rank
-- `!progress [lord_id]` — Full profile: power, kills, dead, heal, RSS, mana (+gain & rank)
+- `!rssheal [lord_id] [season]` — Show RSS spent on healing between last two sheets
+- `!stats [lord_id] [season]` — Show power, kills, healed, dead stats + gain + MFD rank
+- `!kills [lord_id] [season]` — Show kills and troop tier breakdown
+- `!mana [lord_id] [season]` — Mana gathered + gain + MFD rank
+- `!progress [lord_id] [season]` — Full profile: power, kills, dead, heal, RSS, mana (+gain & rank)
 
 **🏆 Leaderboards**
 - `!topmana` — Top mana gatherers
@@ -995,6 +1055,12 @@ async def commands(ctx):
 - `!toprssheal` — Top RSS heal spenders
 - `!topkills` — Top kill gainers
 - `!topdeads` — Top dead units
+
+**🗂️ Season Support**
+You can optionally add a season tag like `sos2`, `hk1`, etc. to pull archived data.
+
+> Example: `!progress 123456 sos2`  
+If no season is given, the bot uses the current season (`hk1`).
 """
     await ctx.send(help_text)
 
