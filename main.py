@@ -13,16 +13,29 @@ creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
+# Season sheet mapping
+SEASON_SHEETS = {
+    "sos2": "Call of Dragons - SoS2",
+    "hk1": "Call of Dragons - HK1"  # <- your new current sheet
+}
+DEFAULT_SEASON = "hk1"
+
 # Now your bot setup
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 @bot.command()
-async def rssheal(ctx, lord_id: str):
+async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        # Get the two latest sheet tabs
-        tabs = client.open("Copy SoS5").worksheets()  # Replace with your sheet name if needed
+        season = "hk1"  # <- default fallback if you don’t accept it as a command param
+        sheet_name = SEASON_SHEETS.get(season.lower())
+
+        if not sheet_name:
+            await ctx.send("❌ Invalid season.")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
