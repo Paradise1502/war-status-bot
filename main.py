@@ -859,7 +859,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             inline=False
         )
         embed.add_field(
-            name="📦 RSS Gathered",
+            name="🧑‍🌾 RSS Gathered",
             value=(
                 f"🪙 Gold: {gold_gathered:,}\n"
                 f"🪵 Wood: {wood_gathered:,}\n"
