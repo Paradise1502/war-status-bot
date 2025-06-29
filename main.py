@@ -28,11 +28,12 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 @bot.command()
 async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
-        season = "hk1"  # <- default fallback if you don’t accept it as a command param
-        sheet_name = SEASON_SHEETS.get(season.lower())
+        # Lowercase just in case someone writes "SoS2"
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
 
         if not sheet_name:
-            await ctx.send("❌ Invalid season.")
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
         tabs = client.open(sheet_name).worksheets()
