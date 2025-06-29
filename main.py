@@ -249,12 +249,17 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topmana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def topmana(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
         tabs = client.open(sheet_name).worksheets()
@@ -314,12 +319,17 @@ async def topmana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
         tabs = client.open(sheet_name).worksheets()
@@ -378,12 +388,17 @@ async def topheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def toprssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def toprssheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
         tabs = client.open(sheet_name).worksheets()
@@ -554,12 +569,17 @@ async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topkills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def topkills(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
         tabs = client.open(sheet_name).worksheets()
@@ -625,12 +645,17 @@ async def topkills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topdeads(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def topdeads(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
         tabs = client.open(sheet_name).worksheets()
