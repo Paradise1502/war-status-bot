@@ -267,8 +267,8 @@ async def topmana(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
@@ -337,8 +337,8 @@ async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
@@ -406,8 +406,8 @@ async def toprssheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
@@ -587,8 +587,8 @@ async def topkills(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
         headers = data_latest[0]
@@ -663,8 +663,8 @@ async def topdeads(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest = sheets[-1]
-        previous = sheets[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
