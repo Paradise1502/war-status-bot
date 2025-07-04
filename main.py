@@ -1072,71 +1072,79 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
 @bot.command()
 async def bastion(ctx):
-    try:
-        season = "sos2"
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
-            await ctx.send("❌ Could not locate the 'sos2' sheet.")
-            return
+    allowed_channels = [1378735765827358791, 1383515877793595435]
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send("❌ Command not allowed here.")
+        return
 
-        tabs = client.open(sheet_name).worksheets()
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets in sos2 to compare.")
-            return
+    season = "sos2"
+    sheet_name = SEASON_SHEETS.get(season)
+    if not sheet_name:
+        await ctx.send("❌ Sheet not found.")
+        return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
+    tabs = client.open(sheet_name).worksheets()
+    if len(tabs) < 2:
+        await ctx.send("❌ Not enough sheets to compare.")
+        return
 
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
+    latest = tabs[-1]
+    previous = tabs[-2]
+    data_latest = latest.get_all_values()
+    data_prev = previous.get_all_values()
+    headers = data_latest[0]
 
-        def col_idx(name): return headers.index(name)
-        def to_int(val):
-            try:
-                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
-            except:
-                return 0
+    def col_idx(name): return headers.index(name)
+    def to_int(val):
+        try:
+            return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+        except:
+            return 0
 
-        id_idx = col_idx("lord_id")
-        name_idx = 1
-        alliance_idx = 3
-        server_idx = col_idx("home_server")
-        power_idx = col_idx("highest_power")
-        dead_idx = col_idx("units_dead")
+    id_idx = col_idx("lord_id")
+    name_idx = 1
+    alliance_idx = 3
+    server_idx = col_idx("home_server")
+    power_idx = col_idx("highest_power")
+    dead_idx = col_idx("units_dead")
 
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx and row[id_idx].strip()}
+    prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx and row[id_idx].strip()}
+    entries = []
 
-        rows = []
-        for row in data_latest[1:]:
-            if len(row) <= max(dead_idx, server_idx):
-                continue
+    for row in data_latest[1:]:
+        if len(row) <= max(dead_idx, server_idx):
+            continue
 
-            lid = row[id_idx].strip()
-            name = row[name_idx].strip()
-            alliance = row[alliance_idx].strip()
-            server = row[server_idx].strip()
-            power = to_int(row[power_idx])
-            dead_total = to_int(row[dead_idx])
+        lid = row[id_idx].strip()
+        name = row[name_idx].strip()
+        server = row[server_idx].strip()
+        power = to_int(row[power_idx])
+        total_dead = to_int(row[dead_idx])
 
-            if not (25000000 <= power <= 55000000):
-                continue
-            if server != "77":
-                continue
+        if not (25_000_000 <= power <= 55_000_000):
+            continue
+        if server != "77":
+            continue
+        if lid not in prev_map:
+            continue
 
-            prev_row = prev_map.get(lid)
-            if not prev_row:
-                continue
+        prev_dead = to_int(prev_map[lid][dead_idx])
+        dead_gain = total_dead - prev_dead
 
-            dead_prev = to_int(prev_row[dead_idx])
-            dead_gain = dead_total - dead_prev
+        entries.append((name, lid, power, dead_gain, total_dead))
 
-            rows.append(f"• {name} — {lid} — {power:,} — {dead_gain:,} / {dead_total:,}")
+    # Sort by power descending
+    entries.sort(key=lambda x: x[2], reverse=True)
 
-        rows.sort(key=lambda x: int(x.split("—")[-2].replace(",", "")), reverse=True)
+    header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
+    header += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
 
-        header = "🌋 Accounts between 25M and 55M Power (Server 77, SOS2):\n\n"
-        await send_long_message(ctx, header, rows)
+    rows = [
+        f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_dead:,}"
+        for name, lid, power, dead_gain, total_dead in entries
+    ]
+
+    await send_long_message(ctx, header, rows)
 
 import os
 TOKEN = os.getenv("TOKEN")
