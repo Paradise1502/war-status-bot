@@ -1092,51 +1092,51 @@ async def bastion(ctx):
         headers = data_latest[0]
 
         def col_idx(name): return headers.index(name)
-    def to_int(val):
-        try:
-            return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
-        except:
-            return 0
+        def to_int(val):
+            try:
+                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+            except:
+                return 0
 
-    id_idx = col_idx("lord_id")
-    name_idx = 1
-    alliance_idx = 3
-    server_idx = col_idx("home_server")
-    power_idx = col_idx("highest_power")
-    dead_idx = col_idx("units_dead")
+        id_idx = col_idx("lord_id")
+        name_idx = 1
+        alliance_idx = 3
+        server_idx = col_idx("home_server")
+        power_idx = col_idx("highest_power")
+        dead_idx = col_idx("units_dead")
 
-    prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx and row[id_idx].strip()}
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx and row[id_idx].strip()}
 
-    rows = []
-    for row in data_latest[1:]:
-        if len(row) <= max(dead_idx, server_idx):
-            continue
+        rows = []
+        for row in data_latest[1:]:
+            if len(row) <= max(dead_idx, server_idx):
+                continue
 
-        lid = row[id_idx].strip()
-        name = row[name_idx].strip()
-        alliance = row[alliance_idx].strip()
-        server = row[server_idx].strip()
-        power = to_int(row[power_idx])
-        dead_total = to_int(row[dead_idx])
+            lid = row[id_idx].strip()
+            name = row[name_idx].strip()
+            alliance = row[alliance_idx].strip()
+            server = row[server_idx].strip()
+            power = to_int(row[power_idx])
+            dead_total = to_int(row[dead_idx])
 
-        if not (25000000 <= power <= 55000000):
-            continue
-        if server != "77":
-            continue
+            if not (25000000 <= power <= 55000000):
+                continue
+            if server != "77":
+                continue
 
-        prev_row = prev_map.get(lid)
-        if not prev_row:
-            continue
+            prev_row = prev_map.get(lid)
+            if not prev_row:
+                continue
 
-        dead_prev = to_int(prev_row[dead_idx])
-        dead_gain = dead_total - dead_prev
+            dead_prev = to_int(prev_row[dead_idx])
+            dead_gain = dead_total - dead_prev
 
-        rows.append(f"• {name} — {lid} — {power:,} — {dead_gain:,} / {dead_total:,}")
+            rows.append(f"• {name} — {lid} — {power:,} — {dead_gain:,} / {dead_total:,}")
 
-    rows.sort(key=lambda x: int(x.split("—")[-2].replace(",", "")), reverse=True)
+        rows.sort(key=lambda x: int(x.split("—")[-2].replace(",", "")), reverse=True)
 
-    header = "🌋 Accounts between 25M and 55M Power (Server 77, SOS2):\n\n"
-    await send_long_message(ctx, header, rows)
+        header = "🌋 Accounts between 25M and 55M Power (Server 77, SOS2):\n\n"
+        await send_long_message(ctx, header, rows)
 
 import os
 TOKEN = os.getenv("TOKEN")
