@@ -1059,6 +1059,76 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def bastion(ctx):
+    try:
+        season = "sos2"
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send("❌ Could not locate the 'sos2' sheet.")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets in sos2 to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        def idx(col): return headers.index(col)
+        id_idx = idx("lord_id")
+        name_idx = 1
+        power_idx = idx("highest_power")
+        dead_idx = idx("units_dead")
+
+        def to_int(val):
+            try:
+                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+            except:
+                return 0
+
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx}
+        entries = []
+
+        for row in data_latest[1:]:
+            if len(row) <= dead_idx:
+                continue
+            lid = row[id_idx].strip()
+            name = row[name_idx].strip()
+            power = to_int(row[power_idx])
+            total_deads = to_int(row[dead_idx])
+            if 25_000_000 <= power <= 55_000_000:
+                prev_row = prev_map.get(lid)
+                if not prev_row:
+                    continue
+                dead_gain = total_deads - to_int(prev_row[dead_idx])
+                entries.append((name, lid, power, dead_gain, total_deads))
+
+        if not entries:
+            await ctx.send("✅ No accounts found between 25M and 55M power.")
+            return
+
+        entries.sort(key=lambda x: x[2], reverse=True)
+
+        message = "**🛡️ Bastion Accounts (25M–55M Power, Season: SOS2):**\n```"
+        message += f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead':<12}\n"
+        message += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}\n"
+
+        for name, lid, power, dead_gain, total_deads in entries:
+            message += f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_deads:<12,}\n"
+        message += "```"
+
+        for chunk in [message[i:i+1900] for i in range(0, len(message), 1900)]:
+            await ctx.send(chunk)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
