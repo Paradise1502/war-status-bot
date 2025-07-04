@@ -25,16 +25,28 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-# 🔧 PLACE THIS HERE — not inside any other command or function
-async def send_long_message(ctx, header: str, rows: list[str], chunk_size: int = 1900):
-    block = header
-    for row in rows:
-        if len(block) + len(row) + 1 > chunk_size:
-            await ctx.send(f"```{block}```")
-            block = header
-        block += row + "\n"
-    if block.strip():
-        await ctx.send(f"```{block}```")
+def clean_str(s):
+    # Replace weird spaces or wide glyphs to stabilize layout
+    return ''.join(c if 32 <= ord(c) <= 126 else '?' for c in s)
+
+def format_bastion_output(entries):
+    lines = []
+    header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}"
+    divider = f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
+    lines.append(header)
+    lines.append(divider)
+
+    for name, lid, power, dead_gain, total_dead in entries:
+        name = clean_str(name.strip())[:25]  # Trim long names
+        line = f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_dead:,}"
+        lines.append(line)
+    return lines
+
+async def send_long_message(ctx, header, data_lines, chunk_size=45):
+    chunks = [data_lines[i:i+chunk_size] for i in range(0, len(data_lines), chunk_size)]
+    for i, chunk in enumerate(chunks):
+        code_block = "```\n" + "\u200b\n".join(chunk) + "```"  # \u200b prevents top line being swallowed
+        await ctx.send(code_block)
 
 @bot.command()
 async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
@@ -1139,12 +1151,8 @@ async def bastion(ctx):
     header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
     header += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
 
-    rows = [
-        f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_dead:,}"
-        for name, lid, power, dead_gain, total_dead in entries
-    ]
-
-    await send_long_message(ctx, header, rows)
+    rows = format_bastion_output(entries)
+    await send_long_message(ctx, rows[0], rows[2:])  # skip header if you like, or send all
 
 import os
 TOKEN = os.getenv("TOKEN")
