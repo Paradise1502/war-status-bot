@@ -1061,10 +1061,6 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
 @bot.command()
 async def bastion(ctx):
-    allowed_channels = [1378735765827358791, 1383515877793595435]
-    if ctx.channel.id not in allowed_channels:
-        await ctx.send("❌ Command not allowed here.")
-        return
 
     season = "sos2"
     sheet_name = SEASON_SHEETS.get(season)
