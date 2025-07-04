@@ -1025,7 +1025,7 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
         def idx(col): return headers.index(col)
         id_idx = idx("lord_id")
         name_idx = 1
-        power_idx = headers.index("highest_power")
+        power_idx = headers.index("power")
 
         results = []
 
