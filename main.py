@@ -25,28 +25,6 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
-def clean_str(s):
-    return s.replace('\n', ' ').replace('\r', '').strip()
-
-def format_bastion_output(entries):
-    lines = []
-    header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}"
-    divider = f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
-    lines.append(header)
-    lines.append(divider)
-
-    for name, lid, power, dead_gain, total_dead in entries:
-        name = clean_str(name.strip())[:25]  # Trim long names
-        line = f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_dead:,}"
-        lines.append(line)
-    return lines
-
-async def send_long_message(ctx, header, data_lines, chunk_size=45):
-    chunks = [data_lines[i:i+chunk_size] for i in range(0, len(data_lines), chunk_size)]
-    for i, chunk in enumerate(chunks):
-        code_block = "```\n" + "\u200b\n".join(chunk) + "```"  # \u200b prevents top line being swallowed
-        await ctx.send(code_block)
-
 @bot.command()
 async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
@@ -1150,8 +1128,31 @@ async def bastion(ctx):
     header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
     header += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
 
-    lines = format_bastion_output(entries)
-    await send_long_message(ctx, lines)  # do NOT skip lines[0]
+    lines = [header]
+    for name, lid, power, dead_gain, total_dead in entries:
+        line = f"{name:<25} {lid:<12} {power:>15,} {dead_gain:>12,} {total_dead:>12,}"
+        lines.append(line)
+
+    await send_long_message(ctx, lines)
+
+def format_bastion_output(entries):
+    output = []
+    header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
+    header += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
+    output.append(header)
+    for name, lid, power, dead_gain, total_dead in entries:
+        output.append(f"{name:<25} {lid:<12} {power:>15,} {dead_gain:>12,} {total_dead:>12,}")
+    return output
+
+async def send_long_message(ctx, data_lines):
+    chunk = ""
+    for line in data_lines:
+        if len(chunk) + len(line) + 1 > 1990:
+            await ctx.send(f"```{chunk}```")
+            chunk = ""
+        chunk += line + "\n"
+    if chunk:
+        await ctx.send(f"```{chunk}```")
 
 import os
 TOKEN = os.getenv("TOKEN")
