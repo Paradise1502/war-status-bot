@@ -1085,6 +1085,7 @@ async def bastion(ctx):
         name_idx = 1
         power_idx = idx("highest_power")
         dead_idx = idx("units_dead")
+        server_idx = idx("home_server")
 
         def to_int(val):
             try:
@@ -1098,6 +1099,8 @@ async def bastion(ctx):
         for row in data_latest[1:]:
             if len(row) <= dead_idx:
                 continue
+            if row[server_idx].strip() != "77":
+                continue
             lid = row[id_idx].strip()
             name = row[name_idx].strip()
             power = to_int(row[power_idx])
@@ -1110,20 +1113,22 @@ async def bastion(ctx):
                 entries.append((name, lid, power, dead_gain, total_deads))
 
         if not entries:
-            await ctx.send("✅ No accounts found between 25M and 55M power.")
+            await ctx.send("✅ No matching bastion accounts found.")
             return
 
         entries.sort(key=lambda x: x[2], reverse=True)
 
-        message = "**🛡️ Bastion Accounts (25M–55M Power, Season: SOS2):**\n```"
-        message += f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead':<12}\n"
-        message += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}\n"
-
+        chunks = []
+        message = "**🛡️ Accounts between 25M and 55M Power (Server 77, SOS2):**\n"
         for name, lid, power, dead_gain, total_deads in entries:
-            message += f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_deads:<12,}\n"
-        message += "```"
+            line = f"• `{name}` — `{lid}` — **{power:,}** — 🩸 `{dead_gain:,}` / `{total_deads:,}`\n"
+            if len(message) + len(line) >= 1900:
+                chunks.append(message)
+                message = ""
+            message += line
+        chunks.append(message)
 
-        for chunk in [message[i:i+1900] for i in range(0, len(message), 1900)]:
+        for chunk in chunks:
             await ctx.send(chunk)
 
     except Exception as e:
