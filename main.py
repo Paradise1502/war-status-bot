@@ -1119,14 +1119,15 @@ async def bastion(ctx):
         entries.sort(key=lambda x: x[2], reverse=True)
 
         chunks = []
-        message = "**🛡️ Accounts between 25M and 55M Power (Server 77, SOS2):**\n"
+        message = "**🛡️ Accounts between 25M and 55M Power (Server 77, SOS2):**\n```"
+        message += f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
+        message += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}\n"
+
         for name, lid, power, dead_gain, total_deads in entries:
-            line = f"• `{name}` — `{lid}` — **{power:,}** — 🩸 `{dead_gain:,}` / `{total_deads:,}`\n"
-            if len(message) + len(line) >= 1900:
-                chunks.append(message)
-                message = ""
-            message += line
-        chunks.append(message)
+            message += f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_deads:,}\n"
+
+        message += "```"
+        await ctx.send(message)
 
         for chunk in chunks:
             await ctx.send(chunk)
