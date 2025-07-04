@@ -26,8 +26,7 @@ intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
 def clean_str(s):
-    # Replace weird spaces or wide glyphs to stabilize layout
-    return ''.join(c if 32 <= ord(c) <= 126 else '?' for c in s)
+    return s.replace('\n', ' ').replace('\r', '').strip()
 
 def format_bastion_output(entries):
     lines = []
@@ -1151,8 +1150,8 @@ async def bastion(ctx):
     header = f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
     header += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}"
 
-    rows = format_bastion_output(entries)
-    await send_long_message(ctx, rows[0], rows[2:])  # skip header if you like, or send all
+    lines = format_bastion_output(entries)
+    await send_long_message(ctx, lines)  # do NOT skip lines[0]
 
 import os
 TOKEN = os.getenv("TOKEN")
