@@ -1008,6 +1008,51 @@ async def lowperformer(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command()
+async def farms(ctx, season: str = DEFAULT_SEASON):
+    try:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        latest = tabs[-1]
+        data = latest.get_all_values()
+        headers = data[0]
+
+        def idx(col): return headers.index(col)
+        id_idx = idx("lord_id")
+        name_idx = 1
+        power_idx = headers.index("highest_power")
+
+        results = []
+
+        for row in data[1:]:
+            if len(row) <= power_idx:
+                continue
+            try:
+                power = int(row[power_idx].replace(",", "").strip()) if row[power_idx] not in ("", "-") else 0
+                if 15_000_000 <= power <= 25_000_000:
+                    name = row[name_idx].strip()
+                    lid = row[id_idx].strip()
+                    results.append(f"• {name} — `{lid}` — {power:,}")
+            except:
+                continue
+
+        if not results:
+            await ctx.send("✅ No accounts found between 15M and 25M power.")
+            return
+
+        # Send in chunks if needed
+        message = "**🌽 Accounts between 15M and 25M Power:**\n" + "\n".join(results)
+        for chunk in [message[i:i+1900] for i in range(0, len(message), 1900)]:
+            await ctx.send(chunk)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 import os
 TOKEN = os.getenv("TOKEN")
 
