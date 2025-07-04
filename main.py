@@ -1037,7 +1037,7 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
                 if 15_000_000 <= power <= 25_000_000:
                     name = row[name_idx].strip()
                     lid = row[id_idx].strip()
-                    results.append((name, lid, f"{power:,}"))
+                    results.append((name, lid, power))
             except:
                 continue
 
@@ -1047,13 +1047,12 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
         # Send in chunks if needed
         message = "**🌽 Accounts between 15M and 25M Power:**\n```"
-        for i in range(0, len(results), 3):
-            chunk = results[i:i+3]
-            line = ""
-            for entry in chunk:
-                name, lid, power = entry
-                line += f"{name:<18} {lid:<10} {power:<12}  "
-            message += line.rstrip() + "\n"
+        message += f"{'Name':<25} {'ID':<12} {'Power':<15}\n"
+        message += f"{'-'*25} {'-'*12} {'-'*15}\n"
+
+        for name, lid, power in results:
+            message += f"{name:<25} {lid:<12} {power:<15,}\n"
+
         message += "```"
         await ctx.send(message)
 
