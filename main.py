@@ -25,6 +25,17 @@ intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# 🔧 PLACE THIS HERE — not inside any other command or function
+async def send_long_message(ctx, header: str, rows: list[str], chunk_size: int = 1900):
+    block = header
+    for row in rows:
+        if len(block) + len(row) + 1 > chunk_size:
+            await ctx.send(f"```{block}```")
+            block = header
+        block += row + "\n"
+    if block.strip():
+        await ctx.send(f"```{block}```")
+
 @bot.command()
 async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
@@ -1080,60 +1091,52 @@ async def bastion(ctx):
         data_prev = previous.get_all_values()
         headers = data_latest[0]
 
-        def idx(col): return headers.index(col)
-        id_idx = idx("lord_id")
-        name_idx = 1
-        power_idx = idx("highest_power")
-        dead_idx = idx("units_dead")
-        server_idx = idx("home_server")
+        def col_idx(name): return headers.index(name)
+    def to_int(val):
+        try:
+            return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+        except:
+            return 0
 
-        def to_int(val):
-            try:
-                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
-            except:
-                return 0
+    id_idx = col_idx("lord_id")
+    name_idx = 1
+    alliance_idx = 3
+    server_idx = col_idx("home_server")
+    power_idx = col_idx("highest_power")
+    dead_idx = col_idx("units_dead")
 
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx}
-        entries = []
+    prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > dead_idx and row[id_idx].strip()}
 
-        for row in data_latest[1:]:
-            if len(row) <= dead_idx:
-                continue
-            if row[server_idx].strip() != "77":
-                continue
-            lid = row[id_idx].strip()
-            name = row[name_idx].strip()
-            power = to_int(row[power_idx])
-            total_deads = to_int(row[dead_idx])
-            if 25_000_000 <= power <= 55_000_000:
-                prev_row = prev_map.get(lid)
-                if not prev_row:
-                    continue
-                dead_gain = total_deads - to_int(prev_row[dead_idx])
-                entries.append((name, lid, power, dead_gain, total_deads))
+    rows = []
+    for row in data_latest[1:]:
+        if len(row) <= max(dead_idx, server_idx):
+            continue
 
-        if not entries:
-            await ctx.send("✅ No matching bastion accounts found.")
-            return
+        lid = row[id_idx].strip()
+        name = row[name_idx].strip()
+        alliance = row[alliance_idx].strip()
+        server = row[server_idx].strip()
+        power = to_int(row[power_idx])
+        dead_total = to_int(row[dead_idx])
 
-        entries.sort(key=lambda x: x[2], reverse=True)
+        if not (25000000 <= power <= 55000000):
+            continue
+        if server != "77":
+            continue
 
-        chunks = []
-        message = "**🛡️ Accounts between 25M and 55M Power (Server 77, SOS2):**\n```"
-        message += f"{'Name':<25} {'ID':<12} {'Power':<15} {'Dead Gain':<12} {'Total Dead'}\n"
-        message += f"{'-'*25} {'-'*12} {'-'*15} {'-'*12} {'-'*12}\n"
+        prev_row = prev_map.get(lid)
+        if not prev_row:
+            continue
 
-        for name, lid, power, dead_gain, total_deads in entries:
-            message += f"{name:<25} {lid:<12} {power:<15,} {dead_gain:<12,} {total_deads:,}\n"
+        dead_prev = to_int(prev_row[dead_idx])
+        dead_gain = dead_total - dead_prev
 
-        message += "```"
-        await ctx.send(message)
+        rows.append(f"• {name} — {lid} — {power:,} — {dead_gain:,} / {dead_total:,}")
 
-        for chunk in chunks:
-            await ctx.send(chunk)
+    rows.sort(key=lambda x: int(x.split("—")[-2].replace(",", "")), reverse=True)
 
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+    header = "🌋 Accounts between 25M and 55M Power (Server 77, SOS2):\n\n"
+    await send_long_message(ctx, header, rows)
 
 import os
 TOKEN = os.getenv("TOKEN")
