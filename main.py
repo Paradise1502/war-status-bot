@@ -1034,7 +1034,7 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
                 continue
             try:
                 power = int(row[power_idx].replace(",", "").strip()) if row[power_idx] not in ("", "-") else 0
-                if 15_000_000 <= power <= 25_000_000:
+                if 15_000_000 <= power <= 30_000_000:
                     name = row[name_idx].strip()
                     lid = row[id_idx].strip()
                     results.append((name, lid, power))
