@@ -1070,7 +1070,7 @@ async def team(ctx):
     if ctx.channel.id not in allowed_channels:
         return await ctx.send("❌ Use this command in <#1378735765827358791>.")
 
-    SHEET_NAME = "YOUR_TEMP_TEAM_SPREADSHEET"
+    SHEET_NAME = "teamscan"
     sheet = client.open(SHEET_NAME).sheet1
     data = sheet.get_all_values()
     headers = data[0]
