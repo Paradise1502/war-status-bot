@@ -1061,16 +1061,6 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-import discord
-from discord.ext import commands
-
-import discord
-from discord.ext import commands
-import gspread
-from utils import format_number  # assuming you have a function to format big numbers like 12000000 to 12.0M or 12.0B
-
-bot = commands.Bot(command_prefix='!')
-
 @bot.command()
 async def team(ctx):
     if ctx.channel.id not in [1378735765827358791, 1383515877793595435]:
