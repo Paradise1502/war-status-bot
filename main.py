@@ -15,9 +15,11 @@ client = gspread.authorize(creds)
 
 # Season sheet mapping
 SEASON_SHEETS = {
-    "sos2": "Call of Dragons - SoS2",
-    "hk1": "Call of Dragons - HK1"  # <- your new current sheet
+    "sos2": "old_sheet_name",
+    "hk1": "current_home_kingdom",
+    "teamscan": "teamscan",  # 👈 add this line
 }
+
 DEFAULT_SEASON = "hk1"
 
 # Now your bot setup
@@ -1055,6 +1057,65 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
         message += "```"
         await ctx.send(message)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
+async def team(ctx):
+    # Allow only in approved channels
+    allowed_channels = [1378735765827358791, 1383515877793595435]
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send("❌ Command not allowed here.")
+        return
+
+    sheet_name = "teamscan"
+    try:
+        ws = client.open(sheet_name).sheet1
+        data = ws.get_all_values()
+        headers = data[0]
+        rows = data[1:]
+
+        def to_int(val):
+            try:
+                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+            except:
+                return 0
+
+        idx = {k: i for i, k in enumerate(headers)}
+
+        def format_row(row):
+            return (
+                f"**{row[idx['top_alliance']]}**\n"
+                f"> 🧠 Top 300 Power: `{row[idx['top300_power']]:>15}`\n"
+                f"> 🎖️ Top 300 Merits: `{row[idx['top300_merits']]:>13}` ({row[idx['Merits/Top Pow']]})\n"
+                f"> ⚔️ Top 300 Kills: `{row[idx['top300_kills']]:>15}`\n"
+                f"> 💀 Top 300 Deads: `{row[idx['top300_deads']]:>14}`\n"
+                f"> ❤️ Top 300 Heals: `{row[idx['top300_heals']]:>14}`\n"
+                f"> 🧮 Total T5: `{row[idx['Total T5']]:>4}`\n"
+                f"> Distribution:\n"
+                f"   60-80M: `{row[idx['60-80M']]:>3}` | 80-100M: `{row[idx['80-100M']]:>3}` | "
+                f"100-125M: `{row[idx['100-125M']]:>3}`\n"
+                f"   125-150M: `{row[idx['125-150M']]:>3}` | 150-200M: `{row[idx['150-200M']]:>3}` | "
+                f"200M+: `{row[idx['Over 200M']]:>2}`\n"
+            )
+
+        def is_total(row):
+            return row[idx['top_alliance']].strip().lower() == 'totals'
+
+        entries = [r for r in rows if not is_total(r)]
+        total_row = next((r for r in rows if is_total(r)), None)
+
+        embed1 = discord.Embed(title="🏆 Team Power Overview", color=discord.Color.blue())
+        for row in entries:
+            embed1.add_field(name=f"{row[idx['top_alliance']]}", value=format_row(row), inline=False)
+
+        if total_row:
+            embed2 = discord.Embed(title="📊 Team Totals", color=discord.Color.green())
+            embed2.description = format_row(total_row)
+            await ctx.send(embeds=[embed1, embed2])
+        else:
+            await ctx.send(embed=embed1)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
