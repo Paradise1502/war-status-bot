@@ -1066,7 +1066,7 @@ from discord.ext import commands
 
 @bot.command()
 async def team(ctx):
-    allowed_channels = [1378735765827358791]
+    allowed_channels = [1378735765827358791, 1383515877793595435]
     if ctx.channel.id not in allowed_channels:
         return await ctx.send("❌ Use this command in <#1378735765827358791>.")
 
