@@ -17,7 +17,6 @@ client = gspread.authorize(creds)
 SEASON_SHEETS = {
     "sos2": "old_sheet_name",
     "hk1": "current_home_kingdom",
-    "teamscan": "teamscan",  # 👈 add this line
 }
 
 DEFAULT_SEASON = "hk1"
@@ -1060,130 +1059,6 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
-
-@bot.command()
-async def team(ctx):
-    if ctx.channel.id not in [1378735765827358791, 1383515877793595435]:
-        return await ctx.send("❌ This command is only allowed in the designated channel.")
-
-    # Open the spreadsheet
-    sheet = client.open("teamscan").sheet1
-    data = sheet.get_all_values()
-    headers = data[0]
-    rows = data[1:]
-
-    def to_int(x):
-        try:
-            return int(x.replace(",", ""))
-        except:
-            return 0
-
-    idx = {name: headers.index(name) for name in ["home_server", "lord_id", "power", "merits", "units_killed", "units_dead", "units_healed"]}
-
-    # Alliance mapping
-    server_to_name = {
-        "60": "ECHO",
-        "77": "MFD",
-        "435": "VW",
-        "73": "SVR"
-    }
-
-    alliances = {name: [] for name in server_to_name.values()}
-
-    # Categorize rows
-    for row in rows:
-        server = row[idx["home_server"]].strip()
-        if server not in server_to_name:
-            continue
-
-        name = server_to_name[server]
-        power = to_int(row[idx["power"]])
-        merits = to_int(row[idx["merits"]])
-        kills = to_int(row[idx["units_killed"]])
-        deads = to_int(row[idx["units_dead"]])
-        heals = to_int(row[idx["units_healed"]])
-
-        alliances[name].append({
-            "power": power,
-            "merits": merits,
-            "kills": kills,
-            "deads": deads,
-            "heals": heals
-        })
-
-    def top_entries(entries, key):
-        return sorted(entries, key=lambda x: x[key], reverse=True)[:300]
-
-    def sum_field(entries, field):
-        return sum(x[field] for x in entries)
-
-    overview_lines = []
-    breakdown_lines = []
-
-    overview_lines.append("| Alliance | Total Power | Fighters | T5 Count | Avg Power |")
-    overview_lines.append("|----------|--------------|----------|----------|------------|")
-
-    breakdown_lines.append("| Alliance | Top Power | Merits | M/P % | Kills | Deads | Heals |")
-    breakdown_lines.append("|----------|------------|---------|--------|--------|--------|--------|")
-
-    total_fighters = 0
-    total_t5 = 0
-    total_power = 0
-    total_avg_power = 0
-
-    total_top_power = 0
-    total_top_merits = 0
-    total_top_kills = 0
-    total_top_deads = 0
-    total_top_heals = 0
-
-    for name, members in alliances.items():
-        power_15m = [x for x in members if x["power"] >= 15_000_000]
-        fighters = [x for x in members if x["power"] >= 50_000_000 and x["merits"] / x["power"] >= 0.03]
-        t5 = [x for x in members if x["power"] >= 65_000_000]
-
-        total_power_15m = sum_field(power_15m, "power")
-        avg_power = round(total_power_15m / len(fighters), 2) if fighters else 0
-
-        top_power = top_entries(power_15m, "power")
-        top_merits = top_entries(power_15m, "merits")
-        top_kills = top_entries(power_15m, "kills")
-        top_deads = top_entries(power_15m, "deads")
-        top_heals = top_entries(power_15m, "heals")
-
-        sum_top_power = sum_field(top_power, "power")
-        sum_top_merits = sum_field(top_merits, "merits")
-        sum_top_kills = sum_field(top_kills, "kills")
-        sum_top_deads = sum_field(top_deads, "deads")
-        sum_top_heals = sum_field(top_heals, "heals")
-
-        mp_ratio = (sum_top_merits / sum_top_power * 100) if sum_top_power else 0
-
-        overview_lines.append(f"| {name:<8} | {format_number(total_power_15m):>10} | {len(fighters):>8} | {len(t5):>8} | {format_number(avg_power)} |")
-        breakdown_lines.append(f"| {name:<8} | {format_number(sum_top_power):>8} | {format_number(sum_top_merits):>6} | {mp_ratio:>6.2f}% | {format_number(sum_top_kills):>6} | {format_number(sum_top_deads):>6} | {format_number(sum_top_heals):>6} |")
-
-        total_fighters += len(fighters)
-        total_t5 += len(t5)
-        total_power += total_power_15m
-        total_avg_power += avg_power
-
-        total_top_power += sum_top_power
-        total_top_merits += sum_top_merits
-        total_top_kills += sum_top_kills
-        total_top_deads += sum_top_deads
-        total_top_heals += sum_top_heals
-
-    overview_lines.append("|----------|--------------|----------|----------|------------|")
-    overview_lines.append(f"| TOTAL    | {format_number(total_power):>10} | {total_fighters:>8} | {total_t5:>8} | {format_number(total_power / total_fighters)} |")
-
-    breakdown_lines.append("|----------|------------|---------|--------|--------|--------|--------|")
-    breakdown_lines.append(f"| TOTAL    | {format_number(total_top_power):>8} | {format_number(total_top_merits):>6} | {(total_top_merits / total_top_power * 100):>6.2f}% | {format_number(total_top_kills):>6} | {format_number(total_top_deads):>6} | {format_number(total_top_heals):>6} |")
-
-    embed1 = discord.Embed(title="📊 Team Power Overview", description="```\n" + "\n".join(overview_lines) + "\n```", color=0x00b0f4)
-    embed2 = discord.Embed(title="📈 Top 300 Breakdown", description="```\n" + "\n".join(breakdown_lines) + "\n```", color=0x00ff4c)
-
-    await ctx.send(embed=embed1)
-    await ctx.send(embed=embed2)
         
 @bot.command()
 async def bastion(ctx):
