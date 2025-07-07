@@ -1064,93 +1064,134 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 import discord
 from discord.ext import commands
 
+import discord
+from discord.ext import commands
+import gspread
+from utils import format_number  # assuming you have a function to format big numbers like 12000000 to 12.0M or 12.0B
+
+bot = commands.Bot(command_prefix='!')
+
 @bot.command()
 async def team(ctx):
-    allowed_channels = [1378735765827358791, 1383515877793595435]
-    if ctx.channel.id not in allowed_channels:
-        return await ctx.send("❌ Use this command in <#1378735765827358791>.")
+    if ctx.channel.id not in [1378735765827358791, 1383515877793595435]:
+        return await ctx.send("❌ This command is only allowed in the designated channel.")
 
-    SHEET_NAME = "teamscan"
-    sheet = client.open(SHEET_NAME).sheet1
+    # Open the spreadsheet
+    sheet = client.open("teamscan").sheet1
     data = sheet.get_all_values()
     headers = data[0]
     rows = data[1:]
 
-    def to_int(val):
+    def to_int(x):
         try:
-            return int(val.replace(",", "").strip()) if val else 0
+            return int(x.replace(",", ""))
         except:
             return 0
 
-    idx = {k: i for i, k in enumerate(headers)}
+    idx = {name: headers.index(name) for name in ["home_server", "lord_id", "power", "merits", "units_killed", "units_dead", "units_healed"]}
 
-    alliance_map = {"60": "ECHO", "77": "MFD", "435": "VW", "73": "SVR"}
-    alliance_data = {tag: [] for tag in alliance_map.values()}
+    # Alliance mapping
+    server_to_name = {
+        "60": "ECHO",
+        "77": "MFD",
+        "435": "VW",
+        "73": "SVR"
+    }
 
+    alliances = {name: [] for name in server_to_name.values()}
+
+    # Categorize rows
     for row in rows:
-        try:
-            power = to_int(row[idx["power"]])
-            if power < 15_000_000:
-                continue
-            server = row[idx["home_server"]].strip()
-            name = alliance_map.get(server)
-            if not name:
-                continue
-            alliance_data[name].append(row)
-        except:
+        server = row[idx["home_server"]].strip()
+        if server not in server_to_name:
             continue
 
-    # Embed 1 data
-    embed1_data = []
-    total_power = 0
+        name = server_to_name[server]
+        power = to_int(row[idx["power"]])
+        merits = to_int(row[idx["merits"]])
+        kills = to_int(row[idx["units_killed"]])
+        deads = to_int(row[idx["units_dead"]])
+        heals = to_int(row[idx["units_healed"]])
+
+        alliances[name].append({
+            "power": power,
+            "merits": merits,
+            "kills": kills,
+            "deads": deads,
+            "heals": heals
+        })
+
+    def top_entries(entries, key):
+        return sorted(entries, key=lambda x: x[key], reverse=True)[:300]
+
+    def sum_field(entries, field):
+        return sum(x[field] for x in entries)
+
+    overview_lines = []
+    breakdown_lines = []
+
+    overview_lines.append("| Alliance | Total Power | Fighters | T5 Count | Avg Power |")
+    overview_lines.append("|----------|--------------|----------|----------|------------|")
+
+    breakdown_lines.append("| Alliance | Top Power | Merits | M/P % | Kills | Deads | Heals |")
+    breakdown_lines.append("|----------|------------|---------|--------|--------|--------|--------|")
+
     total_fighters = 0
     total_t5 = 0
-    for name, members in alliance_data.items():
-        power_sum = sum(to_int(row[idx["power"]]) for row in members)
-        fighter_count = sum(1 for row in members if to_int(row[idx["power"]]) >= 50_000_000)
-        t5_count = sum(1 for row in members if to_int(row[idx["power"]]) >= 65_000_000)
-        avg_power = power_sum / fighter_count if fighter_count > 0 else 0
-        total_power += power_sum
-        total_fighters += len(members)
-        total_t5 += fighter_count
-        embed1_data.append((name, power_sum, len(members), fighter_count, avg_power))
+    total_power = 0
+    total_avg_power = 0
 
-    # Embed 2 data
-    embed2_data = []
-    for name, members in alliance_data.items():
-        top_members = sorted(members, key=lambda r: to_int(r[idx["power"]]), reverse=True)[:300]
-        tp = sum(to_int(r[idx["power"]]) for r in top_members)
-        merits = sum(to_int(r[idx["merits"]]) for r in top_members)
-        kills = sum(to_int(r[idx["units_killed"]]) for r in top_members)
-        deads = sum(to_int(r[idx["units_dead"]]) for r in top_members)
-        heals = sum(to_int(r[idx["units_healed"]]) for r in top_members)
-        ratio = (merits / tp * 100) if tp else 0
-        embed2_data.append((name, tp, merits, ratio, kills, deads, heals))
+    total_top_power = 0
+    total_top_merits = 0
+    total_top_kills = 0
+    total_top_deads = 0
+    total_top_heals = 0
 
-    def fnum(n): return f"{n/1_000_000_000:.2f}B" if n >= 1e9 else f"{n/1_000_000:.2f}M"
+    for name, members in alliances.items():
+        power_15m = [x for x in members if x["power"] >= 15_000_000]
+        fighters = [x for x in members if x["power"] >= 50_000_000 and x["merits"] / x["power"] >= 0.03]
+        t5 = [x for x in members if x["power"] >= 65_000_000]
 
-    table1 = "| Alliance | Total Power | Fighters | TS Count | Avg Power |\n"
-    table1 += "|---------|-------------|----------|-----------|-----------|\n"
-    for name, tp, fc, tsc, ap in embed1_data:
-        table1 += f"| {name:<7} | {fnum(tp):>11} | {fc:^8} | {tsc:^9} | {fnum(ap):>9} |\n"
-    table1 += "|---------|-------------|----------|-----------|-----------|\n"
-    table1 += f"| TOTAL   | {fnum(total_power):>11} | {total_fighters:^8} | {total_t5:^9} | {fnum(total_power/total_t5):>9} |"
+        total_power_15m = sum_field(power_15m, "power")
+        avg_power = round(total_power_15m / len(fighters), 2) if fighters else 0
 
-    table2 = "| Alliance | Top Power | Merits | M/P % | Kills | Deads | Heals |\n"
-    table2 += "|---------|-----------|--------|-------|--------|--------|--------|\n"
-    tot_tp = tot_m = tot_k = tot_d = tot_h = 0
-    for name, tp, m, ratio, k, d, h in embed2_data:
-        table2 += f"| {name:<7} | {fnum(tp):>8} | {fnum(m):>6} | {ratio:>5.2f}% | {fnum(k):>6} | {fnum(d):>6} | {fnum(h):>6} |\n"
-        tot_tp += tp
-        tot_m += m
-        tot_k += k
-        tot_d += d
-        tot_h += h
-    table2 += "|---------|-----------|--------|-------|--------|--------|--------|\n"
-    table2 += f"| TOTAL   | {fnum(tot_tp):>8} | {fnum(tot_m):>6} | {(tot_m / tot_tp * 100):>5.2f}% | {fnum(tot_k):>6} | {fnum(tot_d):>6} | {fnum(tot_h):>6} |"
+        top_power = top_entries(power_15m, "power")
+        top_merits = top_entries(power_15m, "merits")
+        top_kills = top_entries(power_15m, "kills")
+        top_deads = top_entries(power_15m, "deads")
+        top_heals = top_entries(power_15m, "heals")
 
-    embed1 = discord.Embed(title="📊 Team Power Overview", description=f"```mathematica\n{table1}```", color=discord.Color.blue())
-    embed2 = discord.Embed(title="📈 Top 300 Breakdown", description=f"```mathematica\n{table2}```", color=discord.Color.green())
+        sum_top_power = sum_field(top_power, "power")
+        sum_top_merits = sum_field(top_merits, "merits")
+        sum_top_kills = sum_field(top_kills, "kills")
+        sum_top_deads = sum_field(top_deads, "deads")
+        sum_top_heals = sum_field(top_heals, "heals")
+
+        mp_ratio = (sum_top_merits / sum_top_power * 100) if sum_top_power else 0
+
+        overview_lines.append(f"| {name:<8} | {format_number(total_power_15m):>10} | {len(fighters):>8} | {len(t5):>8} | {format_number(avg_power)} |")
+        breakdown_lines.append(f"| {name:<8} | {format_number(sum_top_power):>8} | {format_number(sum_top_merits):>6} | {mp_ratio:>6.2f}% | {format_number(sum_top_kills):>6} | {format_number(sum_top_deads):>6} | {format_number(sum_top_heals):>6} |")
+
+        total_fighters += len(fighters)
+        total_t5 += len(t5)
+        total_power += total_power_15m
+        total_avg_power += avg_power
+
+        total_top_power += sum_top_power
+        total_top_merits += sum_top_merits
+        total_top_kills += sum_top_kills
+        total_top_deads += sum_top_deads
+        total_top_heals += sum_top_heals
+
+    overview_lines.append("|----------|--------------|----------|----------|------------|")
+    overview_lines.append(f"| TOTAL    | {format_number(total_power):>10} | {total_fighters:>8} | {total_t5:>8} | {format_number(total_power / total_fighters)} |")
+
+    breakdown_lines.append("|----------|------------|---------|--------|--------|--------|--------|")
+    breakdown_lines.append(f"| TOTAL    | {format_number(total_top_power):>8} | {format_number(total_top_merits):>6} | {(total_top_merits / total_top_power * 100):>6.2f}% | {format_number(total_top_kills):>6} | {format_number(total_top_deads):>6} | {format_number(total_top_heals):>6} |")
+
+    embed1 = discord.Embed(title="📊 Team Power Overview", description="```\n" + "\n".join(overview_lines) + "\n```", color=0x00b0f4)
+    embed2 = discord.Embed(title="📈 Top 300 Breakdown", description="```\n" + "\n".join(breakdown_lines) + "\n```", color=0x00ff4c)
+
     await ctx.send(embed=embed1)
     await ctx.send(embed=embed2)
         
