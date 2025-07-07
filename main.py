@@ -1063,7 +1063,6 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
 @bot.command()
 async def team(ctx):
-    # Allow only in approved channels
     allowed_channels = [1378735765827358791, 1383515877793595435]
     if ctx.channel.id not in allowed_channels:
         await ctx.send("❌ Command not allowed here.")
@@ -1084,42 +1083,67 @@ async def team(ctx):
 
         idx = {k: i for i, k in enumerate(headers)}
 
-        def format_row(row):
-            return (
-                f"**{row[idx['top_alliance']]}**\n"
-                f"> 🧠 Top 300 Power: `{row[idx['top300_power']]:>15}`\n"
-                f"> 🎖️ Top 300 Merits: `{row[idx['top300_merits']]:>13}` ({row[idx['Merits/Top Pow']]})\n"
-                f"> ⚔️ Top 300 Kills: `{row[idx['top300_kills']]:>15}`\n"
-                f"> 💀 Top 300 Deads: `{row[idx['top300_deads']]:>14}`\n"
-                f"> ❤️ Top 300 Heals: `{row[idx['top300_heals']]:>14}`\n"
-                f"> 🧮 Total T5: `{row[idx['Total T5']]:>4}`\n"
-                f"> Distribution:\n"
-                f"   60-80M: `{row[idx['60-80M']]:>3}` | 80-100M: `{row[idx['80-100M']]:>3}` | "
-                f"100-125M: `{row[idx['100-125M']]:>3}`\n"
-                f"   125-150M: `{row[idx['125-150M']]:>3}` | 150-200M: `{row[idx['150-200M']]:>3}` | "
-                f"200M+: `{row[idx['Over 200M']]:>2}`\n"
+        server_map = {
+            "60": "ECHO",
+            "73": "SVR",
+            "77": "MFD",
+            "435": "VW",
+        }
+
+        metrics = {
+            "Power": "power",
+            "Merits": "merits",
+            "Kills": "units_killed",
+            "Deads": "units_dead",
+            "Heals": "units_healed"
+        }
+
+        # Sort and collect top 300 by metric
+        top_data = {key: [] for key in metrics}
+        for key, col in metrics.items():
+            col_data = sorted(
+                [(row[idx["home_server"]], to_int(row[idx[col]])) for row in rows if len(row) > idx[col] and row[idx["home_server"]] in server_map],
+                key=lambda x: x[1], reverse=True
+            )[:300]
+            for server, val in col_data:
+                top_data[key].append((server, val))
+
+        summary = {}
+        for server in server_map:
+            name = server_map[server]
+            summary[name] = {}
+            for metric in metrics:
+                total = sum(val for s, val in top_data[metric] if s == server)
+                summary[name][metric] = total
+
+        # Calculate Merits/Power %
+        for name in summary:
+            power = summary[name]["Power"] or 1
+            merits = summary[name]["Merits"]
+            ratio = (merits / power) * 100
+            summary[name]["Merits/Power"] = f"{ratio:.2f}%"
+
+        # Create Embed
+        embed = discord.Embed(title="📊 Top 300 Stats by Alliance", color=discord.Color.purple())
+        for name in summary:
+            s = summary[name]
+            embed.add_field(
+                name=name,
+                value=(
+                    f"🧠 Power: `{s['Power']:,}`\n"
+                    f"🎖️ Merits: `{s['Merits']:,}` ({s['Merits/Power']})\n"
+                    f"⚔️ Kills: `{s['Kills']:,}`\n"
+                    f"💀 Deads: `{s['Deads']:,}`\n"
+                    f"❤️ Heals: `{s['Heals']:,}`"
+                ),
+                inline=False
             )
 
-        def is_total(row):
-            return row[idx['top_alliance']].strip().lower() == 'totals'
-
-        entries = [r for r in rows if not is_total(r)]
-        total_row = next((r for r in rows if is_total(r)), None)
-
-        embed1 = discord.Embed(title="🏆 Team Power Overview", color=discord.Color.blue())
-        for row in entries:
-            embed1.add_field(name=f"{row[idx['top_alliance']]}", value=format_row(row), inline=False)
-
-        if total_row:
-            embed2 = discord.Embed(title="📊 Team Totals", color=discord.Color.green())
-            embed2.description = format_row(total_row)
-            await ctx.send(embeds=[embed1, embed2])
-        else:
-            await ctx.send(embed=embed1)
+        await ctx.send(embed=embed)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
-
+        
 @bot.command()
 async def bastion(ctx):
 
