@@ -1089,7 +1089,7 @@ async def team(ctx):
             return 0
 
     h_id, h_name, h_server = idx("lord_id"), idx("name"), idx("home_server")
-    h_power, h_merits, h_kills, h_deads, h_heals = idx("power"), idx("merits"), idx("kills"), idx("units_dead"), idx("units_healed")
+    h_power, h_merits, h_kills, h_deads, h_heals = idx("power"), idx("merits"), idx("units_killed"), idx("units_dead"), idx("units_healed")
 
     server_map = {"60": "ECHO", "73": "SVR", "77": "MFD", "435": "VW"}
     stats = {}
