@@ -1061,88 +1061,96 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+import discord
+from discord.ext import commands
+
 @bot.command()
 async def team(ctx):
-    allowed_channels = [1378735765827358791, 1383515877793595435]
+    allowed_channels = [1378735765827358791]
     if ctx.channel.id not in allowed_channels:
-        await ctx.send("❌ Command not allowed here.")
-        return
+        return await ctx.send("❌ Use this command in <#1378735765827358791>.")
 
-    sheet_name = "teamscan"  # Replace with actual name
-    try:
-        sheet = client.open(sheet_name).sheet1
-        data = sheet.get_all_values()
-    except Exception as e:
-        await ctx.send(f"❌ Could not load sheet: {e}")
-        return
-
+    SHEET_NAME = "YOUR_TEMP_TEAM_SPREADSHEET"
+    sheet = client.open(SHEET_NAME).sheet1
+    data = sheet.get_all_values()
     headers = data[0]
     rows = data[1:]
-    
-    def idx(col):
-        return headers.index(col)
 
     def to_int(val):
         try:
-            return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+            return int(val.replace(",", "").strip()) if val else 0
         except:
             return 0
 
-    h_id, h_name, h_server = idx("lord_id"), idx("name"), idx("home_server")
-    h_power, h_merits, h_kills, h_deads, h_heals = idx("power"), idx("merits"), idx("units_killed"), idx("units_dead"), idx("units_healed")
+    idx = {k: i for i, k in enumerate(headers)}
 
-    server_map = {"60": "ECHO", "73": "SVR", "77": "MFD", "435": "VW"}
-    stats = {}
+    alliance_map = {"60": "ECHO", "77": "MFD", "435": "VW", "73": "SVR"}
+    alliance_data = {tag: [] for tag in alliance_map.values()}
+
     for row in rows:
-        if len(row) <= max(h_power, h_server):
+        try:
+            power = to_int(row[idx["power"]])
+            if power < 15_000_000:
+                continue
+            server = row[idx["home_server"]].strip()
+            name = alliance_map.get(server)
+            if not name:
+                continue
+            alliance_data[name].append(row)
+        except:
             continue
 
-        server = row[h_server].strip()
-        if server not in server_map:
-            continue
+    # Embed 1 data
+    embed1_data = []
+    total_power = 0
+    total_fighters = 0
+    total_t5 = 0
+    for name, members in alliance_data.items():
+        power_sum = sum(to_int(row[idx["power"]]) for row in members)
+        fighter_count = sum(1 for row in members if to_int(row[idx["power"]]) >= 50_000_000)
+        t5_count = sum(1 for row in members if to_int(row[idx["power"]]) >= 65_000_000)
+        avg_power = power_sum / fighter_count if fighter_count > 0 else 0
+        total_power += power_sum
+        total_fighters += len(members)
+        total_t5 += fighter_count
+        embed1_data.append((name, power_sum, len(members), fighter_count, avg_power))
 
-        if server not in stats:
-            stats[server] = []
+    # Embed 2 data
+    embed2_data = []
+    for name, members in alliance_data.items():
+        top_members = sorted(members, key=lambda r: to_int(r[idx["power"]]), reverse=True)[:300]
+        tp = sum(to_int(r[idx["power"]]) for r in top_members)
+        merits = sum(to_int(r[idx["merits"]]) for r in top_members)
+        kills = sum(to_int(r[idx["units_killed"]]) for r in top_members)
+        deads = sum(to_int(r[idx["units_dead"]]) for r in top_members)
+        heals = sum(to_int(r[idx["units_healed"]]) for r in top_members)
+        ratio = (merits / tp * 100) if tp else 0
+        embed2_data.append((name, tp, merits, ratio, kills, deads, heals))
 
-        stats[server].append({
-            "power": to_int(row[h_power]),
-            "merits": to_int(row[h_merits]),
-            "kills": to_int(row[h_kills]),
-            "deads": to_int(row[h_deads]),
-            "heals": to_int(row[h_heals])
-        })
+    def fnum(n): return f"{n/1_000_000_000:.2f}B" if n >= 1e9 else f"{n/1_000_000:.2f}M"
 
-    embeds = []
-    sorted_stats = {}
-    for server, rows in stats.items():
-        sorted_stats[server] = sorted(rows, key=lambda x: x["power"], reverse=True)[:300]
+    table1 = "| Alliance | Total Power | Fighters | TS Count | Avg Power |\n"
+    table1 += "|---------|-------------|----------|-----------|-----------|\n"
+    for name, tp, fc, tsc, ap in embed1_data:
+        table1 += f"| {name:<7} | {fnum(tp):>11} | {fc:^8} | {tsc:^9} | {fnum(ap):>9} |\n"
+    table1 += "|---------|-------------|----------|-----------|-----------|\n"
+    table1 += f"| TOTAL   | {fnum(total_power):>11} | {total_fighters:^8} | {total_t5:^9} | {fnum(total_power/total_t5):>9} |"
 
-    embed1 = discord.Embed(title="📊 Top 300 Stats by Alliance", color=0x3498db)
-    embed2 = discord.Embed(color=0x3498db)
+    table2 = "| Alliance | Top Power | Merits | M/P % | Kills | Deads | Heals |\n"
+    table2 += "|---------|-----------|--------|-------|--------|--------|--------|\n"
+    tot_tp = tot_m = tot_k = tot_d = tot_h = 0
+    for name, tp, m, ratio, k, d, h in embed2_data:
+        table2 += f"| {name:<7} | {fnum(tp):>8} | {fnum(m):>6} | {ratio:>5.2f}% | {fnum(k):>6} | {fnum(d):>6} | {fnum(h):>6} |\n"
+        tot_tp += tp
+        tot_m += m
+        tot_k += k
+        tot_d += d
+        tot_h += h
+    table2 += "|---------|-----------|--------|-------|--------|--------|--------|\n"
+    table2 += f"| TOTAL   | {fnum(tot_tp):>8} | {fnum(tot_m):>6} | {(tot_m / tot_tp * 100):>5.2f}% | {fnum(tot_k):>6} | {fnum(tot_d):>6} | {fnum(tot_h):>6} |"
 
-    for i, server in enumerate(["60", "73", "77", "435"]):
-        tag = server_map.get(server, server)
-        group = sorted_stats.get(server, [])
-        
-        total_power = sum(x["power"] for x in group)
-        total_merits = sum(x["merits"] for x in group)
-        total_kills = sum(x["kills"] for x in group)
-        total_deads = sum(x["deads"] for x in group)
-        total_heals = sum(x["heals"] for x in group)
-
-        merit_ratio = f" ({total_merits / total_power * 100:.2f}%)" if total_power else ""
-        text = (
-            f"<:power:1140260290071422996> **Power:** {total_power:,}\n"
-            f"<:merit:1140260330176577617> **Merits:** {total_merits:,}{merit_ratio}\n"
-            f"<:kills:1140260374687211580> **Kills:** {total_kills:,}\n"
-            f"💀 **Deads:** {total_deads:,}\n"
-            f"❤️ **Heals:** {total_heals:,}"
-        )
-        if i < 2:
-            embed1.add_field(name=tag, value=text, inline=False)
-        else:
-            embed2.add_field(name=tag, value=text, inline=False)
-
+    embed1 = discord.Embed(title="📊 Team Power Overview", description=f"```mathematica\n{table1}```", color=discord.Color.blue())
+    embed2 = discord.Embed(title="📈 Top 300 Breakdown", description=f"```mathematica\n{table2}```", color=discord.Color.green())
     await ctx.send(embed=embed1)
     await ctx.send(embed=embed2)
         
