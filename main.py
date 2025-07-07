@@ -15,10 +15,9 @@ client = gspread.authorize(creds)
 
 # Season sheet mapping
 SEASON_SHEETS = {
-    "sos2": "old_sheet_name",
-    "hk1": "current_home_kingdom",
+    "sos2": "Call of Dragons - SoS2",
+    "hk1": "Call of Dragons - HK1"  # <- your new current sheet
 }
-
 DEFAULT_SEASON = "hk1"
 
 # Now your bot setup
@@ -1059,7 +1058,7 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
-        
+
 @bot.command()
 async def bastion(ctx):
 
