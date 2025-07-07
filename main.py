@@ -1068,81 +1068,83 @@ async def team(ctx):
         await ctx.send("❌ Command not allowed here.")
         return
 
-    sheet_name = "teamscan"
+    sheet_name = "teamscan"  # Replace with actual name
     try:
-        ws = client.open(sheet_name).sheet1
-        data = ws.get_all_values()
-        headers = data[0]
-        rows = data[1:]
-
-        def to_int(val):
-            try:
-                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
-            except:
-                return 0
-
-        idx = {k: i for i, k in enumerate(headers)}
-
-        server_map = {
-            "60": "ECHO",
-            "73": "SVR",
-            "77": "MFD",
-            "435": "VW",
-        }
-
-        metrics = {
-            "Power": "power",
-            "Merits": "merits",
-            "Kills": "units_killed",
-            "Deads": "units_dead",
-            "Heals": "units_healed"
-        }
-
-        # Sort and collect top 300 by metric
-        top_data = {key: [] for key in metrics}
-        for key, col in metrics.items():
-            col_data = sorted(
-                [(row[idx["home_server"]], to_int(row[idx[col]])) for row in rows if len(row) > idx[col] and row[idx["home_server"]] in server_map],
-                key=lambda x: x[1], reverse=True
-            )[:300]
-            for server, val in col_data:
-                top_data[key].append((server, val))
-
-        summary = {}
-        for server in server_map:
-            name = server_map[server]
-            summary[name] = {}
-            for metric in metrics:
-                total = sum(val for s, val in top_data[metric] if s == server)
-                summary[name][metric] = total
-
-        # Calculate Merits/Power %
-        for name in summary:
-            power = summary[name]["Power"] or 1
-            merits = summary[name]["Merits"]
-            ratio = (merits / power) * 100
-            summary[name]["Merits/Power"] = f"{ratio:.2f}%"
-
-        # Create Embed
-        embed = discord.Embed(title="📊 Top 300 Stats by Alliance", color=discord.Color.purple())
-        for name in summary:
-            s = summary[name]
-            embed.add_field(
-                name=name,
-                value=(
-                    f"🧠 Power: `{s['Power']:,}`\n"
-                    f"🎖️ Merits: `{s['Merits']:,}` ({s['Merits/Power']})\n"
-                    f"⚔️ Kills: `{s['Kills']:,}`\n"
-                    f"💀 Deads: `{s['Deads']:,}`\n"
-                    f"❤️ Heals: `{s['Heals']:,}`"
-                ),
-                inline=False
-            )
-
-        await ctx.send(embed=embed)
-
+        sheet = client.open(sheet_name).sheet1
+        data = sheet.get_all_values()
     except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+        await ctx.send(f"❌ Could not load sheet: {e}")
+        return
+
+    headers = data[0]
+    rows = data[1:]
+    
+    def idx(col):
+        return headers.index(col)
+
+    def to_int(val):
+        try:
+            return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+        except:
+            return 0
+
+    h_id, h_name, h_server = idx("lord_id"), idx("name"), idx("home_server")
+    h_power, h_merits, h_kills, h_deads, h_heals = idx("power"), idx("merits"), idx("kills"), idx("units_dead"), idx("units_healed")
+
+    server_map = {"60": "ECHO", "73": "SVR", "77": "MFD", "435": "VW"}
+    stats = {}
+    for row in rows:
+        if len(row) <= max(h_power, h_server):
+            continue
+
+        server = row[h_server].strip()
+        if server not in server_map:
+            continue
+
+        if server not in stats:
+            stats[server] = []
+
+        stats[server].append({
+            "power": to_int(row[h_power]),
+            "merits": to_int(row[h_merits]),
+            "kills": to_int(row[h_kills]),
+            "deads": to_int(row[h_deads]),
+            "heals": to_int(row[h_heals])
+        })
+
+    embeds = []
+    sorted_stats = {}
+    for server, rows in stats.items():
+        sorted_stats[server] = sorted(rows, key=lambda x: x["power"], reverse=True)[:300]
+
+    embed1 = discord.Embed(title="📊 Top 300 Stats by Alliance", color=0x3498db)
+    embed2 = discord.Embed(color=0x3498db)
+
+    for i, server in enumerate(["60", "73", "77", "435"]):
+        tag = server_map.get(server, server)
+        group = sorted_stats.get(server, [])
+        
+        total_power = sum(x["power"] for x in group)
+        total_merits = sum(x["merits"] for x in group)
+        total_kills = sum(x["kills"] for x in group)
+        total_deads = sum(x["deads"] for x in group)
+        total_heals = sum(x["heals"] for x in group)
+
+        merit_ratio = f" ({total_merits / total_power * 100:.2f}%)" if total_power else ""
+        text = (
+            f"<:power:1140260290071422996> **Power:** {total_power:,}\n"
+            f"<:merit:1140260330176577617> **Merits:** {total_merits:,}{merit_ratio}\n"
+            f"<:kills:1140260374687211580> **Kills:** {total_kills:,}\n"
+            f"💀 **Deads:** {total_deads:,}\n"
+            f"❤️ **Heals:** {total_heals:,}"
+        )
+        if i < 2:
+            embed1.add_field(name=tag, value=text, inline=False)
+        else:
+            embed2.add_field(name=tag, value=text, inline=False)
+
+    await ctx.send(embed=embed1)
+    await ctx.send(embed=embed2)
         
 @bot.command()
 async def bastion(ctx):
