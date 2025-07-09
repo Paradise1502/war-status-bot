@@ -249,11 +249,22 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topmana(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+async def topmana(ctx, *args):
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
         await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
         return
+
+    # Default values
+    top_n = 10
+    season = DEFAULT_SEASON
+
+    # Parse args flexibly
+    for arg in args:
+        if arg.isdigit():
+            top_n = int(arg)
+        else:
+            season = arg.lower()
 
     try:
         season = season.lower()
