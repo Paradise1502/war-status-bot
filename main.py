@@ -15,10 +15,12 @@ client = gspread.authorize(creds)
 
 # Season sheet mapping
 SEASON_SHEETS = {
+    "hk1": "Call of Dragons - HK1",
     "sos2": "Call of Dragons - SoS2",
-    "hk1": "Call of Dragons - HK1"  # <- your new current sheet
+    "sos5": "Call of Dragons - SoS5"  # 👈 add this line
 }
-DEFAULT_SEASON = "hk1"
+
+DEFAULT_SEASON = "sos5"
 
 # Now your bot setup
 intents = discord.Intents.default()
