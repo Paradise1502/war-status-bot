@@ -1072,6 +1072,120 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+from discord.ext import commands
+import discord
+
+@bot.command()
+async def serverstats(ctx, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
+    try:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        first = tabs[0]
+        latest = tabs[-1]
+
+        data_first = first.get_all_values()
+        data_latest = latest.get_all_values()
+        headers = data_latest[0]
+
+        def col_idx(name): return headers.index(name)
+        def to_int(val):
+            try:
+                return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
+            except:
+                return 0
+
+        id_idx = col_idx("lord_id")
+        server_idx = col_idx("home_server")
+        kills_idx = col_idx("units_killed")
+        dead_idx = col_idx("units_dead")
+        healed_idx = col_idx("units_healed")
+
+        server_data = {}
+
+        # Map first sheet
+        prev_map = {
+            row[id_idx]: row for row in data_first[1:]
+            if len(row) > max(server_idx, healed_idx) and row[id_idx].strip()
+        }
+
+        for row in data_latest[1:]:
+            if len(row) <= max(server_idx, healed_idx):
+                continue
+            lid = row[id_idx].strip()
+            server = row[server_idx].strip()
+            if not server.isdigit():
+                continue
+
+            kills_now = to_int(row[kills_idx])
+            dead_now = to_int(row[dead_idx])
+            healed_now = to_int(row[healed_idx])
+
+            if lid not in prev_map:
+                continue
+
+            prev_row = prev_map[lid]
+            kills_prev = to_int(prev_row[kills_idx])
+            dead_prev = to_int(prev_row[dead_idx])
+            healed_prev = to_int(prev_row[healed_idx])
+
+            if server not in server_data:
+                server_data[server] = {
+                    "kills": 0, "kills_gain": 0,
+                    "dead": 0, "dead_gain": 0,
+                    "healed": 0, "healed_gain": 0
+                }
+
+            server_data[server]["kills"] += kills_now
+            server_data[server]["kills_gain"] += kills_now - kills_prev
+            server_data[server]["dead"] += dead_now
+            server_data[server]["dead_gain"] += dead_now - dead_prev
+            server_data[server]["healed"] += healed_now
+            server_data[server]["healed_gain"] += healed_now - healed_prev
+
+        names = {
+            "77": "MFD",
+            "60": "ECHO",
+            "435": "VW",
+            "73": "SVR"
+        }
+
+        embed = discord.Embed(
+            title=f"📊 Server Stats for Season `{season.upper()}`",
+            description=f"Comparison from `{first.title}` to `{latest.title}`",
+            color=discord.Color.blurple()
+        )
+
+        for sid, stats in sorted(server_data.items(), key=lambda x: int(x[0])):
+            name = names.get(sid, f"Server {sid}")
+            embed.add_field(
+                name=f"🌍 {name}",
+                value=(
+                    f"**Kills**: {stats['kills']:,} (+{stats['kills_gain']:,})\n"
+                    f"**Deads**: {stats['dead']:,} (+{stats['dead_gain']:,})\n"
+                    f"**Healed**: {stats['healed']:,} (+{stats['healed_gain']:,})"
+                ),
+                inline=False
+            )
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 @bot.command()
 async def bastion(ctx):
 
@@ -1270,7 +1384,7 @@ async def commands(ctx):
 You can optionally add a season tag like `sos2`, `hk1`, etc. to pull archived data.
 
 > Example: `!progress 123456 sos2`  
-If no season is given, the bot uses the current season (`hk1`).
+If no season is given, the bot uses the current season (`sos5`).
 """
     await ctx.send(help_text)
 
