@@ -1196,7 +1196,7 @@ async def matchups(ctx):
             stats_b = stat_map[b]
 
             block = (
-                f"**{name_a}** vs **{name_b}**\n\n"
+                f"{name_a} vs {name_b}\n\n"
                 f"{format_side(name_a, stats_a)}"
                 f"\n-------------------------\n\n"
                 f"{format_side(name_b, stats_b)}"
