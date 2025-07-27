@@ -1130,13 +1130,13 @@ async def matchups(ctx):
 
         id_idx = idx("lord_id")
         server_idx = idx("home_server")
-        kills_idx = idx("kills")
+        kills_idx = idx("units_killed")
         dead_idx = idx("units_dead")
         heal_idx = idx("units_healed")
-        gold_idx = idx("gold")
-        wood_idx = idx("wood")
-        ore_idx = idx("ore")
-        mana_idx = idx("mana")
+        gold_idx = idx("gold_spent")
+        wood_idx = idx("wood_spent")
+        ore_idx = idx("stone_spent")
+        mana_idx = idx("mana_spent")
 
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx}
 
