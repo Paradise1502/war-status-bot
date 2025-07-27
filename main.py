@@ -1189,7 +1189,7 @@ async def matchups(ctx):
 
         embed = discord.Embed(title=format_title_with_dates(previous.title, latest.title), color=0x00ffcc)
 
-        for a, b in matchups:
+                for a, b in matchups:
             name_a = f"{emoji_bracket(a)}{SERVER_MAP[a]}"
             name_b = f"{emoji_bracket(b)}{SERVER_MAP[b]}"
             stats_a = stat_map[a]
@@ -1202,6 +1202,9 @@ async def matchups(ctx):
                 f"{format_side(name_b, stats_b)}"
             )
             embed.add_field(name=f"{SERVER_MAP[a]} vs {SERVER_MAP[b]}", value=f"```{block}```", inline=False)
+
+            # 👇 Adds spacing between matchups
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
 
         await ctx.send(embed=embed)
 
