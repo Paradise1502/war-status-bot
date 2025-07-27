@@ -1115,7 +1115,7 @@ async def matchup(ctx):
             if server not in servers: continue
             if server not in agg:
                 agg[server] = {"Kills":0,"Deads":0,"Heals":0,"Gold":0,"Wood":0,"Ore":0,"Mana":0}
-            agg[server]["Kills"] += to_int(row[idx["Kills"]])
+            agg[server]["Kills"] += to_int(row[idx["units_killed"]])
             agg[server]["Deads"] += to_int(row[idx["R"]])
             agg[server]["Heals"] += to_int(row[idx["S"]])
             agg[server]["Gold"] += to_int(row[idx["AF"]])
