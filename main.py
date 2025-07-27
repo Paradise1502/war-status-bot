@@ -1201,9 +1201,7 @@ async def matchups(ctx):
         embed.description = ""
 
         for a, b in matchups:
-            embed.description += f"\n**{SERVER_MAP[a]} vs {SERVER_MAP[b]}**\n```
-" + "\n".join(block_lines(a, b)) + "\n```
-"
+            embed.description += f"\n**{SERVER_MAP[a]} vs {SERVER_MAP[b]}**\n```" + "\n".join(block_lines(a, b)) + "\n```"
 
         await ctx.send(embed=embed)
 
