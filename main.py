@@ -1138,7 +1138,7 @@ async def serverstats(ctx):
         heal_idx = idx("units_healed")
         gold_idx = idx("gold_spent")
         wood_idx = idx("wood_spent")
-        ore_idx = idx("ore_spent")
+        ore_idx = idx("stone_spent")
         mana_idx = idx("mana_spent")
 
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx}
