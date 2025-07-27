@@ -1175,33 +1175,36 @@ async def matchups(ctx):
             s["dead_gain"] += dead - dead_prev
             s["healed_gain"] += heal - heal_prev
 
-        def fmt(label, left_val, left_gain, right_val=None, right_gain=None):
-            left = f"{left_val:,}" + (f" (+{left_gain:,})" if left_gain else "")
-            if right_val is None:
-                return f"{label:<13} {left}"
-            right = f"{right_val:,}" + (f" (+{right_gain:,})" if right_gain else "")
-            return f"{label:<13} {left:<35} {label:<13} {right}"
-
-        def block_lines(sid_a, sid_b):
-            a, b = stat_map[sid_a], stat_map[sid_b]
-            name_a, name_b = SERVER_MAP[sid_a], SERVER_MAP[sid_b]
-            return [
-                f"**{name_a}**{' ' * 43}**{name_b}**",
-                fmt("⚔️ Kills:", a['kills'], a['kills_gain'], b['kills'], b['kills_gain']),
-                fmt("💀 Deads:", a['dead'], a['dead_gain'], b['dead'], b['dead_gain']),
-                fmt("❤️ Heals:", a['healed'], a['healed_gain'], b['healed'], b['healed_gain']),
-                "",
-                fmt("📦 Gold Spent:", a['gold'], 0, b['gold'], 0),
-                fmt("🪵 Wood Spent:", a['wood'], 0, b['wood'], 0),
-                fmt("⛏️ Ore Spent:", a['ore'], 0, b['ore'], 0),
-                fmt("💧 Mana Spent:", a['mana'], 0, b['mana'], 0),
-            ]
+       def format_side(name, stats):
+            return (
+                f"**{name}**\n"
+                f"⚔️ Kills: {stats['kills']:,} (+{stats['kills_gain']:,})\n"
+                f"💀 Deads: {stats['dead']:,} (+{stats['dead_gain']:,})\n"
+                f"❤️ Heals: {stats['healed']:,} (+{stats['healed_gain']:,})\n"
+                f"\n"
+                f"💰 Gold Spent: {stats['gold']:,}\n"
+                f"🪵 Wood Spent: {stats['wood']:,}\n"
+                f"⛏️ Ore Spent: {stats['ore']:,}\n"
+                f"💧 Mana Spent: {stats['mana']:,}"
+            )
 
         embed = discord.Embed(title="📊 War Matchups", color=0x00ffcc)
-        embed.description = ""
 
         for a, b in matchups:
-            embed.description += f"\n**{SERVER_MAP[a]} vs {SERVER_MAP[b]}**\n```" + "\n".join(block_lines(a, b)) + "\n```"
+            name_a = SERVER_MAP[a]
+            name_b = SERVER_MAP[b]
+            stats_a = stat_map[a]
+            stats_b = stat_map[b]
+
+            block = (
+                f"**{name_a} vs {name_b}**\n"
+                f"```"
+                f"\n{format_side(name_a, stats_a)}"
+                f"\n\n{'-'*25}\n\n"
+                f"{format_side(name_b, stats_b)}"
+                f"\n```"
+            )
+            embed.description = embed.description + "\n" + block if embed.description else block
 
         await ctx.send(embed=embed)
 
