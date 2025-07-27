@@ -1174,7 +1174,7 @@ async def matchups(ctx):
 
         def format_side(name, stats):
             return (
-                f"**{name}**\n"
+                f"{name}\n"
                 f"▶ Combat Stats\n"
                 f"⚔️ Kills:  {stats['kills']:,} (+{stats['kills_gain']:,})\n"
                 f"💀 Deads:  {stats['dead']:,} (+{stats['dead_gain']:,})\n"
