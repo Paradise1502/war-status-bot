@@ -1092,7 +1092,8 @@ async def matchups(ctx):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        latest, previous = tabs[-1], tabs[-2]
+        latest = tabs[-1]
+        previous = tabs[-2]
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
         headers = data_latest[0]
@@ -1118,10 +1119,16 @@ async def matchups(ctx):
         matchups = [("60", "99"), ("77", "156"), ("435", "11"), ("73", "222")]
 
         stat_map = {s: {
-            "kills": 0, "kills_gain": 0,
-            "dead": 0, "dead_gain": 0,
-            "healed": 0, "healed_gain": 0,
-            "gold": 0, "wood": 0, "ore": 0, "mana": 0
+            "kills": 0,
+            "kills_gain": 0,
+            "dead": 0,
+            "dead_gain": 0,
+            "healed": 0,
+            "healed_gain": 0,
+            "gold": 0,
+            "wood": 0,
+            "ore": 0,
+            "mana": 0
         } for s in SERVER_MAP}
 
         id_idx = idx("lord_id")
@@ -1168,30 +1175,37 @@ async def matchups(ctx):
             s["dead_gain"] += dead - dead_prev
             s["healed_gain"] += heal - heal_prev
 
-        def format_side(sid):
-            s = stat_map[sid]
-            return (
-                f"⚔️ Kills:   {s['kills']:,} (+{s['kills_gain']:,})\n"
-                f"💀 Deads:   {s['dead']:,} (+{s['dead_gain']:,})\n"
-                f"❤️ Heals:   {s['healed']:,} (+{s['healed_gain']:,})\n"
-                f"💰 Gold:    {s['gold']:,}\n"
-                f"🪵 Wood:    {s['wood']:,}\n"
-                f"⛏️ Ore:     {s['ore']:,}\n"
-                f"💧 Mana:    {s['mana']:,}"
-            )
+        def fmt(label, left_val, left_gain, right_val=None, right_gain=None):
+            left = f"{left_val:,}" + (f" (+{left_gain:,})" if left_gain else "")
+            if right_val is None:
+                return f"{label:<13} {left}"
+            right = f"{right_val:,}" + (f" (+{right_gain:,})" if right_gain else "")
+            return f"{label:<13} {left:<35} {label:<13} {right}"
 
-        embed1 = discord.Embed(title="📊 War Matchups", color=0x00ffcc)
-        embed2 = discord.Embed(title="📊 War Matchups Continued", color=0x00ccff)
+        def block_lines(sid_a, sid_b):
+            a, b = stat_map[sid_a], stat_map[sid_b]
+            name_a, name_b = SERVER_MAP[sid_a], SERVER_MAP[sid_b]
+            return [
+                f"**{name_a}**{' ' * 43}**{name_b}**",
+                fmt("⚔️ Kills:", a['kills'], a['kills_gain'], b['kills'], b['kills_gain']),
+                fmt("💀 Deads:", a['dead'], a['dead_gain'], b['dead'], b['dead_gain']),
+                fmt("❤️ Heals:", a['healed'], a['healed_gain'], b['healed'], b['healed_gain']),
+                "",
+                fmt("📦 Gold Spent:", a['gold'], 0, b['gold'], 0),
+                fmt("🪵 Wood Spent:", a['wood'], 0, b['wood'], 0),
+                fmt("⛏️ Ore Spent:", a['ore'], 0, b['ore'], 0),
+                fmt("💧 Mana Spent:", a['mana'], 0, b['mana'], 0),
+            ]
 
-        for i, (a, b) in enumerate(matchups):
-            title = f"**{SERVER_MAP[a]}** vs **{SERVER_MAP[b]}**"
-            stats = f"```ansi\n{format_side(a)}\n\n-------------------------\n\n{format_side(b)}\n```"
-            block = f"{title}\n{stats}\n"
-            (embed1 if i < 2 else embed2).description = (embed1 if i < 2 else embed2).description or ""
-            (embed1 if i < 2 else embed2).description += block
+        embed = discord.Embed(title="📊 War Matchups", color=0x00ffcc)
+        embed.description = ""
 
-        await ctx.send(embed=embed1)
-        await ctx.send(embed=embed2)
+        for a, b in matchups:
+            embed.description += f"\n**{SERVER_MAP[a]} vs {SERVER_MAP[b]}**\n```
+" + "\n".join(block_lines(a, b)) + "\n```
+"
+
+        await ctx.send(embed=embed)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
