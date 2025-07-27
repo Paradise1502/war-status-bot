@@ -1099,48 +1099,44 @@ async def matchups(ctx):
         headers = data_latest[0]
 
         def idx(name): return headers.index(name)
-
         def to_int(val):
             try:
                 return int(val.replace(',', '').replace(' ', '').strip()) if val not in ("", "-") else 0
             except:
                 return 0
 
+        def format_title_with_dates(prev_name, latest_name):
+            return f"📊 War Matchups ({prev_name} → {latest_name})"
+
+        def emoji_bracket(server):
+            return {
+                "60": "🔴 ", "73": "🔴 ", "77": "🔴 ", "435": "🔴 ",
+                "11": "🔵 ", "156": "🔵 ", "99": "🔵 ", "222": "🔵 "
+            }.get(server, "")
+
         SERVER_MAP = {
-            "11": "Ex-",
-            "156": "B&R",
-            "99": "BTX",
-            "222": "HOUW",
-            "60": "ECHO",
-            "73": "SVR",
-            "77": "MFD",
-            "435": "VW"
+            "11": "Ex-", "156": "B&R", "99": "BTX", "222": "HOUW",
+            "60": "ECHO", "73": "SVR", "77": "MFD", "435": "VW"
         }
 
         matchups = [("60", "99"), ("77", "156"), ("435", "11"), ("73", "222")]
 
         stat_map = {s: {
-            "kills": 0,
-            "kills_gain": 0,
-            "dead": 0,
-            "dead_gain": 0,
-            "healed": 0,
-            "healed_gain": 0,
-            "gold": 0,
-            "wood": 0,
-            "ore": 0,
-            "mana": 0
+            "kills": 0, "kills_gain": 0,
+            "dead": 0, "dead_gain": 0,
+            "healed": 0, "healed_gain": 0,
+            "gold": 0, "wood": 0, "ore": 0, "mana": 0
         } for s in SERVER_MAP}
 
         id_idx = idx("lord_id")
         server_idx = idx("home_server")
-        kills_idx = idx("units_killed")
+        kills_idx = idx("kills")
         dead_idx = idx("units_dead")
         heal_idx = idx("units_healed")
-        gold_idx = idx("gold_spent")
-        wood_idx = idx("wood_spent")
-        ore_idx = idx("stone_spent")
-        mana_idx = idx("mana_spent")
+        gold_idx = idx("gold")
+        wood_idx = idx("wood")
+        ore_idx = idx("ore")
+        mana_idx = idx("mana")
 
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx}
 
@@ -1179,33 +1175,33 @@ async def matchups(ctx):
         def format_side(name, stats):
             return (
                 f"**{name}**\n"
-                f"⚔️ Kills: {stats['kills']:,} (+{stats['kills_gain']:,})\n"
-                f"💀 Deads: {stats['dead']:,} (+{stats['dead_gain']:,})\n"
-                f"❤️ Heals: {stats['healed']:,} (+{stats['healed_gain']:,})\n"
+                f"▶ Combat Stats\n"
+                f"⚔️ Kills:  {stats['kills']:,} (+{stats['kills_gain']:,})\n"
+                f"💀 Deads:  {stats['dead']:,} (+{stats['dead_gain']:,})\n"
+                f"❤️ Heals:  {stats['healed']:,} (+{stats['healed_gain']:,})\n"
                 f"\n"
-                f"💰 Gold Spent: {stats['gold']:,}\n"
-                f"🪵 Wood Spent: {stats['wood']:,}\n"
-                f"⛏️ Ore Spent: {stats['ore']:,}\n"
-                f"💧 Mana Spent: {stats['mana']:,}"
+                f"▶ Resources Spent\n"
+                f"💰 Gold Spent:  {stats['gold']:,}\n"
+                f"🪵 Wood Spent:  {stats['wood']:,}\n"
+                f"⛏️ Ore Spent:   {stats['ore']:,}\n"
+                f"💧 Mana Spent:  {stats['mana']:,}\n"
             )
 
-        embed = discord.Embed(title="📊 War Matchups", color=0x00ffcc)
+        embed = discord.Embed(title=format_title_with_dates(previous.title, latest.title), color=0x00ffcc)
 
         for a, b in matchups:
-            name_a = SERVER_MAP[a]
-            name_b = SERVER_MAP[b]
+            name_a = f"{emoji_bracket(a)}{SERVER_MAP[a]}"
+            name_b = f"{emoji_bracket(b)}{SERVER_MAP[b]}"
             stats_a = stat_map[a]
             stats_b = stat_map[b]
 
             block = (
-                f"**{name_a} vs {name_b}**\n"
-                f"```\n"
-                f"{format_side(name_a, stats_a)}\n"
-                f"\n{'-'*25}\n\n"
-                f"{format_side(name_b, stats_b)}\n"
-                f"```"
+                f"**{name_a}** vs **{name_b}**\n\n"
+                f"{format_side(name_a, stats_a)}"
+                f"\n-------------------------\n\n"
+                f"{format_side(name_b, stats_b)}"
             )
-            embed.description = embed.description + "\n" + block if embed.description else block
+            embed.add_field(name=f"{SERVER_MAP[a]} vs {SERVER_MAP[b]}", value=f"```{block}```", inline=False)
 
         await ctx.send(embed=embed)
 
