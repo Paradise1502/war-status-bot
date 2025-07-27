@@ -1075,6 +1075,9 @@ async def farms(ctx, season: str = DEFAULT_SEASON):
 from discord.ext import commands
 import discord
 
+import discord
+from discord.ext import commands
+
 @bot.command()
 async def serverstats(ctx, season: str = DEFAULT_SEASON):
     allowed_channels = {1378735765827358791, 1383515877793595435}
@@ -1094,89 +1097,79 @@ async def serverstats(ctx, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
-        first = tabs[0]
-        latest = tabs[-1]
-
-        data_first = first.get_all_values()
+        latest, previous = tabs[-1], tabs[-2]
         data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
         headers = data_latest[0]
 
-        def col_idx(name): return headers.index(name)
+        idx = {k: headers.index(k) for k in ["lord_id", "home_server", "units_killed", "units_dead", "units_healed", "gold_spent", "wood_spent", "stone_spent", "mana_spent"]}
+
         def to_int(val):
             try:
                 return int(val.replace(",", "").strip()) if val not in ("", "-") else 0
             except:
                 return 0
 
-        id_idx = col_idx("lord_id")
-        server_idx = col_idx("home_server")
-        kills_idx = col_idx("units_killed")
-        dead_idx = col_idx("units_dead")
-        healed_idx = col_idx("units_healed")
-
-        server_data = {}
-
-        # Map first sheet
-        prev_map = {
-            row[id_idx]: row for row in data_first[1:]
-            if len(row) > max(server_idx, healed_idx) and row[id_idx].strip()
+        servers_of_interest = {
+            "11": "Ex-",
+            "156": "B&R",
+            "99": "BTX",
+            "222": "HOUW",
+            "60": "ECHO",
+            "73": "SVR",
+            "77": "MFD",
+            "435": "VW"
         }
+
+        prev_map = {row[idx["lord_id"]]: row for row in data_prev[1:] if len(row) > idx["mana_spent"] and row[idx["lord_id"]].strip()}
+        stats = {sid: {"kills": 0, "kills_gain": 0, "deads": 0, "deads_gain": 0, "healed": 0, "healed_gain": 0, "rss_gain": 0} for sid in servers_of_interest}
 
         for row in data_latest[1:]:
-            if len(row) <= max(server_idx, healed_idx):
-                continue
-            lid = row[id_idx].strip()
-            server = row[server_idx].strip()
-            if not server.isdigit():
+            if len(row) <= idx["mana_spent"]:
                 continue
 
-            kills_now = to_int(row[kills_idx])
-            dead_now = to_int(row[dead_idx])
-            healed_now = to_int(row[healed_idx])
-
-            if lid not in prev_map:
+            server = row[idx["home_server"]].strip()
+            if server not in stats:
                 continue
 
-            prev_row = prev_map[lid]
-            kills_prev = to_int(prev_row[kills_idx])
-            dead_prev = to_int(prev_row[dead_idx])
-            healed_prev = to_int(prev_row[healed_idx])
+            lid = row[idx["lord_id"]].strip()
+            prev_row = prev_map.get(lid)
+            if not prev_row:
+                continue
 
-            if server not in server_data:
-                server_data[server] = {
-                    "kills": 0, "kills_gain": 0,
-                    "dead": 0, "dead_gain": 0,
-                    "healed": 0, "healed_gain": 0
-                }
+            kills = to_int(row[idx["units_killed"]])
+            kills_prev = to_int(prev_row[idx["units_killed"]])
+            deads = to_int(row[idx["units_dead"]])
+            deads_prev = to_int(prev_row[idx["units_dead"]])
+            healed = to_int(row[idx["units_healed"]])
+            healed_prev = to_int(prev_row[idx["units_healed"]])
 
-            server_data[server]["kills"] += kills_now
-            server_data[server]["kills_gain"] += kills_now - kills_prev
-            server_data[server]["dead"] += dead_now
-            server_data[server]["dead_gain"] += dead_now - dead_prev
-            server_data[server]["healed"] += healed_now
-            server_data[server]["healed_gain"] += healed_now - healed_prev
+            gold = to_int(row[idx["gold_spent"]]) - to_int(prev_row[idx["gold_spent"]])
+            wood = to_int(row[idx["wood_spent"]]) - to_int(prev_row[idx["wood_spent"]])
+            ore = to_int(row[idx["stone_spent"]]) - to_int(prev_row[idx["stone_spent"]])
+            mana = to_int(row[idx["mana_spent"]]) - to_int(prev_row[idx["mana_spent"]])
+            rss_gain = gold + wood + ore + mana
 
-        names = {
-            "77": "MFD",
-            "60": "ECHO",
-            "435": "VW",
-            "73": "SVR"
-        }
+            stats[server]["kills"] += kills
+            stats[server]["kills_gain"] += (kills - kills_prev)
+            stats[server]["deads"] += deads
+            stats[server]["deads_gain"] += (deads - deads_prev)
+            stats[server]["healed"] += healed
+            stats[server]["healed_gain"] += (healed - healed_prev)
+            stats[server]["rss_gain"] += rss_gain
 
-        embed = discord.Embed(
-            title=f"📊 Server Stats for Season `{season.upper()}`",
-            description=f"Comparison from `{first.title}` to `{latest.title}`",
-            color=discord.Color.blurple()
-        )
+        embed = discord.Embed(title=f"🌍 Server Performance Overview — `{season.upper()}`", color=discord.Color.blue())
+        embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
 
-        for sid, stats in sorted(server_data.items(), key=lambda x: int(x[0])):
-            name = names.get(sid, f"Server {sid}")
+        for sid, name in servers_of_interest.items():
+            s = stats[sid]
             embed.add_field(
-                name=f"🌍 {name}",
+                name=f"{name} ({sid})",
                 value=(
-                    f"**Kills**: {stats['kills']:,} (+{stats['kills_gain']:,})\n"
-                    f"**Deads**: {stats['dead']:,} (+{stats['dead_gain']:,})\n"
-                    f"**Healed**: {stats['healed']:,} (+{stats['healed_gain']:,})"
+                    f"**Kills**: {s['kills']:,} (+{s['kills_gain']:,})\n"
+                    f"**Deads**: {s['deads']:,} (+{s['deads_gain']:,})\n"
+                    f"**Healed**: {s['healed']:,} (+{s['healed_gain']:,})\n"
+                    f"**RSS Used**: {s['rss_gain']:,}"
                 ),
                 inline=False
             )
