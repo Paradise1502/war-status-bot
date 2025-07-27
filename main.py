@@ -1079,132 +1079,78 @@ import discord
 from discord.ext import commands
 
 @bot.command()
-async def serverstats(ctx):
-    allowed_channels = {1378735765827358791, 1383515877793595435}
-    if ctx.channel.id not in allowed_channels:
-        await ctx.send("❌ Command not allowed here.")
+async def matchup(ctx):
+    from discord import Embed
+    def to_int(val):
+        try: return int(val.replace(',', '').replace('-', '').strip())
+        except: return 0
+
+    season = DEFAULT_SEASON
+    sheet_name = SEASON_SHEETS.get(season)
+    if not sheet_name:
+        await ctx.send("❌ Invalid season.")
         return
 
-    try:
-        sheet_name = SEASON_SHEETS.get(DEFAULT_SEASON)
-        tabs = client.open(sheet_name).worksheets()
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
-            return
+    tabs = client.open(sheet_name).worksheets()
+    if len(tabs) < 2:
+        await ctx.send("❌ Not enough sheets to compare.")
+        return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
+    prev, latest = tabs[0], tabs[1]
+    data_prev, data_latest = prev.get_all_values(), latest.get_all_values()
+    headers = data_latest[0]
 
-        def idx(name): return headers.index(name)
-        def to_int(val):
-            try:
-                return int(val.replace(',', '').replace(' ', '').strip()) if val not in ("", "-") else 0
-            except:
-                return 0
+    idx = {col: headers.index(col) for col in ["home_server", "units_killed", "R", "S", "L", "AF", "AG", "AH", "AI"]}
+    servers = ["11", "156", "99", "222", "60", "73", "77", "435"]
+    labels = {
+        "11": "Ex-", "156": "B&R", "99": "BTX", "222": "HOUW",
+        "60": "ECHO", "73": "SVR", "77": "MFD", "435": "VW"
+    }
 
-        SERVER_MAP = {
-            "11": "Ex-",
-            "156": "B&R",
-            "99": "BTX",
-            "222": "HOUW",
-            "60": "ECHO",
-            "73": "SVR",
-            "77": "MFD",
-            "435": "VW"
-        }
+    def aggregate(data):
+        agg = {}
+        for row in data[1:]:
+            if len(row) <= max(idx.values()): continue
+            server = row[idx["home_server"]].strip()
+            if server not in servers: continue
+            if server not in agg:
+                agg[server] = {"Kills":0,"Deads":0,"Heals":0,"Gold":0,"Wood":0,"Ore":0,"Mana":0}
+            agg[server]["Kills"] += to_int(row[idx["Kills"]])
+            agg[server]["Deads"] += to_int(row[idx["R"]])
+            agg[server]["Heals"] += to_int(row[idx["S"]])
+            agg[server]["Gold"] += to_int(row[idx["AF"]])
+            agg[server]["Wood"] += to_int(row[idx["AG"]])
+            agg[server]["Ore"] += to_int(row[idx["AH"]])
+            agg[server]["Mana"] += to_int(row[idx["AI"]])
+        return agg
 
-        matchups = [("60", "99"), ("77", "156"), ("435", "11"), ("73", "222")]
+    prev_data = aggregate(data_prev)
+    latest_data = aggregate(data_latest)
 
-        stat_map = {s: {
-            "kills": 0,
-            "kills_gain": 0,
-            "dead": 0,
-            "dead_gain": 0,
-            "healed": 0,
-            "healed_gain": 0,
-            "gold": 0,
-            "wood": 0,
-            "ore": 0,
-            "mana": 0
-        } for s in SERVER_MAP}
+    def format_block(name, curr, prev):
+        def line(label, key):
+            val = curr[key]
+            diff = val - prev.get(key, 0)
+            return f"{label:<6} {val:>18,} (+{diff:,.0f})"
+        return "\n".join([
+            f"**{name}**",
+            f"🗡️  {line('Kills:', 'Kills')}",
+            f"💀 {line('Deads:', 'Deads')}",
+            f"❤️  {line('Heals:', 'Heals')}",
+            f"🪙 {line('Gold:', 'Gold')}",
+            f"🪵 {line('Wood:', 'Wood')}",
+            f"⛏️  {line('Ore:', 'Ore')}",
+            f"💧 {line('Mana:', 'Mana')}",
+        ])
 
-        id_idx = idx("lord_id")
-        server_idx = idx("home_server")
-        kills_idx = idx("units_killed")
-        dead_idx = idx("units_dead")
-        heal_idx = idx("units_healed")
-        gold_idx = idx("gold_spent")
-        wood_idx = idx("wood_spent")
-        ore_idx = idx("stone_spent")
-        mana_idx = idx("mana_spent")
-
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx}
-
-        for row in data_latest[1:]:
-            if len(row) <= mana_idx:
-                continue
-            sid = row[server_idx]
-            if sid not in SERVER_MAP:
-                continue
-
-            prev_row = prev_map.get(row[id_idx])
-            kills = to_int(row[kills_idx])
-            dead = to_int(row[dead_idx])
-            heal = to_int(row[heal_idx])
-            gold = to_int(row[gold_idx])
-            wood = to_int(row[wood_idx])
-            ore = to_int(row[ore_idx])
-            mana = to_int(row[mana_idx])
-
-            kills_prev = to_int(prev_row[kills_idx]) if prev_row else 0
-            dead_prev = to_int(prev_row[dead_idx]) if prev_row else 0
-            heal_prev = to_int(prev_row[heal_idx]) if prev_row else 0
-
-            s = stat_map[sid]
-            s["kills"] += kills
-            s["dead"] += dead
-            s["healed"] += heal
-            s["gold"] += gold
-            s["wood"] += wood
-            s["ore"] += ore
-            s["mana"] += mana
-            s["kills_gain"] += kills - kills_prev
-            s["dead_gain"] += dead - dead_prev
-            s["healed_gain"] += heal - heal_prev
-
-        def format_side(sid):
-            s = stat_map[sid]
-            return (
-                f"⚔️ Kills:   {s['kills']:,} (+{s['kills_gain']:,})\n"
-                f"💀 Deads:   {s['dead']:,} (+{s['dead_gain']:,})\n"
-                f"❤️ Heals:   {s['healed']:,} (+{s['healed_gain']:,})\n"
-                f"💰 Gold:    {s['gold']:,}\n"
-                f"🪵 Wood:    {s['wood']:,}\n"
-                f"⛏️ Ore:     {s['ore']:,}\n"
-                f"💧 Mana:    {s['mana']:,}\n"
-            )
-
-        embed1 = discord.Embed(title="📊 War Matchups", color=0x00ffcc)
-        embed2 = discord.Embed(title="📊 War Matchups Continued", color=0x00ccff)
-
-        for i, (a, b) in enumerate(matchups):
-            block = (
-                f"**{SERVER_MAP[a]}** vs **{SERVER_MAP[b]}**\n"
-                f"```\n"
-                f"{format_side(a).rstrip():<55}   {format_side(b).rstrip()}\n"
-                f"```"
-            )
-            (embed1 if i < 2 else embed2).description = (embed1 if i < 2 else embed2).description or ""
-            (embed1 if i < 2 else embed2).description += block + "\n"
-
-        await ctx.send(embed=embed1)
-        await ctx.send(embed=embed2)
-
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+    matchups = [("60", "99"), ("77", "156"), ("435", "11"), ("73", "222")]
+    for i, (left, right) in enumerate(matchups):
+        name = f"{labels[left]} vs {labels[right]}"
+        block_left = format_block(labels[left], latest_data[left], prev_data.get(left, {})).split("\n")
+        block_right = format_block(labels[right], latest_data[right], prev_data.get(right, {})).split("\n")
+        merged = [f"{l:<50} {r}" for l, r in zip(block_left, block_right)]
+        embed = Embed(title="📊 War Matchups" + (" Continued" if i >= 2 else ""), description="```\n" + "\n".join(merged) + "\n```")
+        await ctx.send(embed=embed)
 
 @bot.command()
 async def bastion(ctx):
