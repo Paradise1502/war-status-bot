@@ -1099,6 +1099,7 @@ async def matchups(ctx):
         headers = data_latest[0]
 
         def idx(name): return headers.index(name)
+
         def to_int(val):
             try:
                 return int(val.replace(',', '').replace(' ', '').strip()) if val not in ("", "-") else 0
@@ -1175,7 +1176,7 @@ async def matchups(ctx):
             s["dead_gain"] += dead - dead_prev
             s["healed_gain"] += heal - heal_prev
 
-       def format_side(name, stats):
+        def format_side(name, stats):
             return (
                 f"**{name}**\n"
                 f"⚔️ Kills: {stats['kills']:,} (+{stats['kills_gain']:,})\n"
@@ -1198,11 +1199,11 @@ async def matchups(ctx):
 
             block = (
                 f"**{name_a} vs {name_b}**\n"
+                f"```\n"
+                f"{format_side(name_a, stats_a)}\n"
+                f"\n{'-'*25}\n\n"
+                f"{format_side(name_b, stats_b)}\n"
                 f"```"
-                f"\n{format_side(name_a, stats_a)}"
-                f"\n\n{'-'*25}\n\n"
-                f"{format_side(name_b, stats_b)}"
-                f"\n```"
             )
             embed.description = embed.description + "\n" + block if embed.description else block
 
