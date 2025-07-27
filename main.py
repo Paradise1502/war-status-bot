@@ -1159,15 +1159,19 @@ async def matchups(ctx):
             kills_prev = to_int(prev_row[kills_idx]) if prev_row else 0
             dead_prev = to_int(prev_row[dead_idx]) if prev_row else 0
             heal_prev = to_int(prev_row[heal_idx]) if prev_row else 0
+            gold_prev = to_int(prev_row[gold_idx]) if prev_row else 0
+            wood_prev = to_int(prev_row[wood_idx]) if prev_row else 0
+            ore_prev = to_int(prev_row[ore_idx]) if prev_row else 0
+            mana_prev = to_int(prev_row[mana_idx]) if prev_row else 0
 
             s = stat_map[sid]
             s["kills"] += kills
             s["dead"] += dead
             s["healed"] += heal
-            s["gold"] += gold
-            s["wood"] += wood
-            s["ore"] += ore
-            s["mana"] += mana
+            s["gold"] += gold - gold_prev
+            s["wood"] += wood - wood_prev
+            s["ore"] += ore - ore_prev
+            s["mana"] += mana - mana_prev
             s["kills_gain"] += kills - kills_prev
             s["dead_gain"] += dead - dead_prev
             s["healed_gain"] += heal - heal_prev
