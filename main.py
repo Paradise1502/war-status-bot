@@ -6,7 +6,7 @@ import json
 import discord
 from discord.ext import commands
 from discord.ext import tasks
-import datetime
+from datetime import datetime, timedelta
 
 # Google Sheets Auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -102,8 +102,8 @@ async def test_events(ctx):
         sheet = client.open("Event Schedule").sheet1
         data = sheet.get_all_records()
 
-        now = datetime.datetime.utcnow()
-        three_days_later = now + timedelta(days=3)
+        now = datetime.utcnow()
+        later = now + timedelta(days=3)
 
         upcoming = []
         for row in data:
