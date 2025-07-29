@@ -15,7 +15,7 @@ creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
 
-EVENT_SHEET_NAME = "EventSchedule"      # The spreadsheet name
+EVENT_SHEET_NAME = "Event Schedule"      # The spreadsheet name
 EVENT_TAB_NAME = "events"               # The tab name
 ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement channel
 
