@@ -95,12 +95,12 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+from datetime import timedelta
+
 def format_time_diff(diff: timedelta):
     days = diff.days
     hours = diff.seconds // 3600
     return f"(in {days}d {hours}h)" if days or hours else "(now)"
-
-from datetime import datetime, timedelta
 
 @bot.command()
 async def test_events(ctx):
