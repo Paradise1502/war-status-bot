@@ -108,6 +108,8 @@ def format_time_diff(event_time, now):
         parts.append("less than 1 hour")
     return "in " + " ".join(parts)
 
+from datetime import datetime, timedelta
+
 @bot.command()
 async def test_events(ctx):
     try:
