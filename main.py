@@ -139,21 +139,27 @@ async def send_upcoming_events():
         print(f"[Scheduled Task Error] {e}")
 
 # Background scheduler
-@tasks.loop(hours=24)
+@tasks.loop(count=1)
 async def scheduled_event_check():
     await bot.wait_until_ready()
     now = datetime.now(UTC)
     target = now.replace(hour=12, minute=0, second=0, microsecond=0)
-    if now > target:
+    if now >= target:
         target += timedelta(days=1)
-    await asyncio.sleep((target - now).total_seconds())
+    delay = (target - now).total_seconds()
+    await asyncio.sleep(delay)
     await send_upcoming_events()
+    scheduled_event_check.restart()
 
 # Hook the task on bot ready
 @bot.event
 async def on_ready():
     print(f"{bot.user} is ready.")
     scheduled_event_check.start()
+
+@bot.command()
+async def test_events(ctx):
+    await send_upcoming_events()
 
 @bot.command()
 async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
