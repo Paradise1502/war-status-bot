@@ -240,7 +240,7 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         rank = next((i+1 for i, (lid, _) in enumerate(mfd_gains) if lid == lord_id), None)
 
         message = f"🌿 Mana gathered by `[{alliance}] {name}` in `{season.upper()}`:\n💧 Mana: {mana_gain:,}"
-        if alliance == "MFD" and rank:
+        if alliance.startswith("MFD") and rank:
             message += f"\n🏅 MFD Rank: #{rank}"
         else:
             message += "\n❌ Not in MFD"
