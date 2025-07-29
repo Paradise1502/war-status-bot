@@ -99,27 +99,28 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 @bot.command()
 async def test_events(ctx):
     try:
-        sheet = client.open(EVENT_SHEET_NAME).worksheet(EVENT_TAB_NAME)
-        rows = sheet.get_all_records()
-        upcoming = []
-        now = datetime.datetime.utcnow().replace(second=0, microsecond=0)
-        three_days_later = now + datetime.timedelta(days=3)
+        sheet = client.open("Event Schedule").sheet1
+        data = sheet.get_all_records()
 
-        for row in rows:
-            try:
-                event_time = datetime.datetime.strptime(row["start_time_utc"], "%Y-%m-%dT%H:%M:%SZ")
-                if now <= event_time <= three_days_later:
-                    formatted = f"🗓️ **{event_time.strftime('%a %b %d %H:%M UTC')}** — {row['event_name']}\n{row['message']}"
-                    upcoming.append(formatted)
-            except Exception as e:
-                print(f"[Event Parse Error] {e}")
+        now = datetime.utcnow()
+        three_days_later = now + timedelta(days=3)
+
+        upcoming = []
+        for row in data:
+            event_time = datetime.fromisoformat(row["start_time_utc"].replace("Z", "+00:00"))
+            if now <= event_time <= three_days_later:
+                upcoming.append((event_time, row["message"]))
 
         if not upcoming:
-            message = "📭 No scheduled events in the next 3 days."
-        else:
-            message = "**📣 Upcoming Events (Next 3 Days)**\n\n" + "\n\n".join(upcoming)
+            await ctx.send("No events in the next 3 days.")
+            return
 
-        await ctx.send(message)
+        msg = "**📅 Upcoming Events (next 3 days):**\n"
+        for event_time, message in sorted(upcoming):
+            time_str = event_time.strftime("%a %b %d, %H:%M UTC")
+            msg += f"> **{time_str}** — {message}\n"
+
+        await ctx.send(msg)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
