@@ -101,6 +101,7 @@ async def test_events(ctx):
     try:
         sheet = client.open("Event Schedule").sheet1
         data = sheet.get_all_records()
+        await ctx.send(f"Headers: {list(data[0].keys())}")
 
         now = datetime.utcnow()
         later = now + timedelta(days=3)
