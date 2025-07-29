@@ -108,7 +108,7 @@ async def test_events(ctx):
         upcoming = []
         for row in data:
             event_time = datetime.fromisoformat(row["start_time_utc"].replace("Z", "+00:00"))
-            if now <= event_time <= three_days_later:
+            if now <= event_time <= later:
                 upcoming.append((event_time, row["message"]))
 
         if not upcoming:
