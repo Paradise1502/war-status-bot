@@ -734,6 +734,188 @@ async def topdeads(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
+async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+    try:
+        season = season.lower()
+        is_default_season = (season == DEFAULT_SEASON)
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        def col_idx(col): return headers.index(col)
+
+        id_idx = col_idx("lord_id")
+        name_idx = 1
+        alliance_idx = 3
+        power_idx = headers.index("highest_power")
+        kills_idx = headers.index("units_killed")
+        dead_idx = headers.index("units_dead")
+        healed_idx = headers.index("units_healed")
+        gold_idx = headers.index("gold_spent")
+        wood_idx = headers.index("wood_spent")
+        ore_idx = headers.index("stone_spent")
+        mana_idx = headers.index("mana_spent")
+        t5_idx = headers.index("killcount_t5")
+        t4_idx = headers.index("killcount_t4")
+        t3_idx = headers.index("killcount_t3")
+        t2_idx = headers.index("killcount_t2")
+        t1_idx = headers.index("killcount_t1")
+        gold_gathered_idx = headers.index("gold")
+        wood_gathered_idx = headers.index("wood")
+        ore_gathered_idx = headers.index("ore")
+        mana_gathered_idx = headers.index("mana")
+        home_server_idx = headers.index("home_server")
+
+        def to_int(v):
+            try:
+                return int(v.replace(",", "").strip()) if v not in ("-", "") else 0
+            except:
+                return 0
+
+        def find_row(data):
+            for row in data[1:]:
+                if row[id_idx] == lord_id:
+                    return row
+            return None
+
+        row_latest = find_row(data_latest)
+        row_prev = find_row(data_prev)
+
+        if not row_latest or not row_prev:
+            await ctx.send("❌ Lord ID not found in both sheets.")
+            return
+
+        name = row_latest[name_idx]
+        alliance = row_latest[alliance_idx]
+        power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
+        kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
+        dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
+        healed_gain = to_int(row_latest[healed_idx]) - to_int(row_prev[healed_idx])
+        gold = to_int(row_latest[gold_idx]) - to_int(row_prev[gold_idx])
+        wood = to_int(row_latest[wood_idx]) - to_int(row_prev[wood_idx])
+        ore = to_int(row_latest[ore_idx]) - to_int(row_prev[ore_idx])
+        mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
+        total_rss = gold + wood + ore + mana
+        gold_gathered = to_int(row_latest[gold_gathered_idx]) - to_int(row_prev[gold_gathered_idx])
+        wood_gathered = to_int(row_latest[wood_gathered_idx]) - to_int(row_prev[wood_gathered_idx])
+        ore_gathered = to_int(row_latest[ore_gathered_idx]) - to_int(row_prev[ore_gathered_idx])
+        mana_gathered = to_int(row_latest[mana_gathered_idx]) - to_int(row_prev[mana_gathered_idx])
+        total_gathered = gold_gathered + wood_gathered + ore_gathered + mana_gathered
+
+        # Create lookup from previous sheet
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
+
+        def get_rank(col_index):
+            player_row = next((r for r in data_latest[1:] if r[id_idx].strip() == lord_id), None)
+            if not player_row or len(player_row) <= home_server_idx:
+                return None
+
+            player_server = str(player_row[home_server_idx]).strip()
+            if not player_server:
+                return None
+
+            gains = []
+            for row in data_latest[1:]:
+                if len(row) <= col_index or len(row) <= home_server_idx:
+                    continue
+                if str(row[home_server_idx]).strip() != player_server:
+                    continue
+
+                lid = row[id_idx].strip()
+                prev_row = prev_map.get(lid)
+                if not prev_row:
+                    continue
+
+                val = to_int(row[col_index]) - to_int(prev_row[col_index])
+                gains.append((lid, val))
+
+            gains.sort(key=lambda x: x[1], reverse=True)
+
+            for rank, (lid, _) in enumerate(gains, 1):
+                if lid == lord_id:
+                    return rank
+
+            return None
+
+        rank_power = get_rank(power_idx)
+        rank_kills = get_rank(kills_idx)
+        rank_dead = get_rank(dead_idx)
+        rank_healed = get_rank(healed_idx)
+
+        t5 = to_int(row_latest[t5_idx]) - to_int(row_prev[t5_idx])
+        t4 = to_int(row_latest[t4_idx]) - to_int(row_prev[t4_idx])
+        t3 = to_int(row_latest[t3_idx]) - to_int(row_prev[t3_idx])
+        t2 = to_int(row_latest[t2_idx]) - to_int(row_prev[t2_idx])
+        t1 = to_int(row_latest[t1_idx]) - to_int(row_prev[t1_idx])
+
+        embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
+        embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f" (#{rank_power})" if rank_power else ""), inline=False)
+        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
+        embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
+        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
+        embed.add_field(
+            name="• Kill Breakdown",
+            value=(
+                f"T5: +{t5:,}\n"
+                f"T4: +{t4:,}\n"
+                f"T3: +{t3:,}\n"
+                f"T2: +{t2:,}\n"
+                f"T1: +{t1:,}"
+            ),
+            inline=True
+        )
+        embed.add_field(
+            name="📦 RSS Spent",
+            value=(
+                f"🪙 Gold: {gold:,}\n"
+                f"🪵 Wood: {wood:,}\n"
+                f"⛏️ Ore: {ore:,}\n"
+                f"💧 Mana: {mana:,}\n"
+                f"📦 Total: {total_rss:,}"
+            ),
+            inline=False
+        )
+        embed.add_field(
+            name="🧑‍🌾 RSS Gathered",
+            value=(
+                f"🪙 Gold: {gold_gathered:,}\n"
+                f"🪵 Wood: {wood_gathered:,}\n"
+                f"⛏️ Ore: {ore_gathered:,}\n"
+                f"💧 Mana: {mana_gathered:,}\n"
+                f"📦 **Total**: {total_gathered:,}"
+            ),
+            inline=False
+        )
+        if is_default_season:
+            embed.set_footer(
+                text=(
+                    f"📅 Timespan: {previous.title} → {latest.title}\n"
+                    "To view stats from the previous season, add 'sos2' at the end of the command.\n"
+                    "Example: !progress 123456 sos2"
+                )
+            )
+        else:
+            embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
         season = season.lower()
