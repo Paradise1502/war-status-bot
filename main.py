@@ -229,7 +229,7 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         # Filter MFD players only for ranking
         mfd_gains = []
         for row in data_latest[1:]:
-            if len(row) > mana_index and row[alliance_index].strip() == "MFD":
+            if len(row) > mana_index and row[alliance_index].strip().startswith("MFD"):
                 id_val = row[id_index].strip()
                 row_old = next((r for r in data_prev[1:] if len(r) > mana_index and r[id_index].strip() == id_val), None)
                 if row_old:
