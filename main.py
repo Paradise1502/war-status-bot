@@ -114,7 +114,7 @@ async def test_events(ctx):
             if not event_time_raw or not message:
                 continue
 
-            event_time = datetime.fromisoformat(event_time_raw.replace("Z", "+00:00"))
+            event_time = datetime.fromisoformat(row["start_time_utc"].strip().replace("Z", "+00:00"))
             if now <= event_time <= three_days_later:
                 upcoming.append((event_time, message))
 
@@ -124,8 +124,8 @@ async def test_events(ctx):
 
         msg = "**📅 Upcoming Events (next 3 days):**\n"
         for event_time, message in sorted(upcoming):
-            time_str = event_time.strftime("%a %b %d, %H:%M UTC")
-            msg += f"> **{time_str}** — {message}\n"
+            timestamp = int(event_time.timestamp())
+            msg += f"> <t:{timestamp}:F> — {message}\n"
 
         await ctx.send(msg)
 
