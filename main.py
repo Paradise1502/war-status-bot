@@ -110,7 +110,7 @@ async def test_events(ctx):
         for row in data:
             # Fix trailing space in header keys
             event_time_raw = row.get("start_time_utc")
-            message = row.get("message ".strip())
+            message = row.get("message".strip())
             if not event_time_raw or not message:
                 continue
 
