@@ -95,37 +95,31 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+from datetime import datetime, timedelta
+
 @bot.command()
 async def test_events(ctx):
     try:
-        from datetime import datetime, timedelta, timezone
-
         sheet = client.open("Event Schedule").sheet1
         data = sheet.get_all_records()
 
-        now = datetime.now(timezone.utc)
-        three_days_later = now + timedelta(days=3)
+        now = datetime.utcnow()
+        later = now + timedelta(days=3)
 
         upcoming = []
         for row in data:
-            # Fix trailing space in header keys
-            event_time_raw = row.get("start_time_utc")
-            message = row.get("message".strip())
-            if not event_time_raw or not message:
-                continue
-
             event_time = datetime.fromisoformat(row["start_time_utc"].strip().replace("Z", "+00:00"))
-            if now <= event_time <= three_days_later:
-                upcoming.append((event_time, message))
+            if now <= event_time <= later:
+                unix_ts = int(event_time.timestamp())
+                upcoming.append((unix_ts, row["message"]))
 
         if not upcoming:
             await ctx.send("No events in the next 3 days.")
             return
 
         msg = "**📅 Upcoming Events (next 3 days):**\n"
-        for event_time, message in sorted(upcoming):
-            timestamp = int(event_time.timestamp())
-            msg += f"> <t:{timestamp}:F> — {message}\n"
+        for unix_ts, message in sorted(upcoming):
+            msg += f"> <t:{unix_ts}:F> — {message} *(<t:{unix_ts}:R>)*\n"
 
         await ctx.send(msg)
 
