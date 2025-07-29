@@ -95,18 +95,10 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-def format_time_diff(event_time, now):
-    delta = event_time - now
-    days = delta.days
-    hours = delta.seconds // 3600
-    parts = []
-    if days > 0:
-        parts.append(f"{days} day{'s' if days != 1 else ''}")
-    if hours > 0:
-        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
-    if not parts:
-        parts.append("less than 1 hour")
-    return "in " + " ".join(parts)
+def format_time_diff(diff: timedelta):
+    days = diff.days
+    hours = diff.seconds // 3600
+    return f"(in {days}d {hours}h)" if days or hours else "(now)"
 
 from datetime import datetime, timedelta
 
@@ -134,7 +126,10 @@ async def test_events(ctx):
 
         msg = "**📅 Upcoming Events (next 3 days):**\n"
         for unix_ts, message in sorted(upcoming):
-            msg += f"> <t:{unix_ts}:F> — {message} *(<t:{unix_ts}:R>)*\n"
+            event_dt = datetime.fromtimestamp(unix_ts, UTC)
+            diff = event_dt - now
+            time_diff_str = format_time_diff(diff)
+            msg += f"> <t:{unix_ts}:F> — {message} {time_diff_str}\n"
 
         await ctx.send(msg)
 
