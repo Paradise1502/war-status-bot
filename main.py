@@ -104,6 +104,8 @@ def format_time_diff(diff: timedelta):
     hours = diff.seconds // 3600
     return f"(in {days}d {hours}h)" if days or hours else "(now)"
 
+EVENT_MSG_FILE = "last_event_msg.json"
+
 # New background task function
 async def send_upcoming_events():
     try:
@@ -130,10 +132,29 @@ async def send_upcoming_events():
             time_diff_str = format_time_diff(diff)
             msg += f"> <t:{unix_ts}:F> — {message} {time_diff_str}\n"
 
-        channel_id = 1290167968080330782  # Your target channel ID
+        channel_id = 1290167968080330782
         channel = bot.get_channel(channel_id)
-        if channel:
-            await channel.send(msg)
+        if not channel:
+            return
+
+        # 🔥 Try to delete previous message
+        if os.path.exists(EVENT_MSG_FILE):
+            with open(EVENT_MSG_FILE, "r") as f:
+                data = json.load(f)
+                last_msg_id = data.get("message_id")
+                if last_msg_id:
+                    try:
+                        old_msg = await channel.fetch_message(last_msg_id)
+                        await old_msg.delete()
+                    except Exception as e:
+                        print(f"Couldn't delete previous message: {e}")
+
+        # ✅ Send new message
+        new_msg = await channel.send(msg)
+
+        # 💾 Save new message ID
+        with open(EVENT_MSG_FILE, "w") as f:
+            json.dump({"message_id": new_msg.id}, f)
 
     except Exception as e:
         print(f"[Scheduled Task Error] {e}")
