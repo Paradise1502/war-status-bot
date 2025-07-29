@@ -6,7 +6,6 @@ import json
 import discord
 from discord.ext import commands
 from discord.ext import tasks
-from datetime import datetime, timedelta
 
 # Google Sheets Auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -99,18 +98,25 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 @bot.command()
 async def test_events(ctx):
     try:
+        from datetime import datetime, timedelta, timezone
+
         sheet = client.open("Event Schedule").sheet1
         data = sheet.get_all_records()
-        await ctx.send(f"Headers: {list(data[0].keys())}")
 
-        now = datetime.utcnow()
-        later = now + timedelta(days=3)
+        now = datetime.now(timezone.utc)
+        three_days_later = now + timedelta(days=3)
 
         upcoming = []
         for row in data:
-            event_time = datetime.fromisoformat(row["start_time_utc"].replace("Z", "+00:00"))
-            if now <= event_time <= later:
-                upcoming.append((event_time, row["message"]))
+            # Fix trailing space in header keys
+            event_time_raw = row.get("start_time_utc")
+            message = row.get("message ".strip())
+            if not event_time_raw or not message:
+                continue
+
+            event_time = datetime.fromisoformat(event_time_raw.replace("Z", "+00:00"))
+            if now <= event_time <= three_days_later:
+                upcoming.append((event_time, message))
 
         if not upcoming:
             await ctx.send("No events in the next 3 days.")
