@@ -6,6 +6,8 @@ import json
 import discord
 from discord.ext import commands
 from discord.ext import tasks
+from datetime import datetime, timedelta, UTC
+import asyncio
 
 # Google Sheets Auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -102,13 +104,11 @@ def format_time_diff(diff: timedelta):
     hours = diff.seconds // 3600
     return f"(in {days}d {hours}h)" if days or hours else "(now)"
 
-@bot.command()
-async def test_events(ctx):
+# New background task function
+async def send_upcoming_events():
     try:
         sheet = client.open("Event Schedule").sheet1
         data = sheet.get_all_records()
-
-        from datetime import datetime, UTC  # make sure this is imported
 
         now = datetime.now(UTC)
         later = now + timedelta(days=3)
@@ -121,59 +121,39 @@ async def test_events(ctx):
                 upcoming.append((unix_ts, row["message"]))
 
         if not upcoming:
-            await ctx.send("No events in the next 3 days.")
             return
 
-        msg = "**📅 Upcoming Events (next 3 days):**\n"
+        msg = "**\ud83d\uddd3\ufe0f Upcoming Events (next 3 days):**\n"
         for unix_ts, message in sorted(upcoming):
             event_dt = datetime.fromtimestamp(unix_ts, UTC)
             diff = event_dt - now
             time_diff_str = format_time_diff(diff)
             msg += f"> <t:{unix_ts}:F> — {message} {time_diff_str}\n"
 
-        await ctx.send(msg)
-
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
-
-@tasks.loop(minutes=1)
-async def daily_event_summary():
-    now = datetime.datetime.utcnow()
-    if now.hour != 12 or now.minute != 0:
-        return  # Only run at exactly 12:00 UTC
-
-    try:
-        sheet = client.open(EVENT_SHEET_NAME).worksheet(EVENT_TAB_NAME)
-        rows = sheet.get_all_records()
-        upcoming = []
-        now = now.replace(second=0, microsecond=0)
-        three_days_later = now + datetime.timedelta(days=3)
-
-        for row in rows:
-            try:
-                event_time = datetime.datetime.strptime(row["start_time_utc"], "%Y-%m-%dT%H:%M:%SZ")
-                if now <= event_time <= three_days_later:
-                    formatted = f"🗓️ **{event_time.strftime('%a %b %d %H:%M UTC')}** — {row['event_name']}\n{row['message']}"
-                    upcoming.append(formatted)
-            except Exception as e:
-                print(f"[Event Parse Error] {e}")
-
-        if not upcoming:
-            message = "📭 No scheduled events in the next 3 days."
-        else:
-            message = "**📣 Upcoming Events (Next 3 Days)**\n\n" + "\n\n".join(upcoming)
-
-        channel = bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        channel_id = 1290167968080330782  # Your target channel ID
+        channel = bot.get_channel(channel_id)
         if channel:
-            await channel.send(message)
+            await channel.send(msg)
 
     except Exception as e:
-        print(f"[Daily Summary Error] {e}")
+        print(f"[Scheduled Task Error] {e}")
 
+# Background scheduler
+@tasks.loop(hours=24)
+async def scheduled_event_check():
+    await bot.wait_until_ready()
+    now = datetime.now(UTC)
+    target = now.replace(hour=12, minute=0, second=0, microsecond=0)
+    if now > target:
+        target += timedelta(days=1)
+    await asyncio.sleep((target - now).total_seconds())
+    await send_upcoming_events()
+
+# Hook the task on bot ready
 @bot.event
 async def on_ready():
-    print(f"Bot is online as {bot.user}")
-    check_scheduled_events.start()
+    print(f"{bot.user} is ready.")
+    scheduled_event_check.start()
 
 @bot.command()
 async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
