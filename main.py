@@ -95,7 +95,18 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-from datetime import datetime, timedelta
+def format_time_diff(event_time, now):
+    delta = event_time - now
+    days = delta.days
+    hours = delta.seconds // 3600
+    parts = []
+    if days > 0:
+        parts.append(f"{days} day{'s' if days != 1 else ''}")
+    if hours > 0:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if not parts:
+        parts.append("less than 1 hour")
+    return "in " + " ".join(parts)
 
 @bot.command()
 async def test_events(ctx):
