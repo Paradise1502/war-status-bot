@@ -5,6 +5,8 @@ import os
 import json
 import discord
 from discord.ext import commands
+from discord.ext import tasks
+import datetime
 
 # Google Sheets Auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -12,6 +14,10 @@ creds_json = os.getenv("CREDENTIALS_JSON")
 creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
+
+EVENT_SHEET_NAME = "EventSchedule"      # The spreadsheet name
+EVENT_TAB_NAME = "events"               # The tab name
+ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement channel
 
 # Season sheet mapping
 SEASON_SHEETS = {
@@ -89,6 +95,73 @@ async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
+async def test_events(ctx):
+    try:
+        sheet = client.open(EVENT_SHEET_NAME).worksheet(EVENT_TAB_NAME)
+        rows = sheet.get_all_records()
+        upcoming = []
+        now = datetime.datetime.utcnow().replace(second=0, microsecond=0)
+        three_days_later = now + datetime.timedelta(days=3)
+
+        for row in rows:
+            try:
+                event_time = datetime.datetime.strptime(row["start_time_utc"], "%Y-%m-%dT%H:%M:%SZ")
+                if now <= event_time <= three_days_later:
+                    formatted = f"🗓️ **{event_time.strftime('%a %b %d %H:%M UTC')}** — {row['event_name']}\n{row['message']}"
+                    upcoming.append(formatted)
+            except Exception as e:
+                print(f"[Event Parse Error] {e}")
+
+        if not upcoming:
+            message = "📭 No scheduled events in the next 3 days."
+        else:
+            message = "**📣 Upcoming Events (Next 3 Days)**\n\n" + "\n\n".join(upcoming)
+
+        await ctx.send(message)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@tasks.loop(minutes=1)
+async def daily_event_summary():
+    now = datetime.datetime.utcnow()
+    if now.hour != 12 or now.minute != 0:
+        return  # Only run at exactly 12:00 UTC
+
+    try:
+        sheet = client.open(EVENT_SHEET_NAME).worksheet(EVENT_TAB_NAME)
+        rows = sheet.get_all_records()
+        upcoming = []
+        now = now.replace(second=0, microsecond=0)
+        three_days_later = now + datetime.timedelta(days=3)
+
+        for row in rows:
+            try:
+                event_time = datetime.datetime.strptime(row["start_time_utc"], "%Y-%m-%dT%H:%M:%SZ")
+                if now <= event_time <= three_days_later:
+                    formatted = f"🗓️ **{event_time.strftime('%a %b %d %H:%M UTC')}** — {row['event_name']}\n{row['message']}"
+                    upcoming.append(formatted)
+            except Exception as e:
+                print(f"[Event Parse Error] {e}")
+
+        if not upcoming:
+            message = "📭 No scheduled events in the next 3 days."
+        else:
+            message = "**📣 Upcoming Events (Next 3 Days)**\n\n" + "\n\n".join(upcoming)
+
+        channel = bot.get_channel(ANNOUNCE_CHANNEL_ID)
+        if channel:
+            await channel.send(message)
+
+    except Exception as e:
+        print(f"[Daily Summary Error] {e}")
+
+@bot.event
+async def on_ready():
+    print(f"Bot is online as {bot.user}")
+    check_scheduled_events.start()
 
 @bot.command()
 async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
