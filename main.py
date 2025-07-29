@@ -103,7 +103,9 @@ async def test_events(ctx):
         sheet = client.open("Event Schedule").sheet1
         data = sheet.get_all_records()
 
-        now = datetime.utcnow()
+        from datetime import datetime, UTC  # make sure this is imported
+
+        now = datetime.now(UTC)
         later = now + timedelta(days=3)
 
         upcoming = []
