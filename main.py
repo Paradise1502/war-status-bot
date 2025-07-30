@@ -164,7 +164,7 @@ async def send_upcoming_events():
 async def scheduled_event_check():
     await bot.wait_until_ready()
     now = datetime.now(UTC)
-    target = now.replace(hour=12, minute=21, second=0, microsecond=0)
+    target = now.replace(hour=12, minute=0, second=0, microsecond=0)
     if now >= target:
         target += timedelta(days=1)
     delay = (target - now).total_seconds()
