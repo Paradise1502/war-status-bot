@@ -172,12 +172,6 @@ async def scheduled_event_check():
     await send_upcoming_events()
     scheduled_event_check.restart()
 
-# Hook the task on bot ready
-@bot.event
-async def on_ready():
-    print(f"{bot.user} is ready.")
-    scheduled_event_check.start()
-
 @bot.command()
 async def test_events(ctx):
     await send_upcoming_events()
@@ -1445,6 +1439,7 @@ def role_check():
 @bot.event
 async def on_ready():
     print(f'✅ Bot is online as {bot.user}')
+    scheduled_event_check.start()
 
 
 @bot.command()
