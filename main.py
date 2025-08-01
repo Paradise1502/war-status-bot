@@ -177,7 +177,7 @@ async def test_events(ctx):
     await send_upcoming_events()
 
 # Config values
-CONTROL_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
+CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
 WAR_CHANNEL_ID = 11369071691111600168  # ⬅️ replace with your war channel ID
 REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
 
