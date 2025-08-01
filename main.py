@@ -196,10 +196,13 @@ WAR_CHANNEL_REACTIONS = {
 
 @bot.event
 async def on_raw_reaction_add(payload):
+    print(f"Reaction detected: emoji={payload.emoji}, user={payload.user_id}, message={payload.message_id}")
+
     if payload.message_id != REACTION_MESSAGE_ID:
         return
 
     emoji = str(payload.emoji)
+    print(f"Parsed emoji: {emoji}")
     new_name = WAR_CHANNEL_REACTIONS.get(emoji)
     if not new_name:
         return
