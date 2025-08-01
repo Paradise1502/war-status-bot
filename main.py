@@ -191,7 +191,7 @@ WAR_CHANNEL_REACTIONS = {
     "🔴": "〘🔴〙war-status-fullwar",
     "🟢": "〘🟢〙war-status-no-fighting",
     "🟡": "〘🟡〙war-status-skirmishes",
-    "🧑‍🌾": "〘🧑‍🌾〙war-status-go-farm"",
+    "🧑‍🌾": "〘🧑‍🌾〙war-status-go-farm",
 }
 
 @bot.event
