@@ -187,9 +187,9 @@ REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
 
 # Emoji → new channel name mapping
 WAR_CHANNEL_REACTIONS = {
-    "🟥": "war-status-fullwar",
-    "🟩": "war-status-no-fighting",
-    "🟨": "war-status-skirmishes",
+    "🔴": "war-status-fullwar",
+    "🟢": "war-status-no-fighting",
+    "🟡": "war-status-skirmishes",
     "🧑‍🌾": "war-status-go-farm",
 }
 
