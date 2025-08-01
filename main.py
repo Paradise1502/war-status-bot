@@ -34,6 +34,7 @@ intents = discord.Intents.default()
 intents.guilds = True
 intents.messages = True
 intents.reactions = True
+intents.guild_reactions = True
 intents.message_content = True  # Not needed for reactions, but good for commands
 
 bot = commands.Bot(command_prefix="!", intents=intents)
