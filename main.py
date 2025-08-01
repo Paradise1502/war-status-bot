@@ -176,6 +176,44 @@ async def scheduled_event_check():
 async def test_events(ctx):
     await send_upcoming_events()
 
+# Config values
+CONTROL_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
+WAR_CHANNEL_ID = 11369071691111600168  # ⬅️ replace with your war channel ID
+REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
+
+# Emoji → new channel name mapping
+WAR_CHANNEL_REACTIONS = {
+    "🟥": "war-status-fullwar",
+    "🟩": "war-status-no-fighting",
+    "🟨": "war-status-skirmishes",
+    "🧑‍🌾": "war-status-go-farm",
+}
+
+@bot.event
+async def on_raw_reaction_add(payload):
+    if payload.message_id != REACTION_MESSAGE_ID:
+        return
+
+    emoji = str(payload.emoji)
+    new_name = WAR_CHANNEL_REACTIONS.get(emoji)
+    if not new_name:
+        return
+
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+
+    war_channel = guild.get_channel(WAR_CHANNEL_ID)
+    confirm_channel = guild.get_channel(CONFIRM_CHANNEL_ID)
+    if not war_channel or not confirm_channel:
+        return
+
+    try:
+        await war_channel.edit(name=new_name)
+        await confirm_channel.send(f"✅ War channel renamed to `{new_name}` based on reaction {emoji}")
+    except Exception as e:
+        await confirm_channel.send(f"❌ Failed to rename war channel: {e}")
+
 @bot.command()
 async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
