@@ -184,14 +184,14 @@ async def test_events(ctx):
 # Config values
 CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
 WAR_CHANNEL_ID = 1369071691111600168  # ⬅️ replace with your war channel ID
-REACTION_MESSAGE_ID = 1400855732613681152  # ⬅️ replace with your message ID
+REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
 
 # Emoji → new channel name mapping
 WAR_CHANNEL_REACTIONS = {
-    "🔴": "war-status-fullwar",
-    "🟢": "war-status-no-fighting",
-    "🟡": "war-status-skirmishes",
-    "🧑‍🌾": "war-status-go-farm",
+    "🔴": "〘:red_circle:〙war-status-fullwar",
+    "🟢": "〘:green_circle:〙war-status-no-fighting",
+    "🟡": "〘:yellow_circle:〙war-status-skirmishes",
+    "🧑‍🌾": "〘:ear_of_rice:〙war-status-go-farm"",
 }
 
 @bot.event
