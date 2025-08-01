@@ -31,8 +31,12 @@ DEFAULT_SEASON = "sos5"
 
 # Now your bot setup
 intents = discord.Intents.default()
-intents.message_content = True
-bot = commands.Bot(command_prefix='!', intents=intents)
+intents.guilds = True
+intents.messages = True
+intents.reactions = True
+intents.message_content = True  # Not needed for reactions, but good for commands
+
+bot = commands.Bot(command_prefix="!", intents=intents)
 
 @bot.command()
 async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
