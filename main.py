@@ -1054,7 +1054,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def lowperformer(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def lowperformer(ctx, threshold: float = 5.0, season: str = DEFAULT_SEASON):
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
