@@ -910,7 +910,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         ore_gathered_idx = headers.index("ore")
         mana_gathered_idx = headers.index("mana")
         home_server_idx = headers.index("home_server")
-        merit_idx = idx_any("merits", "merit", "total_merits")  # L
+        merit_idx = headers.index("merits")  # L
 
         def idx_any(*names):
             for n in names:
