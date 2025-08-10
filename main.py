@@ -1222,7 +1222,6 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
             except:
                 return 0
 
-        # map previous sheet rows by lord_id for gain calcs
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and row[id_idx].strip()}
 
         rows = []
@@ -1244,7 +1243,6 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
 
             merit = to_int(row[merit_idx])
             ratio = (merit / power) * 100 if power > 0 else 0.0
-            # TOP performers: ratio >= threshold
             if ratio < threshold:
                 continue
 
@@ -1269,15 +1267,14 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
             await ctx.send(f"✅ No players at or above {threshold:.2f}% merit-to-power ratio in server 77.")
             return
 
-        # sort by ratio DESC
         rows.sort(key=lambda x: x["ratio"], reverse=True)
 
         header = f"📈 **Top Performers (≥{threshold:.2f}% merit-to-power)**\n\n"
         chunks, current = [], header
 
-        for e in rows:
+        for rank, e in enumerate(rows, start=1):
             line = (
-                f"🆔 `{e['lid']}` | **{e['name']}** — 🧠 {e['merit']:,} merits (**{e['ratio']:.2f}%**)\n"
+                f"**#{rank}** — 🆔 `{e['lid']}` | **{e['name']}** — 🧠 {e['merit']:,} merits (**{e['ratio']:.2f}%**)\n"
                 f"📊 Power: {e['power']:,}\n"
                 f"⚔️ Kills: +{e['kills']:,} | 💀 Dead: +{e['dead']:,} | "
                 f"❤️ Healed: +{e['healed']:,} | 🤝 Helps: +{e['helps']:,}\n"
