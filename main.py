@@ -910,7 +910,14 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         ore_gathered_idx = headers.index("ore")
         mana_gathered_idx = headers.index("mana")
         home_server_idx = headers.index("home_server")
+        merit_idx = idx_any("merits", "merit", "total_merits")  # L
 
+        def idx_any(*names):
+            for n in names:
+                if n in headers:
+                    return headers.index(n)
+            raise ValueError(f"Missing column; tried: {names}")
+        
         def to_int(v):
             try:
                 return int(v.replace(",", "").strip()) if v not in ("-", "") else 0
@@ -933,6 +940,9 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         name = row_latest[name_idx]
         alliance = row_latest[alliance_idx]
         power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
+        power_latest = to_int(row_latest[power_idx])
+        merit_total = to_int(row_latest[merit_idx])
+        merit_ratio = (merit_total / power_latest * 100) if power_latest > 0 else 0.0
         kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
         dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
         healed_gain = to_int(row_latest[healed_idx]) - to_int(row_prev[healed_idx])
@@ -986,6 +996,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         rank_kills = get_rank(kills_idx)
         rank_dead = get_rank(dead_idx)
         rank_healed = get_rank(healed_idx)
+        rank_merit = get_rank(merit_idx)
 
         t5_total = to_int(row_latest[t5_idx])
         t4_total = to_int(row_latest[t4_idx])
@@ -1001,6 +1012,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
         embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f" (#{rank_power})" if rank_power else ""), inline=False)
+        embed.add_field(name="🧠 Merits", value=f"{merit_total:,} ({merit_ratio:.2f}%)" + (f" (#{rank_merit})" if rank_merit else ""), inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
