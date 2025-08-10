@@ -1011,7 +1011,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         t1_gain = t1_total - to_int(row_prev[t1_idx])
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
-        embed.add_field(name="🟩 Power", value=f"+{power_gain:,}" + (f" (#{rank_power})" if rank_power else ""), inline=False)
+        embed.add_field(name="🟩 Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" (#{rank_power})" if rank_power else ""), inline=False)
         embed.add_field(name="🧠 Merits", value=f"{merit_total:,} ({merit_ratio:.2f}%)" + (f" (#{rank_merit})" if rank_merit else ""), inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
