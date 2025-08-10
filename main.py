@@ -1175,6 +1175,128 @@ async def lowperformer(ctx, threshold: float = 5.0, season: str = DEFAULT_SEASON
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
+        
+@bot.command()
+async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASON):
+    try:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        def col_to_index(col):
+            col = col.upper()
+            idx = 0
+            for ch in col:
+                idx = idx * 26 + (ord(ch) - ord('A') + 1)
+            return idx - 1
+
+        id_idx = headers.index("lord_id")
+        name_idx = 1
+        home_server_idx = col_to_index("F")
+        power_idx = col_to_index("M")
+        merit_idx = col_to_index("L")
+        kills_idx = col_to_index("J")
+        dead_idx = col_to_index("R")
+        healed_idx = col_to_index("S")
+        helps_idx = col_to_index("AE")
+
+        def to_int(val):
+            try:
+                val = val.replace(",", "").strip()
+                if val == "-" or not val:
+                    return 0
+                return int(val)
+            except:
+                return 0
+
+        # map previous sheet rows by lord_id for gain calcs
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and row[id_idx].strip()}
+
+        rows = []
+        for row in data_latest[1:]:
+            if len(row) <= helps_idx:
+                continue
+
+            lid = row[id_idx].strip()
+            if not lid or lid not in prev_map:
+                continue
+
+            server = row[home_server_idx].strip() if len(row) > home_server_idx else ""
+            if server != "77":
+                continue
+
+            power = to_int(row[power_idx])
+            if power < 50_000_000:
+                continue
+
+            merit = to_int(row[merit_idx])
+            ratio = (merit / power) * 100 if power > 0 else 0.0
+            # TOP performers: ratio >= threshold
+            if ratio < threshold:
+                continue
+
+            kills_gain = to_int(row[kills_idx]) - to_int(prev_map[lid][kills_idx])
+            dead_gain = to_int(row[dead_idx]) - to_int(prev_map[lid][dead_idx])
+            healed_gain = to_int(row[healed_idx]) - to_int(prev_map[lid][healed_idx])
+            helps_gain = to_int(row[helps_idx]) - to_int(prev_map[lid][helps_idx])
+
+            rows.append({
+                "lid": lid,
+                "name": row[name_idx],
+                "merit": merit,
+                "ratio": ratio,
+                "power": power,
+                "kills": kills_gain,
+                "dead": dead_gain,
+                "healed": healed_gain,
+                "helps": helps_gain
+            })
+
+        if not rows:
+            await ctx.send(f"✅ No players at or above {threshold:.2f}% merit-to-power ratio in server 77.")
+            return
+
+        # sort by ratio DESC
+        rows.sort(key=lambda x: x["ratio"], reverse=True)
+
+        header = f"📈 **Top Performers (≥{threshold:.2f}% merit-to-power)**\n\n"
+        chunks, current = [], header
+
+        for e in rows:
+            line = (
+                f"🆔 `{e['lid']}` | **{e['name']}** — 🧠 {e['merit']:,} merits (**{e['ratio']:.2f}%**)\n"
+                f"📊 Power: {e['power']:,}\n"
+                f"⚔️ Kills: +{e['kills']:,} | 💀 Dead: +{e['dead']:,} | "
+                f"❤️ Healed: +{e['healed']:,} | 🤝 Helps: +{e['helps']:,}\n"
+            )
+            if len(current) + len(line) >= 2000:
+                chunks.append(current)
+                current = ""
+            current += line + "\n"
+
+        if current.strip():
+            chunks.append(current)
+
+        for chunk in chunks:
+            if chunk.strip():
+                embed = discord.Embed(description=chunk.strip(), color=discord.Color.green())
+                await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
 async def farms(ctx, season: str = DEFAULT_SEASON):
