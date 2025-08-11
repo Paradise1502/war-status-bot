@@ -941,8 +941,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         alliance = row_latest[alliance_idx]
         power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
         power_latest = to_int(row_latest[power_idx])
-        merit_total = to_int(row_latest[merit_idx])
-        merit_ratio = (merit_total / power_latest * 100) if power_latest > 0 else 0.0
+        merit_latest = to_int(row_latest[merit_idx])
+        merit_ratio = (merit_latest / to_int(row_latest[power_idx]) * 100) if to_int(row_latest[power_idx]) > 0 else 0
         kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
         dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
         healed_gain = to_int(row_latest[healed_idx]) - to_int(row_prev[healed_idx])
@@ -960,6 +960,29 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         # Create lookup from previous sheet
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
 
+        def get_merit_ratio_rank():
+            player_server = str(row_latest[home_server_idx]).strip()
+            ratios = []
+            for row in data_latest[1:]:
+                if len(row) <= max(merit_idx, power_idx, home_server_idx):
+                    continue
+                if str(row[home_server_idx]).strip() != player_server:
+                    continue
+                p_power = to_int(row[power_idx])
+                if p_power <= 0:
+                    continue
+                p_merit = to_int(row[merit_idx])
+                p_ratio = (p_merit / p_power) * 100
+                ratios.append((row[id_idx], p_ratio))
+
+            ratios.sort(key=lambda x: x[1], reverse=True)
+            for rank, (lid, _) in enumerate(ratios, 1):
+                if lid == lord_id:
+                    return rank
+            return None
+        
+        rank_merit_ratio = get_merit_ratio_rank()
+        
         def get_rank(col_index):
             player_row = next((r for r in data_latest[1:] if r[id_idx].strip() == lord_id), None)
             if not player_row or len(player_row) <= home_server_idx:
@@ -1012,7 +1035,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
         embed.add_field(name="🟩 Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" (#{rank_power})" if rank_power else ""), inline=False)
-        embed.add_field(name="🧠 Merits", value=f"{merit_total:,} ({merit_ratio:.2f}%)" + (f" (#{rank_merit})" if rank_merit else ""), inline=False)
+        embed.add_field(name="🧠 Merits", value=f"{merit_latest:,} ({merit_ratio:.2f}%)" + (f" (#{rank_merit_ratio})" if rank_merit_ratio else ""), inline=False)
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
