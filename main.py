@@ -23,11 +23,12 @@ ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement ch
 # Season sheet mapping
 SEASON_SHEETS = {
     "hk1": "Call of Dragons - HK1",
+    "hk2": "Call of Dragons - HK2",
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5"  # 👈 add this line
 }
 
-DEFAULT_SEASON = "sos5"
+DEFAULT_SEASON = "hk2"
 
 # Now your bot setup
 intents = discord.Intents.default()
