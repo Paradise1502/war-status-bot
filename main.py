@@ -1693,27 +1693,21 @@ async def warfarm(ctx):
 @bot.command()
 async def commands(ctx):
     channel_id = ctx.channel.id
-    allowed_channel_id = 1378735765827358791  # your allowed channel ID
+    allowed_channel_id = 1378735765827358791  # allowed channel ID
 
     if channel_id != allowed_channel_id:
         await ctx.send(f"❌ Commands are only allowed in <#{allowed_channel_id}>.")
         return
 
     help_text = """
-📜 **Available Commands:**
+📜 **MFD Bot – Available Commands**
 
-**🟣 War Status**
-- `!warred` — Set status to 🔴 FULL WAR
-- `!waryellow` — Set status to 🟡 Skirmishes
-- `!wargreen` — Set status to 🟢 No Fighting
-- `!warfarm` — Set status to 🌾 Go Farm Mana
-
-**📊 Player Stats**
-- `!rssheal [lord_id] [season]` — Show RSS spent on healing between last two sheets
-- `!stats [lord_id] [season]` — Show power, kills, healed, dead stats + gain + MFD rank
-- `!kills [lord_id] [season]` — Show kills and troop tier breakdown
-- `!mana [lord_id] [season]` — Mana gathered + gain + MFD rank
-- `!progress [lord_id] [season]` — Full profile: power, kills, dead, heal, RSS, mana (+gain & rank)
+**📊 Progress & Player Stats**
+- `!progress [lord_id] [season]` — Full profile: power, kills, deads, heals, RSS, mana (+gains & rank)
+- `!stats [lord_id] [season]` — Quick snapshot: power, kills, heals, deads (+gain & rank)
+- `!rssheal [lord_id] [season]` — Resources spent on healing (last two sheets)
+- `!kills [lord_id] [season]` — Kill breakdown by troop tier
+- `!mana [lord_id] [season]` — Mana gathered (+gain & rank)
 
 **🏆 Leaderboards**
 - `!topmana` — Top mana gatherers
@@ -1723,10 +1717,9 @@ async def commands(ctx):
 - `!topdeads` — Top dead units
 
 **🗂️ Season Support**
-You can optionally add a season tag like `sos2`, `hk1`, etc. to pull archived data.
-
+Add an optional season tag like `sos5`, `sos2`, `hk1`, etc. to pull archived data.  
 > Example: `!progress 123456 sos2`  
-If no season is given, the bot uses the current season (`sos5`).
+If no season is given, the bot uses the current one (`hk2`).
 """
     await ctx.send(help_text)
 
