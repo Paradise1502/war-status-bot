@@ -1396,7 +1396,7 @@ async def matchups(ctx):
         return
 
     try:
-        sheet_name = SEASON_SHEETS.get(DEFAULT_SEASON)
+        sheet_name = SEASON_SHEETS.get(sos5)
         tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
