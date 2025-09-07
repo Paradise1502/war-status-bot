@@ -1389,14 +1389,20 @@ import discord
 from discord.ext import commands
 
 @bot.command()
-async def matchups(ctx):
+async def matchups(ctx, season: str = DEFAULT_SEASON):
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
         await ctx.send("❌ Command not allowed here.")
         return
 
     try:
-        sheet_name = SEASON_SHEETS.get(sos5)
+        # normalize input
+        season = season.lower()
+
+        # lookup in dict, or just use raw input (so "sos5" works even if not in dict)
+        sheet_name = SEASON_SHEETS.get(season, season)
+
+        # open the Google Sheet
         tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
