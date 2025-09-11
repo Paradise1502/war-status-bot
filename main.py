@@ -25,10 +25,11 @@ SEASON_SHEETS = {
     "hk1": "Call of Dragons - HK1",
     "hk2": "Call of Dragons - HK2",
     "sos2": "Call of Dragons - SoS2",
-    "sos5": "Call of Dragons - SoS5"  # 👈 add this line
+    "sos5": "Call of Dragons - SoS5",
+    "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
-DEFAULT_SEASON = "hk2"
+DEFAULT_SEASON = "sos4"
 
 # Now your bot setup
 intents = discord.Intents.default()
@@ -1426,16 +1427,16 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
 
         def emoji_bracket(server):
             return {
-                "60": "🔴 ", "73": "🔴 ", "77": "🔴 ", "435": "🔴 ",
-                "11": "🔵 ", "156": "🔵 ", "99": "🔵 ", "222": "🔵 "
+                "99": "🔴 ", "283": "🔴 ", "77": "🔴 ",
+                "110": "🔵 ", "183": "🔵 ", "92": "🔵 "
             }.get(server, "")
 
         SERVER_MAP = {
-            "11": "Ex-", "156": "B&R", "99": "BTX", "222": "HOUW",
-            "60": "ECHO", "73": "SVR", "77": "MFD", "435": "VW"
+            "110": "RoG", "92": "wAo", "99": "BTX", "283": "RFF",
+            "183": "A2G", "77": "MFD"
         }
 
-        matchups = [("60", "99"), ("77", "156"), ("435", "11"), ("73", "222")]
+        matchups = [("183", "99"), ("77", "110"), ("92", "283")]
 
         stat_map = {s: {
             "kills": 0, "kills_gain": 0,
@@ -1725,7 +1726,7 @@ async def commands(ctx):
 **🗂️ Season Support**
 Add an optional season tag like `sos5`, `sos2`, `hk1`, etc. to pull archived data.  
 > Example: `!progress 123456 sos2`  
-If no season is given, the bot uses the current one (`hk2`).
+If no season is given, the bot uses the current one (`sos4`).
 """
     await ctx.send(help_text)
 
