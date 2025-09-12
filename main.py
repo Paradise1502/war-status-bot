@@ -535,14 +535,29 @@ async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def toprssheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+async def toprssheal(ctx, *args):
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
         await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
         return
 
+    # defaults
+    season = DEFAULT_SEASON
+    top_n = 10
+
+    # parse args in any order
     try:
-        season = season.lower()
+        for arg in args:
+            a = str(arg).strip().lower()
+            if a.isdigit():  # top_n
+                top_n = max(1, min(50, int(a)))  # clamp a bit to avoid spam
+            else:  # season
+                if a in SEASON_SHEETS:
+                    season = a
+                else:
+                    await ctx.send(f"❌ Invalid season '{arg}'. Available: {', '.join(SEASON_SHEETS.keys())}")
+                    return
+
         sheet_name = SEASON_SHEETS.get(season)
         if not sheet_name:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
@@ -571,36 +586,37 @@ async def toprssheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
         mana_idx = 34  # AI
 
         def to_int(val):
-            try: return int(val.replace(',', '').replace('-', '').strip())
-            except: return 0
+            try:
+                return int(str(val).replace(',', '').replace('-', '').strip())
+            except:
+                return 0
 
-        # Build previous sheet map
         prev_map = {}
         for row in data_prev[1:]:
             if len(row) > mana_idx:
-                raw_id = row[id_index].strip() if row[id_index] else ""
+                raw_id = (row[id_index] or "").strip()
                 if raw_id:
                     prev_map[raw_id] = {
                         "gold": to_int(row[gold_idx]),
                         "wood": to_int(row[wood_idx]),
-                        "ore": to_int(row[ore_idx]),
-                        "mana": to_int(row[mana_idx])
+                        "ore":  to_int(row[ore_idx]),
+                        "mana": to_int(row[mana_idx]),
                     }
 
         gains = []
         for row in data_latest[1:]:
             if len(row) > mana_idx:
-                raw_id = row[id_index].strip() if row[id_index] else ""
-                if raw_id not in prev_map:
-                    continue  # Skip users not in both sheets
+                raw_id = (row[id_index] or "").strip()
+                if not raw_id or raw_id not in prev_map:
+                    continue
 
                 power = to_int(row[power_idx])
                 if power < 25_000_000:
                     continue
 
-                name = row[name_index].strip() if len(row) > name_index else "?"
-                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
-                full_name = f"[{alliance}] {name}"
+                name = (row[name_index] if len(row) > name_index else "?").strip()
+                alliance = (row[alliance_index] if len(row) > alliance_index else "").strip()
+                full_name = f"[{alliance}] {name}".strip()
 
                 gold = to_int(row[gold_idx]) - prev_map[raw_id]["gold"]
                 wood = to_int(row[wood_idx]) - prev_map[raw_id]["wood"]
@@ -611,10 +627,15 @@ async def toprssheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
                 gains.append((full_name, total, gold, wood, ore, mana))
 
         gains.sort(key=lambda x: x[1], reverse=True)
-        result = "\n".join([
+
+        if not gains:
+            await ctx.send(f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
+            return
+
+        result = "\n".join(
             f"{i+1}. `{name}` — 💸 +{total:,} (🪙{gold:,} 🪵{wood:,} ⛏️{ore:,} 💧{mana:,})"
             for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n])
-        ])
+        )
 
         await ctx.send(f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
 
