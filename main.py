@@ -558,6 +558,196 @@ async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
+async def toprssheal_mfd(ctx, *args):
+    """
+    Top/Bottom RSS heal gains for MFD members on Server 77 only.
+    - Season arg like 'sos5' (must exist in SEASON_SHEETS)
+    - Optional number arg for N: top/bottom N (default 10, clamped 1..50)
+    """
+    allowed_channels = {1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
+    # defaults
+    season = DEFAULT_SEASON
+    top_n = 10
+
+    # parse args in any order
+    try:
+        for arg in args:
+            a = str(arg).strip().lower()
+            if a.isdigit():  # top_n
+                top_n = max(1, min(50, int(a)))  # clamp to avoid spam
+            else:
+                # season key must exist
+                if a in SEASON_SHEETS:
+                    season = a
+                else:
+                    await ctx.send(f"❌ Invalid season '{arg}'. Available: {', '.join(SEASON_SHEETS.keys())}")
+                    return
+
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        headers = data_latest[0]
+
+        # Column lookups (by header names where possible)
+        id_index = headers.index("lord_id")
+        name_index = 1               # Column B (Name)
+        alliance_index = 3           # Column D (Alliance/tag)
+        power_idx = 12               # Column M (Power)
+        server_idx = headers.index("home_server") if "home_server" in headers else 5  # Column F fallback
+
+        gold_idx = 31  # AF
+        wood_idx = 32  # AG
+        ore_idx  = 33  # AH
+        mana_idx = 34  # AI
+
+        def to_int(val):
+            try:
+                return int(str(val).replace(',', '').replace('-', '').strip())
+            except:
+                return 0
+
+        def is_mfd(tag: str) -> bool:
+            """Alliance tag starts with 'MFD' (covers MFD, MFD1, MFD2, etc.)."""
+            if not tag:
+                return False
+            t = tag.strip().upper()
+            return t.startswith("MFD")
+
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > mana_idx:
+                raw_id = (row[id_index] or "").strip()
+                if raw_id:
+                    prev_map[raw_id] = {
+                        "gold": to_int(row[gold_idx]),
+                        "wood": to_int(row[wood_idx]),
+                        "ore":  to_int(row[ore_idx]),
+                        "mana": to_int(row[mana_idx]),
+                    }
+
+        # Build filtered gains list (MFD + server 77 + >=25M power + present in both sheets)
+        records = []
+        for row in data_latest[1:]:
+            if len(row) <= mana_idx:
+                continue
+
+            raw_id = (row[id_index] or "").strip()
+            if not raw_id or raw_id not in prev_map:
+                continue
+
+            # Server filter (must be 77)
+            server_val = (row[server_idx] if len(row) > server_idx else "").strip()
+            if str(server_val) != "77":
+                continue
+
+            # Alliance filter (MFD + variants)
+            alliance = (row[alliance_index] if len(row) > alliance_index else "").strip()
+            if not is_mfd(alliance):
+                continue
+
+            power = to_int(row[power_idx])
+            if power < 25_000_000:
+                continue
+
+            name = (row[name_index] if len(row) > name_index else "?").strip()
+            full_name = f"[{alliance}] {name}".strip()
+
+            gold = to_int(row[gold_idx]) - prev_map[raw_id]["gold"]
+            wood = to_int(row[wood_idx]) - prev_map[raw_id]["wood"]
+            ore  = to_int(row[ore_idx])  - prev_map[raw_id]["ore"]
+            mana = to_int(row[mana_idx]) - prev_map[raw_id]["mana"]
+            total = gold + wood + ore + mana
+
+            records.append((full_name, total, gold, wood, ore, mana))
+
+        if not records:
+            await ctx.send(
+                f"📊 **MFD (S77) RSS Heal Gains** (≥25M Power)\n"
+                f"`{previous.title}` → `{latest.title}`:\n_No eligible MFD players on Server 77 found._"
+            )
+            return
+
+        # Sort once by total
+        records.sort(key=lambda x: x[1], reverse=True)
+
+        # Build Top N lines
+        top_rows = records[:top_n]
+        top_lines = [
+            f"{i+1}. `{name}` — 💸 +{total:,} (🪙{gold:,} 🪵{wood:,} ⛏️{ore:,} 💧{mana:,})"
+            for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows)
+        ]
+
+        # Build Bottom N lines (lowest totals, include zeros)
+        bottom_rows = sorted(records, key=lambda x: x[1])[:top_n]
+        bottom_lines = [
+            f"{i+1}. `{name}` — 💸 +{total:,} (🪙{gold:,} 🪵{wood:,} ⛏️{ore:,} 💧{mana:,})"
+            for i, (name, total, gold, wood, ore, mana) in enumerate(bottom_rows)
+        ]
+
+        # Chunked sending (<=2000 chars per message)
+        header_top = (
+            f"📊 **MFD (S77) — Top {top_n} RSS Heal Gains** (≥25M Power)\n"
+            f"`{previous.title}` → `{latest.title}`:\n"
+        )
+        header_bottom = f"\n📉 **MFD (S77) — Bottom {top_n} RSS Heal Gains**\n"
+
+        # We combine both sections but still respect 2000 char chunks
+        chunks = []
+        chunk = header_top
+        for line in top_lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+
+        # Append bottom header
+        if len(chunk) + len(header_bottom) > 2000:
+            chunks.append(chunk.rstrip())
+            chunk = "(cont.)\n"
+        chunk += header_bottom
+
+        # Append bottom lines
+        for line in bottom_lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+
+        if chunk.strip():
+            chunks.append(chunk.rstrip())
+
+        # Send chunks
+        for ch in chunks:
+            await ctx.send(ch)
+
+    except discord.HTTPException as e:
+        # Friendly messages
+        if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+            await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller N.")
+        elif getattr(e, "status", None) == 429:
+            await ctx.send("⏳ Rate limited. Try again in a moment.")
+        else:
+            await ctx.send(f"❌ Discord error: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def toprssheal(ctx, *args):
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
@@ -655,13 +845,33 @@ async def toprssheal(ctx, *args):
             await ctx.send(f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
             return
 
-        result = "\n".join(
+        # Build lines (respecting top_n)
+        top_rows = gains[:top_n]
+        lines = [
             f"{i+1}. `{name}` — 💸 +{total:,} (🪙{gold:,} 🪵{wood:,} ⛏️{ore:,} 💧{mana:,})"
-            for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n])
-        )
+            for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows)
+        ]
 
-        await ctx.send(f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
+        # Chunked sending (<=2000 chars per message)
+        header = f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
+        chunk = header
+        for line in lines:
+            # +1 for newline
+            if len(chunk) + len(line) + 1 > 2000:
+                await ctx.send(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            await ctx.send(chunk.rstrip())
 
+    except discord.HTTPException as e:
+        # Friendly message on length/validation errors
+        if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+            await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller range.")
+        elif getattr(e, "status", None) == 429:
+            await ctx.send("⏳ Rate limited. Try again in a moment.")
+        else:
+            await ctx.send(f"❌ Discord error: {e}")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
