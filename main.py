@@ -391,11 +391,11 @@ async def topmana(ctx, *args):
         await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
         return
 
-    # Default values
+    # Defaults
     top_n = 10
     season = DEFAULT_SEASON
 
-    # Parse args flexibly
+    # Parse args: first number = top N, any other token = season
     for arg in args:
         if arg.isdigit():
             top_n = int(arg)
@@ -424,44 +424,67 @@ async def topmana(ctx, *args):
         id_index = headers.index("lord_id")
         name_index = 1
         alliance_index = 3
-        mana_idx = 26  # Column AA
-        power_idx = 12  # Column M
+        mana_idx = 26  # AA
+        power_idx = 12 # M
 
         def to_int(val):
-            try: return int(val.replace(',', '').replace('-', '').strip())
-            except: return 0
+            try:
+                return int(val.replace(',', '').replace('-', '').strip())
+            except:
+                return 0
 
         prev_map = {
-            row[id_index]: {
-                "mana": to_int(row[mana_idx])
-            }
+            row[id_index]: {"mana": to_int(row[mana_idx])}
             for row in data_prev[1:]
             if len(row) > mana_idx and row[id_index]
         }
 
         gains = []
-
         for row in data_latest[1:]:
-            if len(row) > max(mana_idx, power_idx):
-                lord_id = row[id_index]
-                alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
-                name = f"[{alliance}] {row[name_index].strip()}"
-                if lord_id not in prev_map:
-                    continue  # skip if not in previous sheet
+            if len(row) <= max(mana_idx, power_idx):
+                continue
+            lord_id = row[id_index]
+            if lord_id not in prev_map:
+                continue
 
-                mana_now = to_int(row[mana_idx])
-                mana_prev = prev_map[lord_id]["mana"]
-                gain = mana_now - mana_prev
-                power = to_int(row[power_idx])
+            alliance = row[alliance_index].strip() if len(row) > alliance_index else ""
+            name = f"[{alliance}] {row[name_index].strip()}"
 
-                if power >= 25_000_000:
-                    gains.append((name, gain))
+            mana_now = to_int(row[mana_idx])
+            mana_prev = prev_map[lord_id]["mana"]
+            gain = mana_now - mana_prev
+            power = to_int(row[power_idx])
+
+            if power >= 25_000_000:
+                gains.append((name, gain))
+
+        if not gains:
+            await ctx.send("No eligible players found (≥25M power and present in both sheets).")
+            return
 
         gains.sort(key=lambda x: x[1], reverse=True)
-        result = "\n".join([f"{i+1}. `{name}` — 💧 +{mana:,}" for i, (name, mana) in enumerate(gains[:top_n])])
+        top_rows = gains[:top_n]
 
-        await ctx.send(f"📊 **Top {top_n} Mana Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
+        # Build lines
+        lines = [f"{i+1}. `{name}` — 💧 +{mana:,}" for i, (name, mana) in enumerate(top_rows)]
 
+        # Chunked sending (<=2000 chars per message)
+        header = f"📊 **Top {top_n} Mana Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
+        chunk = header
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                await ctx.send(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            await ctx.send(chunk.rstrip())
+
+    except discord.HTTPException as e:
+        # Friendly message on length/validation errors
+        if getattr(e, "code", None) == 50035:
+            await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller range.")
+        else:
+            await ctx.send(f"❌ Discord error: {e}")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
