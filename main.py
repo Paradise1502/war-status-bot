@@ -464,7 +464,7 @@ async def totaldeads(ctx, *args):
 async def activity(ctx, *args):
     """
     Compare FIRST vs LATEST tab and report, per SERVER (filtered list only):
-      - Active players (merits increased)
+      - Active players (merits increased, only if power >= 40M)
       - Total merits gained
 
     Usage:
@@ -490,6 +490,7 @@ async def activity(ctx, *args):
         "110": "RoG",
     }
     ALLOWED_SERVERS = set(SERVER_LABELS.keys())
+    POWER_THRESHOLD = 40_000_000
 
     # Parse args
     top_n = 20
@@ -507,8 +508,7 @@ async def activity(ctx, *args):
     def safe_int(v, default=0):
         try:
             s = str(v).strip().replace(",", "")
-            if s in ("", "-", "None", "null"):
-                return default
+            if s in ("", "-", "None", "null"): return default
             return int(float(s))
         except Exception:
             return default
@@ -542,13 +542,13 @@ async def activity(ctx, *args):
         # Headers
         hdr_b = {h: i for i, h in enumerate(base[0])}
         hdr_l = {h: i for i, h in enumerate(later[0])}
-        for req in ("lord_id", "merits"):
+        for req in ("lord_id", "merits", "power"):
             if req not in hdr_b or req not in hdr_l:
-                await ctx.send("❌ Both tabs must include headers: `lord_id`, `merits` (optional `home_server`).")
+                await ctx.send("❌ Both tabs must include headers: `lord_id`, `merits`, `power` (plus optional `home_server`).")
                 return
 
-        id_b, mer_b = hdr_b["lord_id"], hdr_b["merits"]
-        id_l, mer_l = hdr_l["lord_id"], hdr_l["merits"]
+        id_b, mer_b, pow_b = hdr_b["lord_id"], hdr_b["merits"], hdr_b["power"]
+        id_l, mer_l, pow_l = hdr_l["lord_id"], hdr_l["merits"], hdr_l["power"]
         srv_b = hdr_b.get("home_server")
         srv_l = hdr_l.get("home_server")
 
@@ -556,34 +556,40 @@ async def activity(ctx, *args):
         base_map = {}
         for r in base[1:]:
             lid = (r[id_b] if len(r) > id_b else "").strip()
-            if not lid:
-                continue
+            if not lid: continue
             srv_val = (r[srv_b] if (srv_b is not None and len(r) > srv_b) else "")
             m = safe_int(r[mer_b])
-            base_map[lid] = (extract_server(srv_val), m)
+            p = safe_int(r[pow_b])
+            base_map[lid] = (extract_server(srv_val), m, p)
 
         later_map = {}
         for r in later[1:]:
             lid = (r[id_l] if len(r) > id_l else "").strip()
-            if not lid:
-                continue
+            if not lid: continue
             srv_val = (r[srv_l] if (srv_l is not None and len(r) > srv_l) else "")
             m = safe_int(r[mer_l])
-            later_map[lid] = (extract_server(srv_val), m)
+            p = safe_int(r[pow_l])
+            later_map[lid] = (extract_server(srv_val), m, p)
 
-        # Aggregate by SERVER only (filtered set)
+        # Aggregate by SERVER only (filtered set, power filter)
         agg = {}  # server -> {"active": int, "merits": int}
-        for lid, (srv1, m1) in base_map.items():
+        for lid, (srv1, m1, p1) in base_map.items():
             if lid not in later_map:
                 continue
-            srv2, m2 = later_map[lid]
-            # Prefer the later server if present, else base
+            srv2, m2, p2 = later_map[lid]
             server = srv2 or srv1
             if server not in ALLOWED_SERVERS:
                 continue
+
+            # Require power >= threshold in either scan
+            power = max(p1, p2)
+            if power < POWER_THRESHOLD:
+                continue
+
             delta = m2 - m1
             if delta <= 0:
                 continue
+
             bucket = agg.get(server, {"active": 0, "merits": 0})
             bucket["active"] += 1
             bucket["merits"] += delta
@@ -595,18 +601,17 @@ async def activity(ctx, *args):
         top_rows = rows[:top_n]
 
         header = (
-            f"**📈 Activity Report (first vs latest tab, by Server)**\n"
+            f"**📈 Activity Report (≥40M Power, first vs latest tab, by Server)**\n"
             f"`{ws_base.title}` → `{ws_later.title}` in `{wb.title}`\n"
         )
         if not top_rows:
             await ctx.send(header + "_No merit gains detected on the specified servers._")
             return
 
-        # Lines (no "present", no '?', show mapped alliance name)
+        # Lines (server + alliance tag)
         lines = []
         for i, (srv, active, merits) in enumerate(top_rows, start=1):
             tag = SERVER_LABELS.get(srv, "")
-            # Only our allowed servers are included, so tag will exist
             lines.append(f"{i}. [{tag}] S{srv} — 👥 Active {active} — ⭐ +{merits:,}")
 
         # Chunked send
