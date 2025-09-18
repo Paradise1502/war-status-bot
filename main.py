@@ -463,9 +463,10 @@ async def totaldeads(ctx, *args):
 @bot.command()
 async def activity(ctx, *args):
     """
-    Compare the first and latest tab in a workbook and report, per alliance & server:
-      - Active players (merits increased at all)
-      - Total merits gained
+    Compare the FIRST and LATEST tab in a workbook and report, per alliance & server:
+      - Active players (merits increased > 0)
+      - Players present in both scans
+      - Total merits gained (sum of positive deltas)
 
     Usage:
       !activity statue
@@ -489,7 +490,6 @@ async def activity(ctx, *args):
         else:
             tokens.append(str(a))
     sheet_token = " ".join(tokens).strip()
-
     if not sheet_token:
         await ctx.send("❌ Provide a sheet name or season key. Example: `!activity statue 50`")
         return
@@ -497,8 +497,7 @@ async def activity(ctx, *args):
     def safe_int(v, default=0):
         try:
             s = str(v).strip().replace(",", "")
-            if s in ("", "-", "None", "null"):
-                return default
+            if s in ("", "-", "None", "null"): return default
             return int(float(s))
         except Exception:
             return default
@@ -507,16 +506,15 @@ async def activity(ctx, *args):
         # Accept season key or direct title
         book_name = SEASON_SHEETS.get(sheet_token.lower(), sheet_token)
         wb = client.open(book_name)
-
         tabs = wb.worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Need at least two tabs (first + latest) in that workbook.")
             return
 
-        ws_base = tabs[0]    # first tab
-        ws_later = tabs[-1]  # last tab
+        ws_base  = tabs[0]    # FIRST tab
+        ws_later = tabs[-1]   # LATEST tab
 
-        base = ws_base.get_all_values()
+        base  = ws_base.get_all_values()
         later = ws_later.get_all_values()
         if not base or not later:
             await ctx.send("❌ One of the scan tabs is empty.")
@@ -537,57 +535,66 @@ async def activity(ctx, *args):
         srv_b = hdr_b.get("home_server")
         srv_l = hdr_l.get("home_server")
 
-        # Build baseline map
+        # --- De-dupe by lord_id per tab (keep LAST occurrence) ---
         base_map = {}
         for r in base[1:]:
             lid = (r[id_b] if len(r) > id_b else "").strip()
-            if not lid:
-                continue
-            ali = (r[ali_b] if ali_b is not None and len(r) > ali_b else "").strip()
-            srv = (r[srv_b] if srv_b is not None and len(r) > srv_b else "").strip()
-            m = safe_int(r[mer_b])
-            base_map[lid] = (ali, srv, m)
+            if not lid: continue
+            ali = (r[ali_b] if (ali_b is not None and len(r) > ali_b) else "").strip()
+            srv = (r[srv_b] if (srv_b is not None and len(r) > srv_b) else "").strip()
+            m   = safe_int(r[mer_b])
+            base_map[lid] = (ali, srv, m)  # last wins
 
-        # Aggregate deltas
-        agg = {}
+        later_map = {}
         for r in later[1:]:
             lid = (r[id_l] if len(r) > id_l else "").strip()
-            if not lid or lid not in base_map:
-                continue
-            ali2 = (r[ali_l] if ali_l is not None and len(r) > ali_l else "").strip()
-            srv2 = (r[srv_l] if srv_l is not None and len(r) > srv_l else "").strip()
-            m2 = safe_int(r[mer_l])
+            if not lid: continue
+            ali = (r[ali_l] if (ali_l is not None and len(r) > ali_l) else "").strip()
+            srv = (r[srv_l] if (srv_l is not None and len(r) > srv_l) else "").strip()
+            m   = safe_int(r[mer_l])
+            later_map[lid] = (ali, srv, m)  # last wins
 
-            ali1, srv1, m1 = base_map[lid]
+        # --- Aggregate by (alliance, server) ---
+        # Track present_in_both and active_count
+        agg = {}  # key -> {"present": int, "active": int, "merits": int}
+        for lid, (ali1, srv1, m1) in base_map.items():
+            if lid not in later_map:
+                continue
+            ali2, srv2, m2 = later_map[lid]
             ali = ali2 or ali1
             srv = srv2 or srv1
-            delta = m2 - m1
-            if delta <= 0:
-                continue
             key = (ali or "", srv or "")
-            d = agg.get(key, {"active": 0, "merits": 0})
-            d["active"] += 1
-            d["merits"] += delta
-            agg[key] = d
+            bucket = agg.get(key, {"present": 0, "active": 0, "merits": 0})
+            bucket["present"] += 1
+            delta = m2 - m1
+            if delta > 0:
+                bucket["active"] += 1
+                bucket["merits"] += delta
+            agg[key] = bucket
 
-        rows = [((ali, srv), d["active"], d["merits"]) for (ali, srv), d in agg.items()]
-        rows.sort(key=lambda x: (x[2], x[1]), reverse=True)
+        # Build rows and sort by total merits desc, then active desc
+        rows = [((ali, srv), d["present"], d["active"], d["merits"]) for (ali, srv), d in agg.items()]
+        rows.sort(key=lambda x: (x[3], x[2]), reverse=True)
         top_rows = rows[:top_n]
 
         header = (
-            f"**📈 Activity Report (first vs latest tab)**\n"
+            f"**📈 Activity Report (first vs latest tab, by Alliance/Server)**\n"
             f"`{ws_base.title}` → `{ws_later.title}` in `{wb.title}`\n"
+            f"_Active = merits increased; Present = players seen in both scans_\n"
         )
+
         if not top_rows:
-            await ctx.send(header + "_No merit gains detected._")
+            await ctx.send(header + "_No merit gains detected or no overlap between scans._")
             return
 
-        # Build lines + chunked send
+        # Lines + chunked send
         lines = []
-        for i, ((ali, srv), active, merits) in enumerate(top_rows, start=1):
+        for i, ((ali, srv), present, active, merits) in enumerate(top_rows, start=1):
             ali_disp = ali if ali else "?"
             srv_disp = srv if srv else "?"
-            lines.append(f"{i}. [S{srv_disp}] [{ali_disp}] — 👥 Active {active} — ⭐ +{merits:,}")
+            lines.append(
+                f"{i}. [S{srv_disp}] [{ali_disp}] — 👥 Active {active}/{present} — ⭐ +{merits:,}"
+            )
 
         chunk = header
         chunks = []
