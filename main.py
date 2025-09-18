@@ -506,7 +506,8 @@ async def activity(ctx, *args):
 
     try:
         # Open workbook with the two scans (tabs)
-        wb = client.open(sheet_name)
+        book_name = SEASON_SHEETS.get(sheet_name.lower(), sheet_name)
+        wb = client.open(book_name)
         tabs = wb.worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Need at least two tabs (two scans) in that workbook.")
