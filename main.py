@@ -1046,15 +1046,53 @@ async def topkills(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topdeads(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
+async def topdeads(ctx, *args):
+    """
+    Usage examples:
+      !topdeads                         -> Top 10 overall, default season
+      !topdeads 25                     -> Top 25 overall
+      !topdeads sos5                   -> Top 10 for season 'sos5'
+      !topdeads sos5 25                -> Top 25 for season 'sos5'
+      !topdeads mfd 50                 -> Top 50 for MFD on Server 77 (your alliance)
+      !topdeads mfd sos5 30            -> MFD+S77, season 'sos5', top 30
+      !topdeads all 50                 -> Explicitly remove MFD filter and show top 50
+    """
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
         await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
         return
 
+    # Defaults
+    top_n = 10
+    season = DEFAULT_SEASON
+    filter_mfd = False  # toggle for [MFD*] + server 77
+
+    # --- Parse args in any order ---
+    # digits -> top_n
+    # season key -> season
+    # 'mfd' -> filter to MFD on server 77
+    # 'all' or '*' -> remove MFD filter explicitly
+    for arg in args:
+        a = str(arg).strip().lower()
+        if a.isdigit():
+            top_n = max(1, min(100, int(a)))  # clamp a bit
+            continue
+        if a in ("mfd", "mfd77"):
+            filter_mfd = True
+            continue
+        if a in ("all", "*"):
+            filter_mfd = False
+            continue
+        # season?
+        if a in SEASON_SHEETS:
+            season = a
+            continue
+        # Unknown token -> treat as invalid season token for clarity
+        await ctx.send(f"❌ Invalid argument '{arg}'. Seasons: {', '.join(SEASON_SHEETS.keys())} | Filters: 'mfd', 'all'.")
+        return
+
     try:
-        season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
+        sheet_name = SEASON_SHEETS.get(season.lower())
         if not sheet_name:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
@@ -1069,54 +1107,109 @@ async def topdeads(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
 
         data_latest = latest.get_all_values()
         data_prev = previous.get_all_values()
+        if not data_latest or not data_prev:
+            await ctx.send("❌ Sheet data is empty.")
+            return
+
         headers = data_latest[0]
 
-        id_index = headers.index("lord_id")
-        name_index = 1
-        alliance_index = 3
-        power_index = 12  # Column M
-        dead_index = 17   # Column R
+        # Column indices (prefer header lookups where possible)
+        id_index = headers.index("lord_id")      if "lord_id"      in headers else 0
+        name_index = 1                           # Column B (Name)
+        alliance_index = 3                       # Column D (Alliance/tag)
+        power_index = 12                         # Column M (Power)
+        dead_index = 17                          # Column R (Deads total)
+        server_idx = headers.index("home_server") if "home_server" in headers else 5  # Column F fallback
 
         def to_int(val):
             try:
-                return int(val.replace(',', '').replace('-', '').strip())
+                return int(str(val).replace(",", "").replace("-", "").strip())
             except:
                 return 0
 
+        def is_mfd(tag: str) -> bool:
+            if not tag:
+                return False
+            return tag.strip().upper().startswith("MFD")
+
+        # Build previous map: lord_id -> deads_then
         prev_map = {}
         for row in data_prev[1:]:
-            if len(row) > dead_index:
-                raw_id = row[id_index].strip()
+            if len(row) > dead_index and len(row) > id_index:
+                raw_id = (row[id_index] or "").strip()
                 if raw_id:
                     prev_map[raw_id] = to_int(row[dead_index])
 
+        # Collect gains (only players present in both sheets, ≥25M power, optional MFD+S77 filter)
         results = []
         for row in data_latest[1:]:
-            if len(row) > dead_index:
-                raw_id = row[id_index].strip()
-                if raw_id not in prev_map:
+            if len(row) <= max(dead_index, power_index, alliance_index, server_idx, id_index):
+                continue
+
+            raw_id = (row[id_index] or "").strip()
+            if not raw_id or raw_id not in prev_map:
+                continue
+
+            power = to_int(row[power_index])
+            if power < 25_000_000:
+                continue
+
+            alliance = (row[alliance_index] or "").strip()
+            if filter_mfd:
+                server_val = (row[server_idx] or "").strip()
+                if not is_mfd(alliance) or str(server_val) != "77":
                     continue
 
-                power = to_int(row[power_index])
-                if power < 25_000_000:
-                    continue
+            dead_now = to_int(row[dead_index])
+            dead_then = prev_map.get(raw_id, 0)
+            gain = dead_now - dead_then
+            if gain < 0:
+                # Guard against sheet corrections; treat negatives as zero gain
+                gain = 0
 
-                dead_now = to_int(row[dead_index])
-                dead_then = prev_map[raw_id]
-                gain = dead_now - dead_then
+            name = (row[name_index] or "?").strip()
+            full_name = f"[{alliance}] {name}"
+            results.append((full_name, gain))
 
-                name = row[name_index].strip()
-                alliance = row[alliance_index].strip()
-                full_name = f"[{alliance}] {name}"
-                results.append((full_name, gain))
+        if not results:
+            scope = "MFD (S77)" if filter_mfd else "All"
+            await ctx.send(f"**🏆 Top {top_n} Dead Units Gained — {scope}**\n`{previous.title}` → `{latest.title}`:\n_No eligible players found (≥25M power and present in both sheets)._")
+            return
 
+        # Sort and slice
         results.sort(key=lambda x: x[1], reverse=True)
-        output = "\n".join([f"{i+1}. `{name}` — 💀 +{gain:,}" for i, (name, gain) in enumerate(results[:top_n])])
+        top_rows = results[:top_n]
 
-        if not output:
-            await ctx.send("No valid data found.")
-        else:
-            await ctx.send(f"**🏆 Top {top_n} Dead Units Gained:**\n{output}")
+        # Build lines
+        lines = [f"{i+1}. `{name}` — 💀 +{gain:,}" for i, (name, gain) in enumerate(top_rows)]
+
+        # Header + chunked send (<=2000 chars)
+        scope = "MFD (S77)" if filter_mfd else "All"
+        header = f"**🏆 Top {top_n} Dead Units Gained — {scope}**\n`{previous.title}` → `{latest.title}`:\n"
+
+        chunk = header
+        chunks = []
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            chunks.append(chunk.rstrip())
+
+        # Send chunks with friendly errors
+        for ch in chunks:
+            try:
+                await ctx.send(ch)
+            except discord.HTTPException as e:
+                if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+                    await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller N.")
+                    return
+                if getattr(e, "status", None) == 429:
+                    await ctx.send("⏳ Rate limited. Try again in a moment.")
+                    return
+                await ctx.send(f"❌ Discord error: {e}")
+                return
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
