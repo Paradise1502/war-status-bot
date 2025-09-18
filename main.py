@@ -26,6 +26,7 @@ SEASON_SHEETS = {
     "hk2": "Call of Dragons - HK2",
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
+    "statue": "Activity",
     "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
@@ -433,6 +434,176 @@ async def totaldeads(ctx, *args):
 
         # Chunked send
         header = f"**💀 Total Deaths — Top {top_n} — {scope}**\n`{latest.title}`:\n"
+        chunk = header
+        chunks = []
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            chunks.append(chunk.rstrip())
+
+        for ch in chunks:
+            try:
+                await ctx.send(ch)
+            except discord.HTTPException as e:
+                if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+                    await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller N.")
+                    return
+                if getattr(e, "status", None) == 429:
+                    await ctx.send("⏳ Rate limited. Try again in a moment.")
+                    return
+                await ctx.send(f"❌ Discord error: {e}")
+                return
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
+async def activity(ctx, *args):
+    """
+    Compare the last two tabs in a provided workbook and report, per alliance & server:
+    - Active players (merits increased)
+    - Total merits gained (sum of positive deltas)
+
+    Examples:
+      !activity "Alliance Activity Scans - 2025-09-18"
+      !activity MyScanSheet 50
+    """
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
+    if not args:
+        await ctx.send("❌ Usage: `!activity <workbook_name> [topN]`")
+        return
+
+    # First non-numeric arg is taken as workbook name; optional numeric arg sets topN
+    sheet_name = None
+    top_n = 20
+    for arg in args:
+        a = str(arg).strip()
+        if a.isdigit():
+            top_n = max(1, min(200, int(a)))
+        else:
+            # if multiple non-digits are passed, we assume they meant the sheet name with spaces but forgot quotes.
+            sheet_name = a if sheet_name is None else (sheet_name + " " + a)
+
+    if not sheet_name:
+        await ctx.send("❌ Please provide the workbook name. Example: `!activity \"Alliance Activity Scans - 2025-09-18\" 50`")
+        return
+
+    def safe_int(v, default=0):
+        try:
+            if v is None: return default
+            s = str(v).strip().replace(",", "")
+            if s in ("", "-", "None", "null"): return default
+            return int(float(s))
+        except Exception:
+            return default
+
+    try:
+        # Open workbook with the two scans (tabs)
+        wb = client.open(sheet_name)
+        tabs = wb.worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Need at least two tabs (two scans) in that workbook.")
+            return
+
+        # Compare the last two tabs by position
+        ws_base = tabs[-2]
+        ws_later = tabs[-1]
+
+        base = ws_base.get_all_values()
+        later = ws_later.get_all_values()
+        if not base or not later:
+            await ctx.send("❌ One of the scan tabs is empty.")
+            return
+
+        # Build header index maps
+        hdr_b = {h:i for i,h in enumerate(base[0])}
+        hdr_l = {h:i for i,h in enumerate(later[0])}
+
+        # Required
+        if "lord_id" not in hdr_b or "lord_id" not in hdr_l or "merits" not in hdr_b or "merits" not in hdr_l:
+            await ctx.send("❌ Both tabs must include at least 'lord_id' and 'merits' headers.")
+            return
+
+        id_b, mer_b = hdr_b["lord_id"], hdr_b["merits"]
+        id_l, mer_l = hdr_l["lord_id"], hdr_l["merits"]
+
+        # Optional
+        ali_b = hdr_b.get("alliance", None)
+        ali_l = hdr_l.get("alliance", None)
+        srv_b = hdr_b.get("home_server", None)
+        srv_l = hdr_l.get("home_server", None)
+
+        # Map base: lid -> (alliance, server, merits)
+        base_map = {}
+        for r in base[1:]:
+            if len(r) <= max(id_b, mer_b, ali_b or 0, srv_b or 0):
+                continue
+            lid = (r[id_b] or "").strip()
+            if not lid:
+                continue
+            ali = (r[ali_b] if (ali_b is not None and len(r) > ali_b) else "").strip()
+            srv = (r[srv_b] if (srv_b is not None and len(r) > srv_b) else "").strip()
+            m   = safe_int(r[mer_b])
+            base_map[lid] = (ali, srv, m)
+
+        # Aggregate deltas for lids present in both scans
+        # key = (alliance, server)
+        agg = {}  # (ali, srv) -> {"active": int, "merits": int}
+        for r in later[1:]:
+            if len(r) <= max(id_l, mer_l, ali_l or 0, srv_l or 0):
+                continue
+            lid = (r[id_l] or "").strip()
+            if not lid or lid not in base_map:
+                continue
+
+            ali2 = (r[ali_l] if (ali_l is not None and len(r) > ali_l) else "").strip()
+            srv2 = (r[srv_l] if (srv_l is not None and len(r) > srv_l) else "").strip()
+            m2   = safe_int(r[mer_l])
+
+            ali1, srv1, m1 = base_map[lid]
+            # Prefer the later tag/server if present; fall back to base
+            ali = ali2 or ali1
+            srv = srv2 or srv1
+
+            delta = m2 - m1
+            if delta <= 0:
+                continue
+
+            key = (ali or "", srv or "")
+            d = agg.get(key, {"active": 0, "merits": 0})
+            d["active"] += 1
+            d["merits"] += delta
+            agg[key] = d
+
+        # Build rows sorted by total merits desc, then active desc
+        rows = [((ali, srv), d["active"], d["merits"]) for (ali, srv), d in agg.items()]
+        rows.sort(key=lambda x: (x[2], x[1]), reverse=True)
+        top_rows = rows[:top_n]
+
+        # Prepare lines
+        if not top_rows:
+            await ctx.send(f"**📈 Activity Report**\n`{ws_base.title}` → `{ws_later.title}` in `{sheet_name}`:\n_No merit gains detected between scans._")
+            return
+
+        lines = []
+        for i, ((ali, srv), active, merits) in enumerate(top_rows, start=1):
+            ali_disp = ali if ali else "?"
+            srv_disp = srv if srv else "?"
+            lines.append(f"{i}. [S{srv_disp}] [{ali_disp}] — 👥 Active {active} — ⭐ +{merits:,}")
+
+        # Header + chunked send
+        header = (
+            f"**📈 Activity Report (by Alliance / Server)**\n"
+            f"`{ws_base.title}` → `{ws_later.title}` in `{sheet_name}`\n"
+        )
+
         chunk = header
         chunks = []
         for line in lines:
