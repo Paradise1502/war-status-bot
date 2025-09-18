@@ -463,14 +463,13 @@ async def totaldeads(ctx, *args):
 @bot.command()
 async def activity(ctx, *args):
     """
-    Compare the FIRST and LATEST tab in a workbook and report, per alliance & server:
-      - Active players (merits increased > 0)
-      - Players present in both scans
-      - Total merits gained (sum of positive deltas)
+    Compare FIRST vs LATEST tab and report, per SERVER (filtered list only):
+      - Active players (merits increased)
+      - Total merits gained
 
     Usage:
       !activity statue
-      !activity Activity 50   -> show top 50 groups
+      !activity Activity 10
     """
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
@@ -481,7 +480,18 @@ async def activity(ctx, *args):
         await ctx.send("❌ Usage: `!activity <workbook_name|season_key> [topN]`")
         return
 
-    # parse args
+    # Server filter + labels
+    SERVER_LABELS = {
+        "183": "A2G",
+        "99":  "BTX",
+        "92":  "wAo",
+        "283": "RFF",
+        "77":  "MFD",
+        "110": "RoG",
+    }
+    ALLOWED_SERVERS = set(SERVER_LABELS.keys())
+
+    # Parse args
     top_n = 20
     tokens = []
     for a in args:
@@ -491,21 +501,30 @@ async def activity(ctx, *args):
             tokens.append(str(a))
     sheet_token = " ".join(tokens).strip()
     if not sheet_token:
-        await ctx.send("❌ Provide a sheet name or season key. Example: `!activity statue 50`")
+        await ctx.send("❌ Provide a sheet name or season key. Example: `!activity statue`")
         return
 
     def safe_int(v, default=0):
         try:
             s = str(v).strip().replace(",", "")
-            if s in ("", "-", "None", "null"): return default
+            if s in ("", "-", "None", "null"):
+                return default
             return int(float(s))
         except Exception:
             return default
 
+    def extract_server(v: str) -> str:
+        """Return only digits from the server field (e.g., 'S77' -> '77')."""
+        if v is None:
+            return ""
+        digits = "".join(ch for ch in str(v).strip() if ch.isdigit())
+        return digits
+
     try:
-        # Accept season key or direct title
+        # Season key OR exact title
         book_name = SEASON_SHEETS.get(sheet_token.lower(), sheet_token)
         wb = client.open(book_name)
+
         tabs = wb.worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Need at least two tabs (first + latest) in that workbook.")
@@ -520,82 +539,77 @@ async def activity(ctx, *args):
             await ctx.send("❌ One of the scan tabs is empty.")
             return
 
-        # headers
+        # Headers
         hdr_b = {h: i for i, h in enumerate(base[0])}
         hdr_l = {h: i for i, h in enumerate(later[0])}
         for req in ("lord_id", "merits"):
             if req not in hdr_b or req not in hdr_l:
-                await ctx.send("❌ Both tabs must include headers: `lord_id`, `merits` (plus optional `alliance`, `home_server`).")
+                await ctx.send("❌ Both tabs must include headers: `lord_id`, `merits` (optional `home_server`).")
                 return
 
         id_b, mer_b = hdr_b["lord_id"], hdr_b["merits"]
         id_l, mer_l = hdr_l["lord_id"], hdr_l["merits"]
-        ali_b = hdr_b.get("alliance")
-        ali_l = hdr_l.get("alliance")
         srv_b = hdr_b.get("home_server")
         srv_l = hdr_l.get("home_server")
 
-        # --- De-dupe by lord_id per tab (keep LAST occurrence) ---
+        # De-dupe by lord_id per tab (keep LAST)
         base_map = {}
         for r in base[1:]:
             lid = (r[id_b] if len(r) > id_b else "").strip()
-            if not lid: continue
-            ali = (r[ali_b] if (ali_b is not None and len(r) > ali_b) else "").strip()
-            srv = (r[srv_b] if (srv_b is not None and len(r) > srv_b) else "").strip()
-            m   = safe_int(r[mer_b])
-            base_map[lid] = (ali, srv, m)  # last wins
+            if not lid:
+                continue
+            srv_val = (r[srv_b] if (srv_b is not None and len(r) > srv_b) else "")
+            m = safe_int(r[mer_b])
+            base_map[lid] = (extract_server(srv_val), m)
 
         later_map = {}
         for r in later[1:]:
             lid = (r[id_l] if len(r) > id_l else "").strip()
-            if not lid: continue
-            ali = (r[ali_l] if (ali_l is not None and len(r) > ali_l) else "").strip()
-            srv = (r[srv_l] if (srv_l is not None and len(r) > srv_l) else "").strip()
-            m   = safe_int(r[mer_l])
-            later_map[lid] = (ali, srv, m)  # last wins
+            if not lid:
+                continue
+            srv_val = (r[srv_l] if (srv_l is not None and len(r) > srv_l) else "")
+            m = safe_int(r[mer_l])
+            later_map[lid] = (extract_server(srv_val), m)
 
-        # --- Aggregate by (alliance, server) ---
-        # Track present_in_both and active_count
-        agg = {}  # key -> {"present": int, "active": int, "merits": int}
-        for lid, (ali1, srv1, m1) in base_map.items():
+        # Aggregate by SERVER only (filtered set)
+        agg = {}  # server -> {"active": int, "merits": int}
+        for lid, (srv1, m1) in base_map.items():
             if lid not in later_map:
                 continue
-            ali2, srv2, m2 = later_map[lid]
-            ali = ali2 or ali1
-            srv = srv2 or srv1
-            key = (ali or "", srv or "")
-            bucket = agg.get(key, {"present": 0, "active": 0, "merits": 0})
-            bucket["present"] += 1
+            srv2, m2 = later_map[lid]
+            # Prefer the later server if present, else base
+            server = srv2 or srv1
+            if server not in ALLOWED_SERVERS:
+                continue
             delta = m2 - m1
-            if delta > 0:
-                bucket["active"] += 1
-                bucket["merits"] += delta
-            agg[key] = bucket
+            if delta <= 0:
+                continue
+            bucket = agg.get(server, {"active": 0, "merits": 0})
+            bucket["active"] += 1
+            bucket["merits"] += delta
+            agg[server] = bucket
 
-        # Build rows and sort by total merits desc, then active desc
-        rows = [((ali, srv), d["present"], d["active"], d["merits"]) for (ali, srv), d in agg.items()]
-        rows.sort(key=lambda x: (x[3], x[2]), reverse=True)
+        # Build rows & sort (by merits desc, then active desc)
+        rows = [(srv, d["active"], d["merits"]) for srv, d in agg.items() if srv in ALLOWED_SERVERS]
+        rows.sort(key=lambda x: (x[2], x[1]), reverse=True)
         top_rows = rows[:top_n]
 
         header = (
-            f"**📈 Activity Report (first vs latest tab, by Alliance/Server)**\n"
+            f"**📈 Activity Report (first vs latest tab, by Server)**\n"
             f"`{ws_base.title}` → `{ws_later.title}` in `{wb.title}`\n"
-            f"_Active = merits increased; Present = players seen in both scans_\n"
         )
-
         if not top_rows:
-            await ctx.send(header + "_No merit gains detected or no overlap between scans._")
+            await ctx.send(header + "_No merit gains detected on the specified servers._")
             return
 
-        # Lines + chunked send
+        # Lines (no "present", no '?', show mapped alliance name)
         lines = []
-        for i, ((ali, srv), present, active, merits) in enumerate(top_rows, start=1):
-            ali_disp = ali if ali else "?"
-            srv_disp = srv if srv else "?"
-            lines.append(
-                f"{i}. [S{srv_disp}] [{ali_disp}] — 👥 Active {active}/{present} — ⭐ +{merits:,}"
-            )
+        for i, (srv, active, merits) in enumerate(top_rows, start=1):
+            tag = SERVER_LABELS.get(srv, "")
+            # Only our allowed servers are included, so tag will exist
+            lines.append(f"{i}. [{tag}] S{srv} — 👥 Active {active} — ⭐ +{merits:,}")
 
+        # Chunked send
         chunk = header
         chunks = []
         for line in lines:
