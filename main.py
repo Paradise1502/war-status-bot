@@ -42,6 +42,18 @@ intents.message_content = True  # Not needed for reactions, but good for command
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
+# Global flag
+VACATION_MODE = True
+VACATION_MSG = "🍹 Scan’s on a coffee break. Try again later."
+
+# Simple check before every command
+@bot.check
+async def global_vacation_check(ctx):
+    if VACATION_MODE:
+        await ctx.send(VACATION_MSG)
+        return False
+    return True
+
 @bot.command()
 async def rssheal(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
