@@ -44,7 +44,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Global flag
 VACATION_MODE = True
-VACATION_MSG = "🍹 Scan’s on a coffee break. Try again later."
+VACATION_MSG = "🍹 Rekka, just stop."
 
 # Simple check before every command
 @bot.check
