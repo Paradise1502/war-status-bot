@@ -2127,6 +2127,13 @@ async def matchups2(ctx, sheet: str = "testsheet"):
         ore_idx    = find_idx("stone_spent",    33)  # Column AH (you called it stone in header)
         mana_idx   = find_idx("mana_spent",     34)  # Column AI
 
+        # Kill tiers
+        t5_idx = find_idx("t5_kills", 36)  # AK
+        t4_idx = find_idx("t4_kills", 37)  # AL
+        t3_idx = find_idx("t3_kills", 38)  # AM
+        t2_idx = find_idx("t2_kills", 39)  # AN
+        t1_idx = find_idx("t1_kills", 40)  # AO
+
         def to_int(val):
             try:
                 v = str(val).replace(",", "").replace(" ", "").strip()
@@ -2150,7 +2157,12 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             "kills": 0, "kills_gain": 0,
             "dead": 0,  "dead_gain": 0,
             "healed": 0,"healed_gain": 0,
-            "gold": 0, "wood": 0, "ore": 0, "mana": 0
+            "gold": 0, "wood": 0, "ore": 0, "mana": 0,
+            "t5": 0, "t5_gain": 0,
+            "t4": 0, "t4_gain": 0,
+            "t3": 0, "t3_gain": 0,
+            "t2": 0, "t2_gain": 0,
+            "t1": 0, "t1_gain": 0,
         } for sid in SERVER_MAP.keys()}
 
         # Aggregate current totals and gains vs baseline
@@ -2172,6 +2184,10 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             ore   = to_int(r[ore_idx])
             mana  = to_int(r[mana_idx])
 
+            t5 = to_int(r[t5_idx]); t4 = to_int(r[t4_idx])
+            t3 = to_int(r[t3_idx]); t2 = to_int(r[t2_idx])
+            t1 = to_int(r[t1_idx])
+
             # Parse baseline (if present)
             lid = (r[id_idx] or "").strip()
             b = base_map.get(lid)
@@ -2183,8 +2199,13 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 wood_prev  = to_int(b[wood_idx])
                 ore_prev   = to_int(b[ore_idx])
                 mana_prev  = to_int(b[mana_idx])
+
+                t5_prev = to_int(b[t5_idx]); t4_prev = to_int(b[t4_idx])
+                t3_prev = to_int(b[t3_idx]); t2_prev = to_int(b[t2_idx])
+                t1_prev = to_int(b[t1_idx])
             else:
                 kills_prev = dead_prev = heal_prev = gold_prev = wood_prev = ore_prev = mana_prev = 0
+                t5_prev = t4_prev = t3_prev = t2_prev = t1_prev = 0
 
             s = stat_map[sid_digits]
             s["kills"]      += kills
@@ -2197,6 +2218,12 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             s["kills_gain"] += (kills - kills_prev)
             s["dead_gain"]  += (dead  - dead_prev)
             s["healed_gain"]+= (heal  - heal_prev)
+            s["t5"]         += t5; s["t4"] += t4; s["t3"] += t3; s["t2"] += t2; s["t1"] += t1
+            s["t5_gain"]    += (t5 - t5_prev)
+            s["t4_gain"]    += (t4 - t4_prev)
+            s["t3_gain"]    += (t3 - t3_prev)
+            s["t2_gain"]    += (t2 - t2_prev)
+            s["t1_gain"]    += (t1 - t1_prev)
 
         def format_side(name, stats):
             return (
@@ -2207,7 +2234,14 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 f"💀 Deads:  {stats['dead']:,} (+{stats['dead_gain']:,})\n"
                 f"❤️ Heals:  {stats['healed']:,} (+{stats['healed_gain']:,})\n"
                 f"\n"
-                f"▶ Resources Spent (Δ)\n"
+                f"▶ Kill Breakdown\n"
+                f"🟥 T5: {stats['t5']:,} (+{stats['t5_gain']:,})\n"
+                f"🟦 T4: {stats['t4']:,} (+{stats['t4_gain']:,})\n"
+                f"🟩 T3: {stats['t3']:,} (+{stats['t3_gain']:,})\n"
+                f"🟨 T2: {stats['t2']:,} (+{stats['t2_gain']:,})\n"
+                f"⬜ T1: {stats['t1']:,} (+{stats['t1_gain']:,})\n"
+                f"\n"
+                f"▶ Resources Spent\n"
                 f"💰 Gold:  {stats['gold']:,}\n"
                 f"🪵 Wood:  {stats['wood']:,}\n"
                 f"⛏️ Ore:   {stats['ore']:,}\n"
