@@ -2065,7 +2065,7 @@ import discord
 from discord.ext import commands
 
 @bot.command()
-async def matchups2(ctx, sheet: str = "test sheet"):
+async def matchups2(ctx, sheet: str = "testsheet"):
     """
     Compare two tabs in a custom KVK workbook (baseline = tabs[-2], current = tabs[-1]).
     Filters to:
