@@ -2225,6 +2225,11 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             s["t2_gain"]    += (t2 - t2_prev)
             s["t1_gain"]    += (t1 - t1_prev)
 
+        def fmt_gain(val):
+            if val > 0:
+                return f"+{val:,}"
+            return f"{val:,}"
+
         def format_side(name, stats):
             return (
                 f"{name}\n"
@@ -2235,11 +2240,11 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 f"❤️ Heals:  {stats['healed']:,} (+{stats['healed_gain']:,})\n"
                 f"\n"
                 f"▶ Kill Breakdown\n"
-                f"🟥 T5: {stats['t5']:,} (+{stats['t5_gain']:,})\n"
-                f"🟦 T4: {stats['t4']:,} (+{stats['t4_gain']:,})\n"
-                f"🟩 T3: {stats['t3']:,} (+{stats['t3_gain']:,})\n"
-                f"🟨 T2: {stats['t2']:,} (+{stats['t2_gain']:,})\n"
-                f"⬜ T1: {stats['t1']:,} (+{stats['t1_gain']:,})\n"
+                f"🟥 T5: {stats['t5']:,} ({fmt_gain(stats['t5_gain'])})\n"
+                f"🟦 T4: {stats['t4']:,} ({fmt_gain(stats['t4_gain'])})\n"
+                f"🟩 T3: {stats['t3']:,} ({fmt_gain(stats['t3_gain'])})\n"
+                f"🟨 T2: {stats['t2']:,} ({fmt_gain(stats['t2_gain'])})\n"
+                f"⬜ T1: {stats['t1']:,} ({fmt_gain(stats['t1_gain'])})\n"
                 f"\n"
                 f"▶ Resources Spent\n"
                 f"💰 Gold:  {stats['gold']:,}\n"
