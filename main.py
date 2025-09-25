@@ -27,6 +27,7 @@ SEASON_SHEETS = {
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
     "statue": "Activity",
+    "test sheet": "test sheet",
     "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
@@ -2062,6 +2063,182 @@ import discord
 
 import discord
 from discord.ext import commands
+
+@bot.command()
+async def matchups2(ctx, sheet: str = "test sheet"):
+    """
+    Compare two tabs in a custom KVK workbook (baseline = tabs[-2], current = tabs[-1]).
+    Filters to:
+      Team Blue: 225=25IW, 60=echo, 49=NTS
+      Team Red:  363=RaGE, 176=eis, 249=WB
+    Pairs: (225 vs 363), (60 vs 176), (49 vs 249)
+    Shows totals and gains (current - baseline) for kills, deads, heals, and RSS spent deltas.
+    """
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send("❌ Command not allowed here.")
+        return
+
+    try:
+        # Allow season keys OR exact title
+        sheet_name = SEASON_SHEETS.get(sheet.lower(), sheet)
+
+        SERVER_MAP = {
+            "225": "25IW",
+            "60":  "echo",
+            "49":  "NTS",
+            "363": "RaGE",
+            "176": "eis",
+            "249": "WB",
+        }
+        BLUE = ["225", "60", "49"]
+        RED  = ["363", "176", "249"]
+        MATCHUPS = [("225", "176"), ("60", "249"), ("49", "363")]
+
+        # Open and read the two tabs
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare. Put baseline + current.")
+            return
+
+        current = tabs[-1]
+        baseline = tabs[-2]
+
+        cur_vals = current.get_all_values()
+        base_vals = baseline.get_all_values()
+        if not cur_vals or not base_vals:
+            await ctx.send("❌ One of the worksheets is empty.")
+            return
+
+        headers = cur_vals[0]
+
+        # Resolve indices (prefer header names; fall back to known positions from your prior code)
+        def find_idx(name, fallback):
+            return headers.index(name) if name in headers else fallback
+
+        # Fallbacks match your existing code expectation:
+        id_idx     = find_idx("lord_id",        0)
+        server_idx = find_idx("home_server",    5)   # Column F typical
+        kills_idx  = find_idx("units_killed",   9)   # Column J
+        dead_idx   = find_idx("units_dead",     17)  # Column R
+        heal_idx   = find_idx("units_healed",   18)  # Column S
+        gold_idx   = find_idx("gold_spent",     31)  # Column AF
+        wood_idx   = find_idx("wood_spent",     32)  # Column AG
+        ore_idx    = find_idx("stone_spent",    33)  # Column AH (you called it stone in header)
+        mana_idx   = find_idx("mana_spent",     34)  # Column AI
+
+        def to_int(val):
+            try:
+                v = str(val).replace(",", "").replace(" ", "").strip()
+                if v in ("", "-"): return 0
+                return int(v)
+            except:
+                return 0
+
+        # Build baseline map by lord_id (keep last occurrence)
+        base_map = {}
+        for r in base_vals[1:]:
+            if len(r) <= max(mana_idx, server_idx, id_idx):
+                continue
+            lid = (r[id_idx] or "").strip()
+            if not lid:
+                continue
+            base_map[lid] = r
+
+        # Initialize stat buckets for only the six servers
+        stat_map = {sid: {
+            "kills": 0, "kills_gain": 0,
+            "dead": 0,  "dead_gain": 0,
+            "healed": 0,"healed_gain": 0,
+            "gold": 0, "wood": 0, "ore": 0, "mana": 0
+        } for sid in SERVER_MAP.keys()}
+
+        # Aggregate current totals and gains vs baseline
+        for r in cur_vals[1:]:
+            if len(r) <= max(mana_idx, server_idx, id_idx):
+                continue
+            sid = (r[server_idx] or "").strip()
+            # Normalize server to only digits, just in case format is "S225"
+            sid_digits = "".join(ch for ch in sid if ch.isdigit())
+            if sid_digits not in SERVER_MAP:
+                continue
+
+            # Parse current
+            kills = to_int(r[kills_idx])
+            dead  = to_int(r[dead_idx])
+            heal  = to_int(r[heal_idx])
+            gold  = to_int(r[gold_idx])
+            wood  = to_int(r[wood_idx])
+            ore   = to_int(r[ore_idx])
+            mana  = to_int(r[mana_idx])
+
+            # Parse baseline (if present)
+            lid = (r[id_idx] or "").strip()
+            b = base_map.get(lid)
+            if b and len(b) > mana_idx:
+                kills_prev = to_int(b[kills_idx])
+                dead_prev  = to_int(b[dead_idx])
+                heal_prev  = to_int(b[heal_idx])
+                gold_prev  = to_int(b[gold_idx])
+                wood_prev  = to_int(b[wood_idx])
+                ore_prev   = to_int(b[ore_idx])
+                mana_prev  = to_int(b[mana_idx])
+            else:
+                kills_prev = dead_prev = heal_prev = gold_prev = wood_prev = ore_prev = mana_prev = 0
+
+            s = stat_map[sid_digits]
+            s["kills"]      += kills
+            s["dead"]       += dead
+            s["healed"]     += heal
+            s["gold"]       += (gold - gold_prev)
+            s["wood"]       += (wood - wood_prev)
+            s["ore"]        += (ore  - ore_prev)
+            s["mana"]       += (mana - mana_prev)
+            s["kills_gain"] += (kills - kills_prev)
+            s["dead_gain"]  += (dead  - dead_prev)
+            s["healed_gain"]+= (heal  - heal_prev)
+
+        def format_side(name, stats):
+            return (
+                f"{name}\n"
+                f"\n"
+                f"▶ Combat Stats\n"
+                f"⚔️ Kills:  {stats['kills']:,} (+{stats['kills_gain']:,})\n"
+                f"💀 Deads:  {stats['dead']:,} (+{stats['dead_gain']:,})\n"
+                f"❤️ Heals:  {stats['healed']:,} (+{stats['healed_gain']:,})\n"
+                f"\n"
+                f"▶ Resources Spent (Δ)\n"
+                f"💰 Gold:  {stats['gold']:,}\n"
+                f"🪵 Wood:  {stats['wood']:,}\n"
+                f"⛏️ Ore:   {stats['ore']:,}\n"
+                f"💧 Mana:  {stats['mana']:,}\n"
+            )
+
+        title = f"📊 War Matchups ({baseline.title} → {current.title})"
+
+        # Send one embed per pair (keeps under 2000 chars safely)
+        for a, b in MATCHUPS:
+            name_a = f"🔵 {SERVER_MAP[a]} (S{a})"
+            name_b = f"🔴 {SERVER_MAP[b]} (S{b})"
+            stats_a = stat_map[a]
+            stats_b = stat_map[b]
+
+            block = (
+                f"{name_a} vs {name_b}\n\n"
+                f"{format_side(name_a, stats_a)}"
+                f"\n━━━━━━━━━━━━━━\n\n"
+                f"{format_side(name_b, stats_b)}"
+            )
+
+            embed = discord.Embed(
+                title=f"{title} — {SERVER_MAP[a]} vs {SERVER_MAP[b]}",
+                description=f"```{block}```",
+                color=0x00AEEF  # blue-ish
+            )
+            await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
 async def matchups(ctx, season: str = DEFAULT_SEASON):
