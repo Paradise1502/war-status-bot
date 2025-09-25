@@ -892,7 +892,7 @@ async def toprssheal_mfd(ctx, *args):
     - Season arg like 'sos5' (must exist in SEASON_SHEETS)
     - Optional number arg for N: top/bottom N (default 10, clamped 1..50)
     """
-    allowed_channels = {1383515877793595435}
+    allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
         await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
         return
