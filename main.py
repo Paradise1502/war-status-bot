@@ -27,7 +27,7 @@ SEASON_SHEETS = {
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
     "statue": "Activity",
-    "test sheet": "test sheet",
+    "testsheet": "testsheet",
     "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
@@ -2065,7 +2065,7 @@ import discord
 from discord.ext import commands
 
 @bot.command()
-async def matchups2(ctx, sheet: str = "test sheet"):
+async def matchups2(ctx, sheet: str = "testsheet"):
     """
     Compare two tabs in a custom KVK workbook (baseline = tabs[-2], current = tabs[-1]).
     Filters to:
