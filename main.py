@@ -1006,7 +1006,7 @@ async def toprssheal_mfd(ctx, *args):
 
         if not records:
             await ctx.send(
-                f"📊 **MFD (S77) RSS Heal Gains** (≥25M Power)\n"
+                f"📊 **MFD (S77) RSS spent** (≥25M Power)\n"
                 f"`{previous.title}` → `{latest.title}`:\n_No eligible MFD players on Server 77 found._"
             )
             return
@@ -1170,7 +1170,7 @@ async def toprssheal(ctx, *args):
         gains.sort(key=lambda x: x[1], reverse=True)
 
         if not gains:
-            await ctx.send(f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
+            await ctx.send(f"📊 **Top {top_n} RSS spent** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
             return
 
         # Build lines (respecting top_n)
