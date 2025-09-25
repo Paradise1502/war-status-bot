@@ -2284,13 +2284,9 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
         return
 
     try:
-        # normalize input
         season = season.lower()
-
-        # lookup in dict, or just use raw input (so "sos5" works even if not in dict)
         sheet_name = SEASON_SHEETS.get(season, season)
 
-        # open the Google Sheet
         tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
@@ -2302,12 +2298,21 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
         data_prev = previous.get_all_values()
         headers = data_latest[0]
 
-        def idx(name): return headers.index(name)
+        # header lookups with safe fallback to known positions (0-based)
+        def find_idx(name, fallback):
+            return headers.index(name) if name in headers else fallback
+
         def to_int(val):
             try:
-                return int(val.replace(',', '').replace(' ', '').strip()) if val not in ("", "-") else 0
+                v = str(val).replace(',', '').replace(' ', '').strip()
+                if v in ("", "-"):
+                    return 0
+                return int(v)
             except:
                 return 0
+
+        def fmt_gain(n):
+            return f"+{n:,}" if n > 0 else f"{n:,}"
 
         def format_title_with_dates(prev_name, latest_name):
             return f"📊 War Matchups ({prev_name} → {latest_name})"
@@ -2322,78 +2327,125 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             "110": "RoG", "92": "wAo", "99": "BTX", "283": "RFF",
             "183": "A2G", "77": "MFD"
         }
-
         matchups = [("183", "99"), ("77", "110"), ("92", "283")]
 
+        # indices
+        id_idx     = find_idx("lord_id",        0)
+        server_idx = find_idx("home_server",    5)
+        dead_idx   = find_idx("units_dead",     17)
+        heal_idx   = find_idx("units_healed",   18)
+        gold_idx   = find_idx("gold_spent",     31)
+        wood_idx   = find_idx("wood_spent",     32)
+        ore_idx    = find_idx("stone_spent",    33)
+        mana_idx   = find_idx("mana_spent",     34)
+
+        # tier kill indices (AK..AO ~ 36..40 as fallback)
+        t5_idx = find_idx("t5_kills", 36)
+        t4_idx = find_idx("t4_kills", 37)
+        t3_idx = find_idx("t3_kills", 38)
+        t2_idx = find_idx("t2_kills", 39)
+        t1_idx = find_idx("t1_kills", 40)
+
+        # prev rows by lord_id
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > max(mana_idx, t1_idx)}
+
+        # aggregate
         stat_map = {s: {
+            # totals derived from tiers later
             "kills": 0, "kills_gain": 0,
-            "dead": 0, "dead_gain": 0,
-            "healed": 0, "healed_gain": 0,
-            "gold": 0, "wood": 0, "ore": 0, "mana": 0
+            "dead": 0,  "dead_gain": 0,
+            "healed": 0,"healed_gain": 0,
+            "gold": 0, "wood": 0, "ore": 0, "mana": 0,
+            # tier totals + gains
+            "t5": 0, "t5_gain": 0,
+            "t4": 0, "t4_gain": 0,
+            "t3": 0, "t3_gain": 0,
+            "t2": 0, "t2_gain": 0,
+            "t1": 0, "t1_gain": 0,
         } for s in SERVER_MAP}
 
-        id_idx = idx("lord_id")
-        server_idx = idx("home_server")
-        kills_idx = idx("units_killed")
-        dead_idx = idx("units_dead")
-        heal_idx = idx("units_healed")
-        gold_idx = idx("gold_spent")
-        wood_idx = idx("wood_spent")
-        ore_idx = idx("stone_spent")
-        mana_idx = idx("mana_spent")
-
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx}
-
         for row in data_latest[1:]:
-            if len(row) <= mana_idx:
+            if len(row) <= max(mana_idx, t1_idx):
                 continue
-            sid = row[server_idx]
+            sid = (row[server_idx] or "").strip()
             if sid not in SERVER_MAP:
                 continue
 
-            prev_row = prev_map.get(row[id_idx])
-            kills = to_int(row[kills_idx])
+            # current values
             dead = to_int(row[dead_idx])
             heal = to_int(row[heal_idx])
             gold = to_int(row[gold_idx])
             wood = to_int(row[wood_idx])
-            ore = to_int(row[ore_idx])
+            ore  = to_int(row[ore_idx])
             mana = to_int(row[mana_idx])
 
-            kills_prev = to_int(prev_row[kills_idx]) if prev_row else 0
-            dead_prev = to_int(prev_row[dead_idx]) if prev_row else 0
-            heal_prev = to_int(prev_row[heal_idx]) if prev_row else 0
-            gold_prev = to_int(prev_row[gold_idx]) if prev_row else 0
-            wood_prev = to_int(prev_row[wood_idx]) if prev_row else 0
-            ore_prev = to_int(prev_row[ore_idx]) if prev_row else 0
-            mana_prev = to_int(prev_row[mana_idx]) if prev_row else 0
+            t5 = to_int(row[t5_idx]); t4 = to_int(row[t4_idx])
+            t3 = to_int(row[t3_idx]); t2 = to_int(row[t2_idx])
+            t1 = to_int(row[t1_idx])
+
+            # previous
+            prev_row = prev_map.get(row[id_idx])
+            if prev_row and len(prev_row) > t1_idx:
+                dead_prev = to_int(prev_row[dead_idx])
+                heal_prev = to_int(prev_row[heal_idx])
+                gold_prev = to_int(prev_row[gold_idx])
+                wood_prev = to_int(prev_row[wood_idx])
+                ore_prev  = to_int(prev_row[ore_idx])
+                mana_prev = to_int(prev_row[mana_idx])
+
+                t5_prev = to_int(prev_row[t5_idx]); t4_prev = to_int(prev_row[t4_idx])
+                t3_prev = to_int(prev_row[t3_idx]); t2_prev = to_int(prev_row[t2_idx])
+                t1_prev = to_int(prev_row[t1_idx])
+            else:
+                dead_prev = heal_prev = gold_prev = wood_prev = ore_prev = mana_prev = 0
+                t5_prev = t4_prev = t3_prev = t2_prev = t1_prev = 0
 
             s = stat_map[sid]
-            s["kills"] += kills
-            s["dead"] += dead
+            # totals
+            s["dead"]   += dead
             s["healed"] += heal
-            s["gold"] += gold - gold_prev
-            s["wood"] += wood - wood_prev
-            s["ore"] += ore - ore_prev
-            s["mana"] += mana - mana_prev
-            s["kills_gain"] += kills - kills_prev
-            s["dead_gain"] += dead - dead_prev
-            s["healed_gain"] += heal - heal_prev
+            s["t5"]     += t5; s["t4"] += t4; s["t3"] += t3; s["t2"] += t2; s["t1"] += t1
+            # gains
+            s["dead_gain"]   += (dead  - dead_prev)
+            s["healed_gain"] += (heal  - heal_prev)
+            s["gold"]        += (gold  - gold_prev)
+            s["wood"]        += (wood  - wood_prev)
+            s["ore"]         += (ore   - ore_prev)
+            s["mana"]        += (mana  - mana_prev)
+            s["t5_gain"]     += (t5 - t5_prev)
+            s["t4_gain"]     += (t4 - t4_prev)
+            s["t3_gain"]     += (t3 - t3_prev)
+            s["t2_gain"]     += (t2 - t2_prev)
+            s["t1_gain"]     += (t1 - t1_prev)
+
+        # derive kills from tiers so totals match breakdown
+        for sid, s in stat_map.items():
+            tier_total = s["t5"] + s["t4"] + s["t3"] + s["t2"] + s["t1"]
+            tier_gain  = s["t5_gain"] + s["t4_gain"] + s["t3_gain"] + s["t2_gain"] + s["t1_gain"]
+            s["kills"] = tier_total
+            s["kills_gain"] = tier_gain
 
         def format_side(name, stats):
             return (
                 f"{name}\n"
                 f"\n"
                 f"▶ Combat Stats\n"
-                f"⚔️ Kills:  {stats['kills']:,} (+{stats['kills_gain']:,})\n"
-                f"💀 Deads:  {stats['dead']:,} (+{stats['dead_gain']:,})\n"
-                f"❤️ Heals:  {stats['healed']:,} (+{stats['healed_gain']:,})\n"
+                f"⚔️ Kills:  {stats['kills']:,} ({fmt_gain(stats['kills_gain'])})\n"
+                f"💀 Deads:  {stats['dead']:,} ({fmt_gain(stats['dead_gain'])})\n"
+                f"❤️ Heals:  {stats['healed']:,} ({fmt_gain(stats['healed_gain'])})\n"
+                f"\n"
+                f"▶ Kill Breakdown\n"
+                f"🟨 T5: {stats['t5']:,} ({fmt_gain(stats['t5_gain'])})\n"
+                f"🟪 T4: {stats['t4']:,} ({fmt_gain(stats['t4_gain'])})\n"
+                f"🟦 T3: {stats['t3']:,} ({fmt_gain(stats['t3_gain'])})\n"
+                f"🟩 T2: {stats['t2']:,} ({fmt_gain(stats['t2_gain'])})\n"
+                f"⬜ T1: {stats['t1']:,} ({fmt_gain(stats['t1_gain'])})\n"
                 f"\n"
                 f"▶ Resources Spent\n"
-                f"💰 Gold Spent:  {stats['gold']:,}\n"
-                f"🪵 Wood Spent:  {stats['wood']:,}\n"
-                f"⛏️ Ore Spent:   {stats['ore']:,}\n"
-                f"💧 Mana Spent:  {stats['mana']:,}\n"
+                f"💰 Gold:  {stats['gold']:,}\n"
+                f"🪵 Wood:  {stats['wood']:,}\n"
+                f"⛏️ Ore:   {stats['ore']:,}\n"
+                f"💧 Mana:  {stats['mana']:,}\n"
             )
 
         title = format_title_with_dates(previous.title, latest.title)
