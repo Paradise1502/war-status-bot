@@ -2085,10 +2085,10 @@ async def matchups2(ctx, sheet: str = "test sheet"):
 
         SERVER_MAP = {
             "225": "25IW",
-            "60":  "echo",
+            "60":  "ECHO",
             "49":  "NTS",
             "363": "RaGE",
-            "176": "eis",
+            "176": "EIS",
             "249": "WB",
         }
         BLUE = ["225", "60", "49"]
