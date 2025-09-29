@@ -1181,7 +1181,7 @@ async def toprssheal(ctx, *args):
         ]
 
         # Chunked sending (<=2000 chars per message)
-        header = f"📊 **Top {top_n} RSS Heal Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
+        header = f"📊 **Top {top_n} RSS spent** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
         chunk = header
         for line in lines:
             # +1 for newline
