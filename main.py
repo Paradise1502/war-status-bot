@@ -1085,15 +1085,13 @@ async def toprssheal(ctx, *args):
     season = DEFAULT_SEASON
     top_n = 10
 
-    # ---------- helpers ----------
     def to_int(val):
         try:
             return int(str(val).replace(',', '').replace('-', '').strip())
         except:
             return 0
 
-    def fmt_abbr_fixed(n: int, width: int = 7) -> str:
-        # right-aligned short number: 31.2b / 915.4m / 9.8k / 950
+    def fmt_abbr(n: int) -> str:
         sign = "-" if n < 0 else ""
         x = abs(n)
         if x >= 1_000_000_000:
@@ -1103,47 +1101,14 @@ async def toprssheal(ctx, *args):
         elif x >= 1_000:
             v, s = x / 1_000, "k"
         else:
-            return f"{sign}{x}".rjust(width)
-        return f"{sign}{v:.1f}{s}".rjust(width)
+            return f"{sign}{x}"
+        txt = f"{v:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{txt}{s}"
 
-    # width calc using wcwidth if available
-    try:
-        from wcwidth import wcswidth
-        def disp_width(s: str) -> int:
-            return max(0, wcswidth(s))
-    except Exception:
-        import unicodedata
-        def _char_w(ch: str) -> int:
-            if unicodedata.combining(ch):
-                return 0
-            eaw = unicodedata.east_asian_width(ch)
-            if eaw in ("W", "F"): return 2
-            name = unicodedata.name(ch, "")
-            if ("EMOJI" in name) or ("FACE" in name) or ("SMILING" in name) or ("HEART" in name):
-                return 2
-            return 1
-        def disp_width(s: str) -> int:
-            return sum(_char_w(c) for c in s)
+    def truncate(s: str, max_len: int = 64) -> str:
+        return s if len(s) <= max_len else s[:max_len-1] + "…"
 
-    def truncate_to_cols(s: str, max_cols: int) -> str:
-        cols = 0
-        out = []
-        for ch in s:
-            w = disp_width(ch)
-            if cols + w > max_cols:
-                break
-            out.append(ch)
-            cols += w
-        if disp_width(s) > cols and max_cols > 0 and cols + 1 <= max_cols:
-            out.append("…")
-        return "".join(out)
-
-    def pad_to_cols(s: str, width_cols: int) -> str:
-        s2 = truncate_to_cols(s, width_cols)
-        pad = width_cols - disp_width(s2)
-        return s2 + (" " * pad if pad > 0 else "")
-
-    # ---------- args ----------
+    # parse args (any order: number + season key)
     try:
         for arg in args:
             a = str(arg).strip().lower()
@@ -1177,44 +1142,46 @@ async def toprssheal(ctx, *args):
         name_index = 1
         alliance_index = 3
         power_idx = 12  # M
-        gold_idx = 31   # AF
-        wood_idx = 32   # AG
-        ore_idx  = 33   # AH
-        mana_idx = 34   # AI
 
+        gold_idx = 31  # AF
+        wood_idx = 32  # AG
+        ore_idx  = 33  # AH
+        mana_idx = 34  # AI
+
+        # build prev map
         prev_map = {}
         for row in data_prev[1:]:
             if len(row) > mana_idx:
-                raw_id = (row[id_index] or "").strip()
-                if raw_id:
-                    prev_map[raw_id] = {
-                        "gold": to_int(row[gold_idx]),
-                        "wood": to_int(row[wood_idx]),
-                        "ore":  to_int(row[ore_idx]),
-                        "mana": to_int(row[mana_idx]),
-                    }
+                rid = (row[id_index] or "").strip()
+                if rid:
+                    prev_map[rid] = (
+                        to_int(row[gold_idx]),
+                        to_int(row[wood_idx]),
+                        to_int(row[ore_idx]),
+                        to_int(row[mana_idx]),
+                    )
 
+        # compute deltas
         gains = []
         for row in data_latest[1:]:
             if len(row) <= mana_idx:
                 continue
-            raw_id = (row[id_index] or "").strip()
-            if not raw_id or raw_id not in prev_map:
+            rid = (row[id_index] or "").strip()
+            if not rid or rid not in prev_map:
                 continue
             if to_int(row[power_idx]) < 25_000_000:
                 continue
 
-            name_raw = (row[name_index] if len(row) > name_index else "?").strip()
+            name = (row[name_index] if len(row) > name_index else "?").strip()
             alliance = (row[alliance_index] if len(row) > alliance_index else "").strip()
-            full_name = f"[{alliance}] {name_raw}".strip()
+            display = truncate(f"[{alliance}] {name}".strip())
 
-            gold = to_int(row[gold_idx]) - prev_map[raw_id]["gold"]
-            wood = to_int(row[wood_idx]) - prev_map[raw_id]["wood"]
-            ore  = to_int(row[ore_idx])  - prev_map[raw_id]["ore"]
-            mana = to_int(row[mana_idx]) - prev_map[raw_id]["mana"]
+            g0, w0, o0, m0 = prev_map[rid]
+            g1 = to_int(row[gold_idx]); w1 = to_int(row[wood_idx]); o1 = to_int(row[ore_idx]); m1 = to_int(row[mana_idx])
+            gold = g1 - g0; wood = w1 - w0; ore = o1 - o0; mana = m1 - m0
             total = gold + wood + ore + mana
 
-            gains.append((full_name, total, gold, wood, ore, mana))
+            gains.append((display, total, gold, wood, ore, mana))
 
         gains.sort(key=lambda x: x[1], reverse=True)
         if not gains:
@@ -1224,61 +1191,28 @@ async def toprssheal(ctx, *args):
             )
             return
 
-        top_rows = gains[:top_n]
-
-        # ---------- dynamic name column width ----------
-        # Use the LONGEST visual width among the names in the final output, but cap it.
-        MAX_NAME_COLS = 44
-        longest = min(MAX_NAME_COLS, max(disp_width(name) for name, *_ in top_rows))
-        W_RANK = 3
-        W_NAME = max(20, longest)  # keep at least 20 cols so short lists still look decent
-        W_NUM  = 7                 # numeric columns width
-
-        header_title = (
+        # Build two-line rows (robust to Unicode widths)
+        header = (
             f"📊 **Top {top_n} RSS Spent** (includes heals + training) (≥25M Power)\n"
             f"`{previous.title}` → `{latest.title}`\n"
-            f"Legend: 🪙 Gold | 🪵 Wood | ⛏️ Ore | 💧 Mana | 💸 Total\n"
-        )
-        tbl_header = (
-            "#".rjust(W_RANK) + " " +
-            pad_to_cols("Player", W_NAME) + " " +
-            "Total".rjust(W_NUM) + "  " +
-            "Gold".rjust(W_NUM)  + " " +
-            "Wood".rjust(W_NUM)  + " " +
-            "Ore".rjust(W_NUM)   + " " +
-            "Mana".rjust(W_NUM)
+            f"Legend: 🪙 Gold · 🪵 Wood · ⛏️ Ore · 💧 Mana · 💸 Total\n"
         )
 
         rows = []
-        for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows, start=1):
-            rows.append(
-                str(i).rjust(W_RANK) + " " +
-                pad_to_cols(name, W_NAME) + " " +
-                fmt_abbr_fixed(total, W_NUM) + "  " +
-                fmt_abbr_fixed(gold,  W_NUM) + " " +
-                fmt_abbr_fixed(wood,  W_NUM) + " " +
-                fmt_abbr_fixed(ore,   W_NUM) + " " +
-                fmt_abbr_fixed(mana,  W_NUM)
-            )
+        for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n], start=1):
+            line1 = f"{i}. {name}"
+            line2 = f"   💸 {fmt_abbr(total)} · 🪙 {fmt_abbr(gold)} · 🪵 {fmt_abbr(wood)} · ⛏️ {fmt_abbr(ore)} · 💧 {fmt_abbr(mana)}"
+            rows.append(line1 + "\n" + line2)
 
-        table_block = "```text\n" + tbl_header + "\n" + "\n".join(rows) + "\n```"
-
-        # Chunk-safe send
-        chunk = header_title + table_block
-        if len(chunk) <= 2000:
-            await ctx.send(chunk)
-        else:
-            await ctx.send(header_title + "```text\n" + tbl_header + "\n```")
-            cur = "```text\n"
-            for line in rows:
-                if len(cur) + len(line) + 1 > 1900:
-                    cur += "```"
-                    await ctx.send(cur)
-                    cur = "```text\n"
-                cur += line + "\n"
-            if cur.strip():
-                cur += "```"
-                await ctx.send(cur)
+        # chunked send
+        chunk = header
+        for block in rows:
+            if len(chunk) + len(block) + 2 > 2000:
+                await ctx.send(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += block + "\n"
+        if chunk.strip():
+            await ctx.send(chunk.rstrip())
 
     except discord.HTTPException as e:
         if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
