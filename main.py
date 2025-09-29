@@ -2096,12 +2096,10 @@ from discord.ext import commands
 async def matchups2(ctx, sheet: str = "testsheet"):
     """
     Compare two tabs in a custom KVK workbook (baseline = tabs[-2], current = tabs[-1]).
-    Filters to:
-      Team Blue: 225=25IW, 60=echo, 49=NTS
-      Team Red:  363=RaGE, 176=eis, 249=WB
-    Pairs: (225 vs 363), (60 vs 176), (49 vs 249)
-    Shows totals and gains (current - baseline) for kills, deads, heals, RSS spent, and kill tier breakdown.
-    Kills totals/gains are derived from T5..T1 to keep sums consistent with the breakdown.
+    Uses ONLY accounts present in BOTH tabs (by lord_id).
+    Pairs: (225 vs 176), (60 vs 249), (49 vs 363)
+    Shows totals and gains (current - baseline) for deads, heals, RSS deltas, and tiered kills.
+    Kills totals/gains are derived from T5..T1 to match the breakdown.
     """
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
@@ -2126,10 +2124,10 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             await ctx.send("❌ Not enough sheets to compare. Put baseline + current.")
             return
 
-        current = tabs[-1]
+        current  = tabs[-1]
         baseline = tabs[-2]
 
-        cur_vals = current.get_all_values()
+        cur_vals  = current.get_all_values()
         base_vals = baseline.get_all_values()
         if not cur_vals or not base_vals:
             await ctx.send("❌ One of the worksheets is empty.")
@@ -2140,17 +2138,15 @@ async def matchups2(ctx, sheet: str = "testsheet"):
         def find_idx(name, fallback):
             return headers.index(name) if name in headers else fallback
 
-        # Core indices (fallbacks match your sheet layout)
+        # Indices (fallbacks match your layout)
         id_idx     = find_idx("lord_id",        0)
         server_idx = find_idx("home_server",    5)
-        kills_idx  = find_idx("units_killed",   9)   # not used for totals anymore, kept for backward compat
         dead_idx   = find_idx("units_dead",     17)
         heal_idx   = find_idx("units_healed",   18)
         gold_idx   = find_idx("gold_spent",     31)
         wood_idx   = find_idx("wood_spent",     32)
         ore_idx    = find_idx("stone_spent",    33)
         mana_idx   = find_idx("mana_spent",     34)
-
         # Kill tiers (AK..AO)
         t5_idx = find_idx("t5_kills", 36)
         t4_idx = find_idx("t4_kills", 37)
@@ -2161,21 +2157,19 @@ async def matchups2(ctx, sheet: str = "testsheet"):
         def to_int(val):
             try:
                 v = str(val).replace(",", "").replace(" ", "").strip()
-                if v in ("", "-"):
-                    return 0
+                if v in ("", "-"): return 0
                 return int(v)
             except:
                 return 0
 
-        # Build baseline by lord_id
+        # Baseline rows by lord_id
         base_map = {}
         for r in base_vals[1:]:
-            if len(r) <= max(mana_idx, server_idx, id_idx):
+            if len(r) <= max(mana_idx, server_idx, id_idx): 
                 continue
             lid = (r[id_idx] or "").strip()
-            if not lid:
-                continue
-            base_map[lid] = r
+            if lid:
+                base_map[lid] = r
 
         # Stats per server
         stat_map = {sid: {
@@ -2190,50 +2184,41 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             "t1": 0, "t1_gain": 0,
         } for sid in SERVER_MAP.keys()}
 
+        # Aggregate using ONLY IDs present in both sheets
         for r in cur_vals[1:]:
             if len(r) <= max(mana_idx, server_idx, id_idx):
                 continue
+
+            lid = (r[id_idx] or "").strip()
+            b = base_map.get(lid)
+            if not lid or b is None:
+                continue  # <- skip accounts not present in baseline
+
             sid_raw = (r[server_idx] or "").strip()
             sid = "".join(ch for ch in sid_raw if ch.isdigit())
             if sid not in SERVER_MAP:
                 continue
 
-            # Current values
-            dead  = to_int(r[dead_idx])
-            heal  = to_int(r[heal_idx])
-            gold  = to_int(r[gold_idx])
-            wood  = to_int(r[wood_idx])
-            ore   = to_int(r[ore_idx])
-            mana  = to_int(r[mana_idx])
+            # Current
+            dead  = to_int(r[dead_idx]);   heal  = to_int(r[heal_idx])
+            gold  = to_int(r[gold_idx]);   wood  = to_int(r[wood_idx])
+            ore   = to_int(r[ore_idx]);    mana  = to_int(r[mana_idx])
+            t5 = to_int(r[t5_idx]); t4 = to_int(r[t4_idx]); t3 = to_int(r[t3_idx])
+            t2 = to_int(r[t2_idx]); t1 = to_int(r[t1_idx])
 
-            t5 = to_int(r[t5_idx]); t4 = to_int(r[t4_idx])
-            t3 = to_int(r[t3_idx]); t2 = to_int(r[t2_idx])
-            t1 = to_int(r[t1_idx])
-
-            # Baseline values
-            lid = (r[id_idx] or "").strip()
-            b = base_map.get(lid)
-            if b and len(b) > t1_idx:
-                dead_prev  = to_int(b[dead_idx])
-                heal_prev  = to_int(b[heal_idx])
-                gold_prev  = to_int(b[gold_idx])
-                wood_prev  = to_int(b[wood_idx])
-                ore_prev   = to_int(b[ore_idx])
-                mana_prev  = to_int(b[mana_idx])
-
-                t5_prev = to_int(b[t5_idx]); t4_prev = to_int(b[t4_idx])
-                t3_prev = to_int(b[t3_idx]); t2_prev = to_int(b[t2_idx])
-                t1_prev = to_int(b[t1_idx])
-            else:
-                dead_prev = heal_prev = gold_prev = wood_prev = ore_prev = mana_prev = 0
-                t5_prev = t4_prev = t3_prev = t2_prev = t1_prev = 0
+            # Baseline (exists by guard above)
+            dead_prev  = to_int(b[dead_idx]);   heal_prev = to_int(b[heal_idx])
+            gold_prev  = to_int(b[gold_idx]);   wood_prev = to_int(b[wood_idx])
+            ore_prev   = to_int(b[ore_idx]);    mana_prev = to_int(b[mana_idx])
+            t5_prev = to_int(b[t5_idx]); t4_prev = to_int(b[t4_idx]); t3_prev = to_int(b[t3_idx])
+            t2_prev = to_int(b[t2_idx]); t1_prev = to_int(b[t1_idx])
 
             s = stat_map[sid]
             # totals
             s["dead"]   += dead
             s["healed"] += heal
             s["t5"]     += t5; s["t4"] += t4; s["t3"] += t3; s["t2"] += t2; s["t1"] += t1
-            # gains/deltas
+            # deltas
             s["dead_gain"]   += (dead  - dead_prev)
             s["healed_gain"] += (heal  - heal_prev)
             s["gold"]        += (gold  - gold_prev)
@@ -2246,15 +2231,14 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             s["t2_gain"]     += (t2 - t2_prev)
             s["t1_gain"]     += (t1 - t1_prev)
 
-        # After aggregating, derive kills from tier sums so totals match the breakdown
+        # Derive kills from tier sums so totals match breakdown
         for sid, s in stat_map.items():
             tier_total = s["t5"] + s["t4"] + s["t3"] + s["t2"] + s["t1"]
             tier_gain  = s["t5_gain"] + s["t4_gain"] + s["t3_gain"] + s["t2_gain"] + s["t1_gain"]
             s["kills"] = tier_total
             s["kills_gain"] = tier_gain
 
-        def fmt_gain(val):
-            return f"+{val:,}" if val > 0 else f"{val:,}"
+        def fmt_gain(val): return f"+{val:,}" if val > 0 else f"{val:,}"
 
         def format_side(name, stats):
             return (
@@ -2272,7 +2256,7 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 f"🟩 T2: {stats['t2']:,} ({fmt_gain(stats['t2_gain'])})\n"
                 f"⬜ T1: {stats['t1']:,} ({fmt_gain(stats['t1_gain'])})\n"
                 f"\n"
-                f"▶ Resources Spent\n"
+                f"▶ Resources Spent (Δ)\n"
                 f"💰 Gold:  {stats['gold']:,}\n"
                 f"🪵 Wood:  {stats['wood']:,}\n"
                 f"⛏️ Ore:   {stats['ore']:,}\n"
