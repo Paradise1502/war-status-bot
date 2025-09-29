@@ -1093,7 +1093,7 @@ async def toprssheal(ctx, *args):
             return 0
 
     def fmt_abbr_fixed(n: int, width: int = 7) -> str:
-        # right-aligned: 31.2b / 915.4m / 9.8k / 950
+        # right-aligned short number: 31.2b / 915.4m / 9.8k / 950
         sign = "-" if n < 0 else ""
         x = abs(n)
         if x >= 1_000_000_000:
@@ -1104,12 +1104,11 @@ async def toprssheal(ctx, *args):
             v, s = x / 1_000, "k"
         else:
             return f"{sign}{x}".rjust(width)
-        txt = f"{sign}{v:.1f}{s}"
-        return txt.rjust(width)
+        return f"{sign}{v:.1f}{s}".rjust(width)
 
-    # width-aware padding using wcwidth if available
+    # width calc using wcwidth if available
     try:
-        from wcwidth import wcswidth  # pip install wcwidth
+        from wcwidth import wcswidth
         def disp_width(s: str) -> int:
             return max(0, wcswidth(s))
     except Exception:
@@ -1118,15 +1117,13 @@ async def toprssheal(ctx, *args):
             if unicodedata.combining(ch):
                 return 0
             eaw = unicodedata.east_asian_width(ch)
-            if eaw in ("W", "F"):  # wide/fullwidth
-                return 2
-            # crude emoji heuristic
+            if eaw in ("W", "F"): return 2
             name = unicodedata.name(ch, "")
-            if ("EMOJI" in name) or ("FACE" in name) or ("SMILING" in name) or ("CAT" in name) or ("HEART" in name):
+            if ("EMOJI" in name) or ("FACE" in name) or ("SMILING" in name) or ("HEART" in name):
                 return 2
             return 1
         def disp_width(s: str) -> int:
-            return sum(_char_w(ch) for ch in s)
+            return sum(_char_w(c) for c in s)
 
     def truncate_to_cols(s: str, max_cols: int) -> str:
         cols = 0
@@ -1137,10 +1134,8 @@ async def toprssheal(ctx, *args):
                 break
             out.append(ch)
             cols += w
-        if disp_width(s) > cols and max_cols > 0:
-            # add ellipsis if at least 1 col free
-            if cols + 1 <= max_cols:
-                out.append("…")
+        if disp_width(s) > cols and max_cols > 0 and cols + 1 <= max_cols:
+            out.append("…")
         return "".join(out)
 
     def pad_to_cols(s: str, width_cols: int) -> str:
@@ -1229,10 +1224,15 @@ async def toprssheal(ctx, *args):
             )
             return
 
-        # ---------- render ----------
+        top_rows = gains[:top_n]
+
+        # ---------- dynamic name column width ----------
+        # Use the LONGEST visual width among the names in the final output, but cap it.
+        MAX_NAME_COLS = 44
+        longest = min(MAX_NAME_COLS, max(disp_width(name) for name, *_ in top_rows))
         W_RANK = 3
-        W_NAME = 38   # visual columns (wcwidth)
-        W_NUM  = 7    # fits 915.4m, 31.2b etc.
+        W_NAME = max(20, longest)  # keep at least 20 cols so short lists still look decent
+        W_NUM  = 7                 # numeric columns width
 
         header_title = (
             f"📊 **Top {top_n} RSS Spent** (includes heals + training) (≥25M Power)\n"
@@ -1250,7 +1250,7 @@ async def toprssheal(ctx, *args):
         )
 
         rows = []
-        for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n], start=1):
+        for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows, start=1):
             rows.append(
                 str(i).rjust(W_RANK) + " " +
                 pad_to_cols(name, W_NAME) + " " +
@@ -1263,6 +1263,7 @@ async def toprssheal(ctx, *args):
 
         table_block = "```text\n" + tbl_header + "\n" + "\n".join(rows) + "\n```"
 
+        # Chunk-safe send
         chunk = header_title + table_block
         if len(chunk) <= 2000:
             await ctx.send(chunk)
