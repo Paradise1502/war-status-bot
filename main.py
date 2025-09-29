@@ -1082,20 +1082,18 @@ async def toprssheal(ctx, *args):
         await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
         return
 
-    # defaults
     season = DEFAULT_SEASON
     top_n = 10
 
-    import unicodedata
-
+    # ---------- helpers ----------
     def to_int(val):
         try:
             return int(str(val).replace(',', '').replace('-', '').strip())
         except:
             return 0
 
-    def fmt_abbr_fixed(n: int, width: int = 6) -> str:
-        """Right-aligned fixed-width abbreviations: 31.2b / 915.4m / 9.8k / 950"""
+    def fmt_abbr_fixed(n: int, width: int = 7) -> str:
+        # right-aligned: 31.2b / 915.4m / 9.8k / 950
         sign = "-" if n < 0 else ""
         x = abs(n)
         if x >= 1_000_000_000:
@@ -1109,54 +1107,54 @@ async def toprssheal(ctx, *args):
         txt = f"{sign}{v:.1f}{s}"
         return txt.rjust(width)
 
-    # --- width-aware name handling (keeps Unicode) ---
-    def char_display_width(ch: str) -> int:
-        # Zero width for combining marks / variation selectors
-        if unicodedata.combining(ch):
-            return 0
-        name = unicodedata.name(ch, "")
-        if "VARIATION SELECTOR" in name:
-            return 0
-        # East Asian wide/fullwidth count as 2
-        if unicodedata.east_asian_width(ch) in ("W", "F"):
-            return 2
-        # Many emojis are width 2; heuristic: symbols & pictographs
-        if ("EMOJI" in name) or ("FACE" in name) or ("SYMBOL" in name and "LETTER" not in name):
-            return 2
-        return 1
+    # width-aware padding using wcwidth if available
+    try:
+        from wcwidth import wcswidth  # pip install wcwidth
+        def disp_width(s: str) -> int:
+            return max(0, wcswidth(s))
+    except Exception:
+        import unicodedata
+        def _char_w(ch: str) -> int:
+            if unicodedata.combining(ch):
+                return 0
+            eaw = unicodedata.east_asian_width(ch)
+            if eaw in ("W", "F"):  # wide/fullwidth
+                return 2
+            # crude emoji heuristic
+            name = unicodedata.name(ch, "")
+            if ("EMOJI" in name) or ("FACE" in name) or ("SMILING" in name) or ("CAT" in name) or ("HEART" in name):
+                return 2
+            return 1
+        def disp_width(s: str) -> int:
+            return sum(_char_w(ch) for ch in s)
 
-    def truncate_display(s: str, max_cols: int) -> str:
+    def truncate_to_cols(s: str, max_cols: int) -> str:
         cols = 0
         out = []
         for ch in s:
-            w = char_display_width(ch)
+            w = disp_width(ch)
             if cols + w > max_cols:
                 break
             out.append(ch)
             cols += w
-        if cols < display_width(s):
-            # Reserve one col for ellipsis if room
+        if disp_width(s) > cols and max_cols > 0:
+            # add ellipsis if at least 1 col free
             if cols + 1 <= max_cols:
                 out.append("…")
         return "".join(out)
 
-    def display_width(s: str) -> int:
-        return sum(char_display_width(ch) for ch in s)
+    def pad_to_cols(s: str, width_cols: int) -> str:
+        s2 = truncate_to_cols(s, width_cols)
+        pad = width_cols - disp_width(s2)
+        return s2 + (" " * pad if pad > 0 else "")
 
-    def pad_display(s: str, width_cols: int) -> str:
-        s = truncate_display(s, width_cols)
-        pad = width_cols - display_width(s)
-        if pad > 0:
-            s += " " * pad
-        return s
-
-    # parse args in any order
+    # ---------- args ----------
     try:
         for arg in args:
             a = str(arg).strip().lower()
-            if a.isdigit():  # top_n
+            if a.isdigit():
                 top_n = max(1, min(50, int(a)))
-            else:  # season
+            else:
                 if a in SEASON_SHEETS:
                     season = a
                 else:
@@ -1177,7 +1175,7 @@ async def toprssheal(ctx, *args):
         previous = tabs[-2]
 
         data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        data_prev   = previous.get_all_values()
         headers = data_latest[0]
 
         id_index = headers.index("lord_id")
@@ -1211,7 +1209,6 @@ async def toprssheal(ctx, *args):
             if to_int(row[power_idx]) < 25_000_000:
                 continue
 
-            # Keep original Unicode name
             name_raw = (row[name_index] if len(row) > name_index else "?").strip()
             alliance = (row[alliance_index] if len(row) > alliance_index else "").strip()
             full_name = f"[{alliance}] {name_raw}".strip()
@@ -1232,20 +1229,19 @@ async def toprssheal(ctx, *args):
             )
             return
 
-        # Table config (width-aware names)
+        # ---------- render ----------
         W_RANK = 3
-        W_NAME = 34  # visual columns, not characters
-        W_NUM  = 7   # a bit wider so 915.4m aligns well
+        W_NAME = 38   # visual columns (wcwidth)
+        W_NUM  = 7    # fits 915.4m, 31.2b etc.
 
         header_title = (
             f"📊 **Top {top_n} RSS Spent** (includes heals + training) (≥25M Power)\n"
             f"`{previous.title}` → `{latest.title}`\n"
             f"Legend: 🪙 Gold | 🪵 Wood | ⛏️ Ore | 💧 Mana | 💸 Total\n"
         )
-
         tbl_header = (
             "#".rjust(W_RANK) + " " +
-            "Player".ljust(W_NAME) + " " +
+            pad_to_cols("Player", W_NAME) + " " +
             "Total".rjust(W_NUM) + "  " +
             "Gold".rjust(W_NUM)  + " " +
             "Wood".rjust(W_NUM)  + " " +
@@ -1253,29 +1249,27 @@ async def toprssheal(ctx, *args):
             "Mana".rjust(W_NUM)
         )
 
-        lines = []
+        rows = []
         for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n], start=1):
-            line = (
+            rows.append(
                 str(i).rjust(W_RANK) + " " +
-                pad_display(name, W_NAME) + " " +
+                pad_to_cols(name, W_NAME) + " " +
                 fmt_abbr_fixed(total, W_NUM) + "  " +
                 fmt_abbr_fixed(gold,  W_NUM) + " " +
                 fmt_abbr_fixed(wood,  W_NUM) + " " +
                 fmt_abbr_fixed(ore,   W_NUM) + " " +
                 fmt_abbr_fixed(mana,  W_NUM)
             )
-            lines.append(line)
 
-        table_block = "```text\n" + tbl_header + "\n" + "\n".join(lines) + "\n```"
+        table_block = "```text\n" + tbl_header + "\n" + "\n".join(rows) + "\n```"
 
-        # Chunked sending
         chunk = header_title + table_block
         if len(chunk) <= 2000:
             await ctx.send(chunk)
         else:
             await ctx.send(header_title + "```text\n" + tbl_header + "\n```")
             cur = "```text\n"
-            for line in lines:
+            for line in rows:
                 if len(cur) + len(line) + 1 > 1900:
                     cur += "```"
                     await ctx.send(cur)
