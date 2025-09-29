@@ -1093,7 +1093,7 @@ async def toprssheal(ctx, *args):
             return 0
 
     def fmt_abbr(n: int) -> str:
-        """6,128,825,344 -> 6.1b; 125,400,000 -> 125.4m; 9,800 -> 9.8k"""
+        """6,128,825,344 -> 6.1b; 125,400,000 -> 125.4m; 9,800 -> 9.8k; keep sign."""
         sign = "-" if n < 0 else ""
         x = abs(n)
         if x >= 1_000_000_000:
@@ -1107,12 +1107,16 @@ async def toprssheal(ctx, *args):
         txt = f"{v:.1f}".rstrip("0").rstrip(".")
         return f"{sign}{txt}{s}"
 
+    def pad(s: str, width: int) -> str:
+        s = s if len(s) <= width else (s[:width-1] + "…")
+        return s + " " * (width - len(s))
+
     # parse args in any order
     try:
         for arg in args:
             a = str(arg).strip().lower()
             if a.isdigit():  # top_n
-                top_n = max(1, min(50, int(a)))  # clamp a bit to avoid spam
+                top_n = max(1, min(50, int(a)))
             else:  # season
                 if a in SEASON_SHEETS:
                     season = a
@@ -1191,27 +1195,64 @@ async def toprssheal(ctx, *args):
             )
             return
 
-        # Build lines (abbreviated numbers)
+        # Build a monospace table
         top_rows = gains[:top_n]
-        lines = [
-            f"{i+1}. `{name}` — 💸 {fmt_abbr(total)} "
-            f"(🪙{fmt_abbr(gold)} 🪵{fmt_abbr(wood)} ⛏️{fmt_abbr(ore)} 💧{fmt_abbr(mana)})"
-            for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows)
-        ]
 
-        # Chunked sending (<=2000 chars per message)
-        header = (
+        # Column widths
+        W_RANK = 3
+        W_NAME = 28  # [TAG] Name truncated to keep rows single-line
+        W_NUM  = 6   # fits like 17.4b / 125.4m / 9.8k
+
+        header_title = (
             f"📊 **Top {top_n} RSS Spent** (includes heals + training) (≥25M Power)\n"
-            f"`{previous.title}` → `{latest.title}`:\n"
+            f"`{previous.title}` → `{latest.title}`\n"
+            f"Legend: 🪙 Gold | 🪵 Wood | ⛏️ Ore | 💧 Mana | 💸 Total\n"
         )
-        chunk = header
-        for line in lines:
-            if len(chunk) + len(line) + 1 > 2000:
-                await ctx.send(chunk.rstrip())
-                chunk = "(cont.)\n"
-            chunk += line + "\n"
-        if chunk.strip():
-            await ctx.send(chunk.rstrip())
+
+        # Table header (monospace)
+        tbl_header = (
+            pad("#", W_RANK) + " " +
+            pad("Player", W_NAME) + " " +
+            pad("Total", W_NUM) + "  " +
+            pad("Gold", W_NUM)  + " " +
+            pad("Wood", W_NUM)  + " " +
+            pad("Ore",  W_NUM)  + " " +
+            pad("Mana", W_NUM)
+        )
+
+        lines = []
+        for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows, start=1):
+            line = (
+                pad(str(i), W_RANK) + " " +
+                pad(name, W_NAME) + " " +
+                pad(fmt_abbr(total), W_NUM) + "  " +
+                pad(fmt_abbr(gold),  W_NUM) + " " +
+                pad(fmt_abbr(wood),  W_NUM) + " " +
+                pad(fmt_abbr(ore),   W_NUM) + " " +
+                pad(fmt_abbr(mana),  W_NUM)
+            )
+            lines.append(line)
+
+        # Wrap the table in a code block so columns align
+        table_block = "```text\n" + tbl_header + "\n" + "\n".join(lines) + "\n```"
+
+        # Chunked sending (<=2000 chars)
+        chunk = header_title + table_block
+        if len(chunk) <= 2000:
+            await ctx.send(chunk)
+        else:
+            # If it somehow exceeds, split rows while keeping header & code fences intact
+            await ctx.send(header_title + "```text\n" + tbl_header + "\n```")
+            cur = "```text\n"
+            for line in lines:
+                if len(cur) + len(line) + 1 > 1900:  # margin for closing fence
+                    cur += "```"
+                    await ctx.send(cur)
+                    cur = "```text\n"
+                cur += line + "\n"
+            if cur.strip():
+                cur += "```"
+                await ctx.send(cur)
 
     except discord.HTTPException as e:
         if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
