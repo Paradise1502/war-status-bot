@@ -2165,11 +2165,11 @@ async def matchups2(ctx, sheet: str = "testsheet"):
         mana_idx   = col("mana_spent", "mana spent")
 
         # Tier kills (accept common aliases)
-        t5_idx = col("t5_kills", "t5 kills", "t5_points", "t5 points", "kills_t5")
-        t4_idx = col("t4_kills", "t4 kills", "t4_points", "t4 points", "kills_t4")
-        t3_idx = col("t3_kills", "t3 kills", "t3_points", "t3 points", "kills_t3")
-        t2_idx = col("t2_kills", "t2 kills", "t2_points", "t2 points", "kills_t2")
-        t1_idx = col("t1_kills", "t1 kills", "t1_points", "t1 points", "kills_t1")
+        t5_idx = col("t5_kills", "t5 kills", "t5_points", "t5 points", "killcount_t5")
+        t4_idx = col("t4_kills", "t4 kills", "t4_points", "t4 points", "killcount_t4")
+        t3_idx = col("t3_kills", "t3 kills", "t3_points", "t3 points", "killcount_t3")
+        t2_idx = col("t2_kills", "t2 kills", "t2_points", "t2 points", "killcount_t2")
+        t1_idx = col("t1_kills", "t1 kills", "t1_points", "t1 points", "killcount_t1")
 
         # Build maps and ID intersection
         base_map = {}
