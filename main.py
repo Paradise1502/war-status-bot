@@ -1197,13 +1197,20 @@ async def toprssheal(ctx, *args):
             f"`{previous.title}` → `{latest.title}`\n"
             f"Legend: 🪙 Gold · 🪵 Wood · ⛏️ Ore · 💧 Mana · 💸 Total\n"
         )
+        SEP = "  —  "  # nice readable gap between name and numbers
 
         rows = []
         for i, (name, total, gold, wood, ore, mana) in enumerate(gains[:top_n], start=1):
-            line1 = f"{i}. {name}"
-            line2 = f"   💸 {fmt_abbr(total)} · 🪙 {fmt_abbr(gold)} · 🪵 {fmt_abbr(wood)} · ⛏️ {fmt_abbr(ore)} · 💧 {fmt_abbr(mana)}"
-            rows.append(line1 + "\n" + line2)
-
+            line = (
+                f"{i}. {name}{SEP}"
+                f"💸 {fmt_abbr(total)}  ·  "
+                f"🪙 {fmt_abbr(gold)}  ·  "
+                f"🪵 {fmt_abbr(wood)}  ·  "
+                f"⛏️ {fmt_abbr(ore)}  ·  "
+                f"💧 {fmt_abbr(mana)}"
+            )
+            rows.append(line)
+            
         # chunked send
         chunk = header
         for block in rows:
