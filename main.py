@@ -1086,6 +1086,27 @@ async def toprssheal(ctx, *args):
     season = DEFAULT_SEASON
     top_n = 10
 
+    def to_int(val):
+        try:
+            return int(str(val).replace(',', '').replace('-', '').strip())
+        except:
+            return 0
+
+    def fmt_abbr(n: int) -> str:
+        """6,128,825,344 -> 6.1b; 125,400,000 -> 125.4m; 9,800 -> 9.8k"""
+        sign = "-" if n < 0 else ""
+        x = abs(n)
+        if x >= 1_000_000_000:
+            v, s = x / 1_000_000_000, "b"
+        elif x >= 1_000_000:
+            v, s = x / 1_000_000, "m"
+        elif x >= 1_000:
+            v, s = x / 1_000, "k"
+        else:
+            return f"{sign}{x}"
+        txt = f"{v:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{txt}{s}"
+
     # parse args in any order
     try:
         for arg in args:
@@ -1126,12 +1147,6 @@ async def toprssheal(ctx, *args):
         ore_idx  = 33  # AH
         mana_idx = 34  # AI
 
-        def to_int(val):
-            try:
-                return int(str(val).replace(',', '').replace('-', '').strip())
-            except:
-                return 0
-
         prev_map = {}
         for row in data_prev[1:]:
             if len(row) > mana_idx:
@@ -1170,21 +1185,27 @@ async def toprssheal(ctx, *args):
         gains.sort(key=lambda x: x[1], reverse=True)
 
         if not gains:
-            await ctx.send(f"📊 **Top {top_n} RSS spent** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
+            await ctx.send(
+                f"📊 **Top {top_n} RSS Spent** (includes heals + training) (≥25M Power)\n"
+                f"`{previous.title}` → `{latest.title}`:\n_No eligible players found._"
+            )
             return
 
-        # Build lines (respecting top_n)
+        # Build lines (abbreviated numbers)
         top_rows = gains[:top_n]
         lines = [
-            f"{i+1}. `{name}` — 💸 +{total:,} (🪙{gold:,} 🪵{wood:,} ⛏️{ore:,} 💧{mana:,})"
+            f"{i+1}. `{name}` — 💸 {fmt_abbr(total)} "
+            f"(🪙{fmt_abbr(gold)} 🪵{fmt_abbr(wood)} ⛏️{fmt_abbr(ore)} 💧{fmt_abbr(mana)})"
             for i, (name, total, gold, wood, ore, mana) in enumerate(top_rows)
         ]
 
         # Chunked sending (<=2000 chars per message)
-        header = f"📊 **Top {top_n} RSS spent** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
+        header = (
+            f"📊 **Top {top_n} RSS Spent** (includes heals + training) (≥25M Power)\n"
+            f"`{previous.title}` → `{latest.title}`:\n"
+        )
         chunk = header
         for line in lines:
-            # +1 for newline
             if len(chunk) + len(line) + 1 > 2000:
                 await ctx.send(chunk.rstrip())
                 chunk = "(cont.)\n"
@@ -1193,7 +1214,6 @@ async def toprssheal(ctx, *args):
             await ctx.send(chunk.rstrip())
 
     except discord.HTTPException as e:
-        # Friendly message on length/validation errors
         if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
             await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller range.")
         elif getattr(e, "status", None) == 429:
