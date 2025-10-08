@@ -44,7 +44,7 @@ intents.message_content = True  # Not needed for reactions, but good for command
 bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Global flag
-VACATION_MODE = True
+VACATION_MODE = False
 VACATION_MSG = "🗣️ not updated 🗣️ old data 🗣️ update update update"
 
 # Simple check before every command
