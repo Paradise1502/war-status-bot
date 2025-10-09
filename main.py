@@ -2089,11 +2089,12 @@ async def lowperformer(ctx, threshold: float = 5.0, season: str = DEFAULT_SEASON
 @bot.command()
 async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASON):
     """
-    Rank MFD (S77) players by a composite score:
-      - Eligibility: power ≥ 50M AND merit_ratio ≥ threshold (default 12%)
-      - Score = 40% merit_ratio_norm + 40% deaths_norm*(dead_ratio/7% capped at 1) + 20% heals_norm
-      - dead_ratio = (dead_gain / power)*100 ; if < 7%, death component is scaled down
-    Uses only accounts present in both sheets. Sorted by score (desc).
+    Rank MFD (S77) players by composite score:
+      - Eligibility: power ≥ 50M AND merit_ratio ≥ threshold (default 12%), present in both tabs
+      - Score = 40% merits + 40% deaths + 20% heals
+      - Death target = 0.4% of power:
+          * ratio < target  -> heavy penalty with quadratic scale
+          * ratio >= target -> reward (up to +75% boost), capped
     """
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
@@ -2147,8 +2148,13 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
         # previous rows map (only ids that exist)
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and (row[id_idx] or "").strip()}
 
-        # gather raw metrics for eligible players (in both sheets, S77, power >= 50M, merit_ratio >= threshold)
         MIN_POWER = 50_000_000
+        DEAD_TARGET = 0.4  # percent of power
+        WEIGHT_MERIT = 0.40
+        WEIGHT_DEAD  = 0.40
+        WEIGHT_HEAL  = 0.20
+
+        # collect raw metrics (eligible only)
         players = []
         for row in data_latest[1:]:
             if len(row) <= helps_idx:
@@ -2156,9 +2162,7 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
             lid = (row[id_idx] or "").strip()
             if not lid or lid not in prev_map:
                 continue
-
-            server = (row[serv_idx] or "").strip()
-            if server != "77":
+            if (row[serv_idx] or "").strip() != "77":
                 continue
 
             power = to_int(row[power_idx])
@@ -2177,79 +2181,75 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
             helps_gain  = to_int(row[helps_idx]) - to_int(prev[helps_idx])
 
             # guard against negative corrections
-            if dead_gain   < 0: dead_gain   = 0
-            if healed_gain < 0: healed_gain = 0
-            if kills_gain  < 0: kills_gain  = 0
-            if helps_gain  < 0: helps_gain  = 0
+            dead_gain   = max(0, dead_gain)
+            healed_gain = max(0, healed_gain)
+            kills_gain  = max(0, kills_gain)
+            helps_gain  = max(0, helps_gain)
 
-            dead_ratio = (dead_gain / power) * 100 if power > 0 else 0.0  # ~"deaths as % of troop mass"
+            dead_ratio = (dead_gain / power) * 100 if power > 0 else 0.0
 
             players.append({
-                "lid": lid,
-                "name": row[name_idx],
-                "power": power,
-                "merit": merit,
-                "merit_ratio": merit_ratio,
-                "dead_gain": dead_gain,
-                "healed_gain": healed_gain,
-                "dead_ratio": dead_ratio,
-                "helps_gain": helps_gain,
-                "kills_gain": kills_gain,
+                "lid": lid, "name": row[name_idx], "power": power,
+                "merit": merit, "merit_ratio": merit_ratio,
+                "dead_gain": dead_gain, "dead_ratio": dead_ratio,
+                "healed_gain": healed_gain, "kills_gain": kills_gain, "helps_gain": helps_gain
             })
 
         if not players:
             await ctx.send(f"✅ No eligible players in server 77 at ≥{threshold:.2f}% merit ratio and ≥50M power.")
             return
 
-        # ---- normalization helpers (min-max within cohort) ----
-        def minmax(values):
-            lo = min(values); hi = max(values)
+        # --- min-max normalizers over the cohort ---
+        def minmax(vals):
+            lo = min(vals); hi = max(vals)
             if hi == lo:
-                return (lambda _x: 1.0)  # everyone equal -> give full credit
+                return lambda _x: 1.0  # everyone equal
             span = hi - lo
-            return (lambda x: (x - lo) / span)
+            return lambda x: (x - lo) / span
 
-        norm_merit_ratio = minmax([p["merit_ratio"]  for p in players])
-        norm_dead_gain   = minmax([p["dead_gain"]    for p in players])
-        norm_healed_gain = minmax([p["healed_gain"]  for p in players])
+        norm_merit = minmax([p["merit_ratio"]  for p in players])
+        norm_dead  = minmax([p["dead_gain"]    for p in players])
+        norm_heal  = minmax([p["healed_gain"]  for p in players])
 
-        # ---- compute composite score ----
-        WEIGHT_MERIT = 0.40
-        WEIGHT_DEAD  = 0.40
-        WEIGHT_HEAL  = 0.20
-        DEAD_TARGET  = 7.0  # % of power
+        # death ratio scale: heavy penalty below target (square), reward above (up to +75%), cap overall component to 1.0
+        def death_ratio_factor(ratio_pct: float) -> float:
+            if DEAD_TARGET <= 0:
+                return 1.0
+            r = ratio_pct / DEAD_TARGET
+            if r < 1.0:
+                return r * r          # quadratic penalty: 0.3 -> 0.09
+            bonus = 1.0 + 0.75 * (r - 1.0)  # reward slope 0.75
+            return min(bonus, 2.0)  # cap factor
 
         for p in players:
-            m_comp = norm_merit_ratio(p["merit_ratio"])
+            m_comp = norm_merit(p["merit_ratio"])
 
-            d_comp_base = norm_dead_gain(p["dead_gain"])
-            # scale death component if they didn't hit the 7% target
-            scale = min(1.0, p["dead_ratio"] / DEAD_TARGET) if DEAD_TARGET > 0 else 1.0
-            d_comp = d_comp_base * scale
+            d_base = norm_dead(p["dead_gain"])
+            d_factor = death_ratio_factor(p["dead_ratio"])
+            d_comp = min(d_base * d_factor, 1.0)  # keep component in [0,1]
 
-            h_comp = norm_healed_gain(p["healed_gain"])
+            h_comp = norm_heal(p["healed_gain"])
 
             score = (WEIGHT_MERIT * m_comp) + (WEIGHT_DEAD * d_comp) + (WEIGHT_HEAL * h_comp)
-            p["score"] = round(score * 100, 2)  # 0..100 for readability
-            p["d_comp_scale"] = scale
+            p["score"] = round(score * 100, 2)
+            p["d_factor"] = round(d_factor, 2)
 
+        # Sort by score desc, tie-break merit ratio desc
         players.sort(key=lambda x: (x["score"], x["merit_ratio"]), reverse=True)
 
-        # ---- build output (chunked) ----
         header = (
             f"🏅 **Top Performers — MFD (S77)**\n"
-            f"Filters: power ≥ 50M, merit ratio ≥ {threshold:.2f}% • scoring = 40% merits + 40% deaths + 20% heals\n"
-            f"Death target: {DEAD_TARGET:.1f}% of power (death score scales down if not met)\n"
+            f"Filters: power ≥ 50M, merit ratio ≥ {threshold:.2f}% • weights 40% merits / 40% deaths / 20% heals\n"
+            f"Death target: **{DEAD_TARGET:.2f}%** of power (below = quadratic penalty, above = reward)\n"
             f"`{previous.title}` → `{latest.title}`\n\n"
         )
 
-        chunks = []
-        cur = header
+        chunks, cur = [], header
         for rank, p in enumerate(players, start=1):
             line = (
                 f"**#{rank}** — **{p['name']}** (`{p['lid']}`)\n"
                 f"🔢 Score: **{p['score']:.2f}**  |  🧠 Merits: {p['merit']:,} (**{p['merit_ratio']:.2f}%** of power)\n"
-                f"💀 Deads: +{p['dead_gain']:,} (**{p['dead_ratio']:.2f}%** of power, scale×{p['d_comp_scale']:.2f})  •  "
+                f"💀 Deads: +{p['dead_gain']:,} (**{p['dead_ratio']:.2f}%** of power, factor×{p['d_factor']})  •  "
                 f"❤️ Heals: +{p['healed_gain']:,}  •  ⚔️ Kills: +{p['kills_gain']:,}  •  🤝 Helps: +{p['helps_gain']:,}\n"
             )
             if len(cur) + len(line) + 1 > 2000:
@@ -2260,12 +2260,11 @@ async def topperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASO
             chunks.append(cur.rstrip())
 
         for ch in chunks:
-            embed = discord.Embed(description=ch, color=discord.Color.gold())
-            await ctx.send(embed=embed)
+            await ctx.send(embed=discord.Embed(description=ch, color=discord.Color.gold()))
 
     except discord.HTTPException as e:
         if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
-            await ctx.send("⚠️ Character limit reached — try raising the threshold or narrowing scope.")
+            await ctx.send("⚠️ Character limit reached — tighten filters (e.g., raise threshold).")
         else:
             await ctx.send(f"❌ Discord error: {e}")
     except Exception as e:
