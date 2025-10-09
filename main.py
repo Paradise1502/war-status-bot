@@ -45,7 +45,7 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 
 # Global flag
 VACATION_MODE = False
-VACATION_MSG = "🗣️ not updated 🗣️ old data 🗣️ update update update"
+VACATION_MSG = "🗣️ not updated 🗣️ old data 🗣️ update update"
 
 # Simple check before every command
 @bot.check
