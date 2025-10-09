@@ -1964,7 +1964,22 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def lowperformer(ctx, threshold: float = 5.0, season: str = DEFAULT_SEASON):
+async def lowperformer(ctx, threshold: float = 12.0, season: str = DEFAULT_SEASON):
+    """
+    Show lowest performers for MFD (S77) using the same scoring as topperformer,
+    but filtered to merit_ratio < threshold and sorted by score ascending.
+
+    Score weights: 40% merits, 40% deaths, 20% heals.
+    Death target = 0.4% of power:
+      - below target: quadratic penalty
+      - above target: reward (capped)
+    Only players present in BOTH tabs, power ≥ 50M, server == 77.
+    """
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season)
@@ -1980,109 +1995,156 @@ async def lowperformer(ctx, threshold: float = 5.0, season: str = DEFAULT_SEASON
         latest = tabs[-1]
         previous = tabs[-2]
         data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        data_prev   = previous.get_all_values()
         headers = data_latest[0]
 
         def col_to_index(col):
             col = col.upper()
-            index = 0
-            for char in col:
-                index = index * 26 + (ord(char) - ord('A') + 1)
-            return index - 1
+            idx = 0
+            for ch in col:
+                idx = idx * 26 + (ord(ch) - ord('A') + 1)
+            return idx - 1
 
-        id_idx = headers.index("lord_id")
-        name_idx = 1
-        home_server_idx = col_to_index("F")
+        id_idx    = headers.index("lord_id")
+        name_idx  = 1
+        serv_idx  = col_to_index("F")   # home_server
         power_idx = col_to_index("M")
         merit_idx = col_to_index("L")
         kills_idx = col_to_index("J")
-        dead_idx = col_to_index("R")
-        healed_idx = col_to_index("S")
+        dead_idx  = col_to_index("R")
+        heal_idx  = col_to_index("S")
         helps_idx = col_to_index("AE")
 
         def to_int(val):
             try:
-                val = val.replace(",", "").strip()
+                val = str(val).replace(",", "").strip()
                 if val == "-" or not val:
                     return 0
                 return int(val)
             except:
                 return 0
 
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and row[id_idx].strip()}
+        # map of previous rows (only ids present)
+        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > helps_idx and (row[id_idx] or "").strip()}
 
-        raw_list = []
+        MIN_POWER     = 50_000_000
+        DEAD_TARGET   = 0.4   # percent of power
+        WEIGHT_MERIT  = 0.40
+        WEIGHT_DEAD   = 0.40
+        WEIGHT_HEAL   = 0.20
+
+        # collect candidates (present in both, S77, power ≥ 50M, merit_ratio < threshold)
+        people = []
         for row in data_latest[1:]:
-            if len(row) <= helps_idx:
+            if len(row) <= helps_idx: 
                 continue
-
-            lid = row[id_idx]
-            if lid not in prev_map:
+            lid = (row[id_idx] or "").strip()
+            if not lid or lid not in prev_map:
                 continue
-
-            server = row[home_server_idx].strip() if len(row) > home_server_idx else ""
-            if server != "77":
+            if (row[serv_idx] or "").strip() != "77":
                 continue
 
             power = to_int(row[power_idx])
-            if power < 50_000_000:
+            if power < MIN_POWER:
                 continue
 
             merit = to_int(row[merit_idx])
-            merit_ratio = (merit / power) * 100 if power > 0 else 0
+            merit_ratio = (merit / power) * 100 if power > 0 else 0.0
             if merit_ratio >= threshold:
-                continue
+                continue  # we're focusing on low performers (below target)
 
-            name = row[name_idx]
-            kills_gain = to_int(row[kills_idx]) - to_int(prev_map[lid][kills_idx])
-            dead_gain = to_int(row[dead_idx]) - to_int(prev_map[lid][dead_idx])
-            healed_gain = to_int(row[healed_idx]) - to_int(prev_map[lid][healed_idx])
-            helps_gain = to_int(row[helps_idx]) - to_int(prev_map[lid][helps_idx])
+            prev = prev_map[lid]
+            kills_gain  = to_int(row[kills_idx]) - to_int(prev[kills_idx])
+            dead_gain   = to_int(row[dead_idx])  - to_int(prev[dead_idx])
+            healed_gain = to_int(row[heal_idx])  - to_int(prev[heal_idx])
+            helps_gain  = to_int(row[helps_idx]) - to_int(prev[helps_idx])
 
-            raw_list.append({
-                "lid": lid,
-                "name": name,
-                "merit": merit,
-                "ratio": merit_ratio,
-                "power": power,
-                "kills": kills_gain,
-                "dead": dead_gain,
-                "healed": healed_gain,
-                "helps": helps_gain
+            # clamp negatives from corrections
+            kills_gain  = max(0, kills_gain)
+            dead_gain   = max(0, dead_gain)
+            healed_gain = max(0, healed_gain)
+            helps_gain  = max(0, helps_gain)
+
+            dead_ratio = (dead_gain / power) * 100 if power > 0 else 0.0
+
+            people.append({
+                "lid": lid, "name": row[name_idx], "power": power,
+                "merit": merit, "merit_ratio": merit_ratio,
+                "dead_gain": dead_gain, "dead_ratio": dead_ratio,
+                "healed_gain": healed_gain, "kills_gain": kills_gain, "helps_gain": helps_gain
             })
 
-        if not raw_list:
-            await ctx.send(f"✅ No players under {threshold:.2f}% merit-to-power ratio in server 77.")
+        if not people:
+            await ctx.send(f"✅ No low performers found under {threshold:.2f}% merit ratio (S77, ≥50M).")
             return
 
-        # Sort by merit ratio ascending
-        raw_list.sort(key=lambda x: x["ratio"])
+        # --- min-max normalizers over this low-performer cohort ---
+        def minmax(vals):
+            lo = min(vals); hi = max(vals)
+            if hi == lo:
+                return lambda _x: 1.0
+            span = hi - lo
+            return lambda x: (x - lo) / span
 
-        header = f"📉 **Low Performers (<{threshold:.2f}% merit-to-power)**\n\n"
-        chunks = []
-        current_chunk = header
+        norm_merit = minmax([p["merit_ratio"]  for p in people])   # lower is worse; min-max will reflect that
+        norm_dead  = minmax([p["dead_gain"]    for p in people])
+        norm_heal  = minmax([p["healed_gain"]  for p in people])
 
-        for entry in raw_list:
+        # same death ratio factor as topperformer
+        def death_ratio_factor(ratio_pct: float) -> float:
+            if DEAD_TARGET <= 0:
+                return 1.0
+            r = ratio_pct / DEAD_TARGET
+            if r < 1.0:
+                return r * r
+            bonus = 1.0 + 0.75 * (r - 1.0)
+            return min(bonus, 2.0)
+
+        # compute composite score (then sort ASC)
+        for p in people:
+            merit_comp = norm_merit(p["merit_ratio"])
+            dead_base  = norm_dead(p["dead_gain"])
+            d_factor   = death_ratio_factor(p["dead_ratio"])
+            dead_comp  = min(dead_base * d_factor, 1.0)
+            heal_comp  = norm_heal(p["healed_gain"])
+
+            score = (WEIGHT_MERIT * merit_comp) + (WEIGHT_DEAD * dead_comp) + (WEIGHT_HEAL * heal_comp)
+            p["score"]    = round(score * 100, 2)
+            p["d_factor"] = round(d_factor, 2)
+
+        # worst (lowest score) first; tie-break by merit ratio ascending
+        people.sort(key=lambda x: (x["score"], x["merit_ratio"]))
+
+        header = (
+            f"🥉 **Low Performers — MFD (S77)**\n"
+            f"Scope: power ≥ 50M, **merit ratio < {threshold:.2f}%** • weights 40% merits / 40% deaths / 20% heals\n"
+            f"Death target: **{DEAD_TARGET:.2f}%** of power (below = quadratic penalty, above = reward)\n"
+            f"`{previous.title}` → `{latest.title}`\n\n"
+        )
+
+        chunks, cur = [], header
+        for rank, p in enumerate(people, start=1):
             line = (
-                f"🆔 `{entry['lid']}` | **{entry['name']}** — 🧠 {entry['merit']:,} merits ({entry['ratio']:.2f}%)\n"
-                f"📊 Power: {entry['power']:,}\n"
-                f"⚔️ Kills: +{entry['kills']:,} | 💀 Dead: +{entry['dead']:,} | "
-                f"❤️ Healed: +{entry['healed']:,} | 🤝 Helps: +{entry['helps']:,}\n"
+                f"**#{rank}** — **{p['name']}** (`{p['lid']}`)\n"
+                f"🔢 Score: **{p['score']:.2f}**  |  🧠 Merits: {p['merit']:,} (**{p['merit_ratio']:.2f}%** of power)\n"
+                f"💀 Deads: +{p['dead_gain']:,} (**{p['dead_ratio']:.2f}%** of power, factor×{p['d_factor']})  •  "
+                f"❤️ Heals: +{p['healed_gain']:,}  •  ⚔️ Kills: +{p['kills_gain']:,}  •  🤝 Helps: +{p['helps_gain']:,}\n"
             )
+            if len(cur) + len(line) + 1 > 2000:
+                chunks.append(cur.rstrip())
+                cur = ""
+            cur += line + "\n"
+        if cur.strip():
+            chunks.append(cur.rstrip())
 
-            if len(current_chunk) + len(line) >= 2000:
-                chunks.append(current_chunk)
-                current_chunk = ""
-            current_chunk += line + "\n"
+        for ch in chunks:
+            await ctx.send(embed=discord.Embed(description=ch, color=discord.Color.red()))
 
-        if current_chunk.strip():
-            chunks.append(current_chunk)
-
-        for chunk in chunks:
-            if chunk.strip():
-                embed = discord.Embed(description=chunk.strip(), color=discord.Color.red())
-                await ctx.send(embed=embed)
-
+    except discord.HTTPException as e:
+        if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+            await ctx.send("⚠️ Character limit reached — try lowering the threshold or split the query.")
+        else:
+            await ctx.send(f"❌ Discord error: {e}")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
         
