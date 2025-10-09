@@ -2602,6 +2602,185 @@ async def matchups2(ctx, sheet: str = "testsheet"):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+
+@bot.command()
+async def matchups3 (ctx, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send("❌ Command not allowed here.")
+        return
+
+    try:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season, season)
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+        data_latest = latest.get_all_values()
+        data_prev   = previous.get_all_values()
+        headers = data_latest[0]
+
+        # strict header lookup
+        hmap = {h.strip().lower(): i for i, h in enumerate(headers)}
+        def col(*names):
+            for n in names:
+                k = n.strip().lower()
+                if k in hmap: return hmap[k]
+            raise ValueError(f"Missing column (tried: {names})")
+
+        def to_int(val):
+            try:
+                s = str(val).replace(',', '').replace(' ', '').strip()
+                if s in ("", "-"): return 0
+                return int(s)
+            except:
+                return 0
+
+        def fmt_gain(n): return f"+{n:,}" if n > 0 else f"{n:,}"
+        def title(prev_name, latest_name): return f"📊 War Matchups ({prev_name} → {latest_name})"
+        def emoji(server):
+            return {"99":"🔴 ","283":"🔴 ","77":"🔴 ","110":"🔵 ","183":"🔵 ","92":"🔵 "}.get(server,"")
+
+        SERVER_MAP = {"110":"RoG","92":"wAo","99":"BTX","283":"RFF","183":"A2G","77":"MFD"}
+        matchups = [("183","99"), ("77","110"), ("92","283")]
+
+        # indices
+        id_idx     = col("lord_id")
+        server_idx = col("home_server","server","home server")
+        dead_idx   = col("units_dead","deads")
+        heal_idx   = col("units_healed","heals")
+        gold_idx   = col("gold_spent","gold spent")
+        wood_idx   = col("wood_spent","wood spent")
+        ore_idx    = col("stone_spent","ore_spent","ore spent","stone spent")
+        mana_idx   = col("mana_spent","mana spent")
+
+        # tiers
+        t5_idx = col("killcount_t5","t5 kills")
+        t4_idx = col("killcount_t4","t4 kills")
+        t3_idx = col("killcount_t3","t3 kills")
+        t2_idx = col("killcount_t2","t2 kills")
+        t1_idx = col("killcount_t1","t1 kills")
+
+        # build maps
+        base_map = {}
+        for r in data_prev[1:]:
+            if len(r) <= mana_idx: continue
+            lid = (r[id_idx] or "").strip()
+            if lid: base_map[lid] = r
+
+        cur_map = {}
+        for r in data_latest[1:]:
+            if len(r) <= mana_idx: continue
+            lid = (r[id_idx] or "").strip()
+            if lid: cur_map[lid] = r
+
+        # only IDs in both AND same server both times
+        common_ids = set(base_map) & set(cur_map)
+
+        def norm_server(v):
+            s = (v or "").strip()
+            digits = "".join(ch for ch in s if ch.isdigit())
+            return digits
+
+        stat_map = {s: {
+            "kills":0,"kills_gain":0,
+            "dead":0,"dead_gain":0,
+            "healed":0,"healed_gain":0,
+            "gold":0,"wood":0,"ore":0,"mana":0,
+            "t5":0,"t5_gain":0,"t4":0,"t4_gain":0,"t3":0,"t3_gain":0,"t2":0,"t2_gain":0,"t1":0,"t1_gain":0,
+        } for s in SERVER_MAP}
+
+        for lid in common_ids:
+            prev_row = base_map[lid]
+            row      = cur_map[lid]
+
+            sid_prev = norm_server(prev_row[server_idx])
+            sid_now  = norm_server(row[server_idx])
+
+            # ignore server swaps
+            if sid_prev != sid_now: 
+                continue
+            if sid_now not in SERVER_MAP:
+                continue
+
+            # current totals
+            dead = to_int(row[dead_idx]);   heal = to_int(row[heal_idx])
+            gold = to_int(row[gold_idx]);   wood = to_int(row[wood_idx])
+            ore  = to_int(row[ore_idx]);    mana = to_int(row[mana_idx])
+            t5 = to_int(row[t5_idx]); t4 = to_int(row[t4_idx]); t3 = to_int(row[t3_idx]); t2 = to_int(row[t2_idx]); t1 = to_int(row[t1_idx])
+
+            # previous totals
+            dead0 = to_int(prev_row[dead_idx]);   heal0 = to_int(prev_row[heal_idx])
+            gold0 = to_int(prev_row[gold_idx]);   wood0 = to_int(prev_row[wood_idx])
+            ore0  = to_int(prev_row[ore_idx]);    mana0 = to_int(prev_row[mana_idx])
+            t50 = to_int(prev_row[t5_idx]); t40 = to_int(prev_row[t4_idx]); t30 = to_int(prev_row[t3_idx]); t20 = to_int(prev_row[t2_idx]); t10 = to_int(prev_row[t1_idx])
+
+            s = stat_map[sid_now]
+            # totals
+            s["dead"] += dead; s["healed"] += heal
+            s["t5"] += t5; s["t4"] += t4; s["t3"] += t3; s["t2"] += t2; s["t1"] += t1
+            # deltas
+            s["dead_gain"]   += (dead - dead0)
+            s["healed_gain"] += (heal - heal0)
+            s["gold"]        += (gold - gold0)
+            s["wood"]        += (wood - wood0)
+            s["ore"]         += (ore  - ore0)
+            s["mana"]        += (mana - mana0)
+            s["t5_gain"]     += (t5 - t50)
+            s["t4_gain"]     += (t4 - t40)
+            s["t3_gain"]     += (t3 - t30)
+            s["t2_gain"]     += (t2 - t20)
+            s["t1_gain"]     += (t1 - t10)
+
+        # derive kills from tiers
+        for sid, s in stat_map.items():
+            s["kills"] = s["t5"] + s["t4"] + s["t3"] + s["t2"] + s["t1"]
+            s["kills_gain"] = s["t5_gain"] + s["t4_gain"] + s["t3_gain"] + s["t2_gain"] + s["t1_gain"]
+
+        def format_side(name, stats):
+            return (
+                f"{name}\n\n"
+                f"▶ Combat Stats\n"
+                f"⚔️ Kills:  {stats['kills']:,} ({fmt_gain(stats['kills_gain'])})\n"
+                f"💀 Deads:  {stats['dead']:,} ({fmt_gain(stats['dead_gain'])})\n"
+                f"❤️ Heals:  {stats['healed']:,} ({fmt_gain(stats['healed_gain'])})\n\n"
+                f"▶ Kill Breakdown\n"
+                f"🟥 T5: {stats['t5']:,} ({fmt_gain(stats['t5_gain'])})\n"
+                f"🟦 T4: {stats['t4']:,} ({fmt_gain(stats['t4_gain'])})\n"
+                f"🟩 T3: {stats['t3']:,} ({fmt_gain(stats['t3_gain'])})\n"
+                f"🟨 T2: {stats['t2']:,} ({fmt_gain(stats['t2_gain'])})\n"
+                f"⬜ T1: {stats['t1']:,} ({fmt_gain(stats['t1_gain'])})\n\n"
+                f"▶ Resources Spent (Δ)\n"
+                f"💰 Gold:  {stats['gold']:,}\n"
+                f"🪵 Wood:  {stats['wood']:,}\n"
+                f"⛏️ Ore:   {stats['ore']:,}\n"
+                f"💧 Mana:  {stats['mana']:,}\n"
+            )
+
+        ttl = title(previous.title, latest.title)
+        for a, b in matchups:
+            name_a = f"{emoji(a)}{SERVER_MAP[a]}"
+            name_b = f"{emoji(b)}{SERVER_MAP[b]}"
+            block = (
+                f"{name_a} vs {name_b}\n\n"
+                f"{format_side(name_a, stat_map[a])}"
+                f"\n━━━━━━━━━━━━━━\n\n"
+                f"{format_side(name_b, stat_map[b])}"
+            )
+            await ctx.send(embed=discord.Embed(
+                title=f"{ttl} — {SERVER_MAP[a]} vs {SERVER_MAP[b]}",
+                description=f"```{block}```",
+                color=0x00ffcc
+            ))
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 @bot.command()
 async def matchups(ctx, season: str = DEFAULT_SEASON):
     allowed_channels = {1378735765827358791, 1383515877793595435}
