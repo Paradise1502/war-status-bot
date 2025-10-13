@@ -27,7 +27,7 @@ SEASON_SHEETS = {
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
     "statue": "Activity",
-    "testsheet": "testsheet",
+    "test": "testsheet",
     "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
