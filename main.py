@@ -1574,16 +1574,9 @@ async def lowdeads(ctx, *args):
 @bot.command()
 async def lowmerits(ctx, *args):
     """
-    Lowest merit gains between the last two tabs.
-
-    Usage examples:
-      !lowmerits                       -> Bottom 10 overall (≥50M power)
-      !lowmerits 25                   -> Bottom 25 overall
-      !lowmerits sos5                 -> Bottom 10 for season 'sos5'
-      !lowmerits sos5 30              -> Bottom 30 for 'sos5'
-      !lowmerits mfd 50               -> Bottom 50 for MFD on Server 77
-      !lowmerits mfd sos5 30          -> MFD+S77, season 'sos5', bottom 30
-      !lowmerits all 50               -> Remove MFD filter and show bottom 50
+    Lowest merit gains between the last two tabs (IDs must be in both).
+    Uses merits in column 12 and power in column 13 (1-based).
+    Supports MFD (S77) filter. Requires power >= 50M.
     """
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
@@ -1593,28 +1586,23 @@ async def lowmerits(ctx, *args):
     # Defaults
     top_n = 10
     season = DEFAULT_SEASON
-    filter_mfd = False        # [MFD*] AND server == 77
-    MIN_POWER = 50_000_000    # merits column is "only 50m+ power"
+    filter_mfd = False
+    MIN_POWER = 50_000_000
 
-    # ---- Parse args (any order) ----
+    # Parse args
     for arg in args:
         a = str(arg).strip().lower()
         if a.isdigit():
             top_n = max(1, min(100, int(a)))
-            continue
-        if a in ("mfd", "mfd77"):
+        elif a in ("mfd", "mfd77"):
             filter_mfd = True
-            continue
-        if a in ("all", "*"):
+        elif a in ("all", "*"):
             filter_mfd = False
-            continue
-        if a in SEASON_SHEETS:
+        elif a in SEASON_SHEETS:
             season = a
-            continue
-        await ctx.send(
-            f"❌ Invalid argument '{arg}'. Seasons: {', '.join(SEASON_SHEETS.keys())} | Filters: 'mfd', 'all'."
-        )
-        return
+        else:
+            await ctx.send(f"❌ Invalid argument '{arg}'. Seasons: {', '.join(SEASON_SHEETS.keys())} | Filters: 'mfd', 'all'.")
+            return
 
     try:
         sheet_name = SEASON_SHEETS.get(season.lower())
@@ -1629,7 +1617,6 @@ async def lowmerits(ctx, *args):
 
         latest = tabs[-1]
         previous = tabs[-2]
-
         data_latest = latest.get_all_values()
         data_prev   = previous.get_all_values()
         if not data_latest or not data_prev:
@@ -1637,28 +1624,29 @@ async def lowmerits(ctx, *args):
             return
 
         headers = data_latest[0]
+        hmap = {h.strip().lower(): i for i, h in enumerate(headers)}
 
-        # Column indices (prefer header lookups)
-        def hidx(name, fallback=None):
-            return headers.index(name) if name in headers else fallback
-            
-        id_index      = 0   # lord_id
-        name_index    = 1   # name
-        alliance_idx  = 3   # alliance/tag
-        server_idx    = 5   # home_server
-        merits_idx    = 11  # column 12
-        power_idx     = 12  # column 13
+        # Fixed positions you specified (1-based -> 0-based), with safe fallback to header if present
+        id_index     = hmap.get("lord_id", 0)         # A by default
+        name_index   = 1                               # B
+        alliance_idx = 3                               # D
+        server_idx   = hmap.get("home_server", 5)      # F
+        merits_idx   = 11                              # column 12 (1-based)
+        power_idx    = 12                              # column 13 (1-based)
 
+        # robust int parser: keep digits only (handles 21.734.811, 21,734,811, spaces, NBSP)
         def to_int(val):
+            s = str(val).replace("\u00A0", "").strip()
+            digits = "".join(ch for ch in s if ch.isdigit())
             try:
-                return int(str(val).replace(",", "").replace("-", "").strip())
+                return int(digits) if digits else 0
             except:
                 return 0
 
         def is_mfd(tag: str) -> bool:
             return bool(tag) and tag.strip().upper().startswith("MFD")
 
-        # Build prev map (id -> merits then)
+        # prev map (id -> merits then)
         prev_map = {}
         for row in data_prev[1:]:
             if len(row) > max(merits_idx, id_index):
@@ -1666,12 +1654,11 @@ async def lowmerits(ctx, *args):
                 if rid:
                     prev_map[rid] = to_int(row[merits_idx])
 
-        # Collect gains for IDs present in BOTH sheets, ≥50M, optional MFD+S77
+        # gather (IDs in both, >=50M, optional MFD S77)
         rows = []
         for row in data_latest[1:]:
             if len(row) <= max(merits_idx, power_idx, alliance_idx, server_idx, id_index):
                 continue
-
             rid = (row[id_index] or "").strip()
             if not rid or rid not in prev_map:
                 continue
@@ -1690,33 +1677,25 @@ async def lowmerits(ctx, *args):
             m_now  = to_int(row[merits_idx])
             gain = m_now - m_then
             if gain < 0:
-                gain = 0  # guard against corrections
+                gain = 0  # clamp corrections
 
             name = (row[name_index] or "?").strip()
-            display = f"[{tag}] {name}"
+            display = f"[{tag}] {name}".strip()
             rows.append((display, gain))
 
         if not rows:
             scope = "MFD (S77)" if filter_mfd else "All"
-            await ctx.send(
-                f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)**\n"
-                f"`{previous.title}` → `{latest.title}`:\n_No eligible players found._"
-            )
+            await ctx.send(f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)**\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
             return
 
-        # Sort ASC by gain (lowest first), then by name for stability
+        # sort ascending by gain (lowest first), then name for stability
         rows.sort(key=lambda x: (x[1], x[0]))
         bottom = rows[:top_n]
 
-        # Build lines
         lines = [f"{i+1}. `{name}` — 🧠 +{gain:,}" for i, (name, gain) in enumerate(bottom)]
 
-        # Header + chunked send
         scope = "MFD (S77)" if filter_mfd else "All"
-        header = (
-            f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)**\n"
-            f"`{previous.title}` → `{latest.title}`:\n"
-        )
+        header = f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)**\n`{previous.title}` → `{latest.title}`:\n"
 
         chunk = header
         chunks = []
@@ -1733,7 +1712,7 @@ async def lowmerits(ctx, *args):
                 await ctx.send(ch)
             except discord.HTTPException as e:
                 if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
-                    await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller N.")
+                    await ctx.send("⚠️ Character limit reached — result was too long (2000 chars). Try a smaller N.")
                     return
                 if getattr(e, "status", None) == 429:
                     await ctx.send("⏳ Rate limited. Try again in a moment.")
