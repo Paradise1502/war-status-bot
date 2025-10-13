@@ -1741,6 +1741,168 @@ async def topdeads(ctx, *args):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
+async def topmerits(ctx, *args):
+    """
+    Usage examples:
+      !topmerits                          -> Top 10 overall (default season)
+      !topmerits 25                      -> Top 25 overall
+      !topmerits sos5                    -> Top 10 for season 'sos5'
+      !topmerits sos5 25                 -> Top 25 for season 'sos5'
+      !topmerits mfd 50                  -> Top 50 for MFD on Server 77
+      !topmerits mfd sos5 30             -> MFD+S77, season 'sos5', top 30
+      !topmerits all 50                  -> Remove MFD filter explicitly
+    """
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
+    # Defaults
+    top_n = 10
+    season = DEFAULT_SEASON
+    filter_mfd = False  # [MFD*] + Server 77
+
+    # Parse args (any order)
+    for arg in args:
+        a = str(arg).strip().lower()
+        if a.isdigit():
+            top_n = max(1, min(100, int(a)))
+            continue
+        if a in ("mfd", "mfd77"):
+            filter_mfd = True
+            continue
+        if a in ("all", "*"):
+            filter_mfd = False
+            continue
+        if a in SEASON_SHEETS:
+            season = a
+            continue
+        await ctx.send(f"❌ Invalid argument '{arg}'. Seasons: {', '.join(SEASON_SHEETS.keys())} | Filters: 'mfd', 'all'.")
+        return
+
+    try:
+        sheet_name = SEASON_SHEETS.get(season.lower())
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev = previous.get_all_values()
+        if not data_latest or not data_prev:
+            await ctx.send("❌ Sheet data is empty.")
+            return
+
+        headers = data_latest[0]
+
+        # Indices (prefer header lookups)
+        def hidx(name, fallback=None):
+            return headers.index(name) if name in headers else fallback
+
+        id_index      = hidx("lord_id", 0)
+        name_index    = 1                   # B
+        alliance_idx  = 3                   # D
+        power_idx     = 12                  # M
+        server_idx    = hidx("home_server", 5)
+        merits_idx    = hidx("merits (only 50m+ power)", 11)  # near K/L fallback
+
+        def to_int(val):
+            try:
+                return int(str(val).replace(",", "").replace("-", "").strip())
+            except:
+                return 0
+
+        def is_mfd(tag: str) -> bool:
+            return bool(tag) and tag.strip().upper().startswith("MFD")
+
+        # Build previous map: lord_id -> merits_then
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > max(merits_idx, id_index):
+                raw_id = (row[id_index] or "").strip()
+                if raw_id:
+                    prev_map[raw_id] = to_int(row[merits_idx])
+
+        # Collect gains (both sheets, ≥50M power, optional MFD+S77)
+        results = []
+        for row in data_latest[1:]:
+            if len(row) <= max(merits_idx, power_idx, alliance_idx, server_idx, id_index):
+                continue
+
+            raw_id = (row[id_index] or "").strip()
+            if not raw_id or raw_id not in prev_map:
+                continue
+
+            power = to_int(row[power_idx])
+            if power < 50_000_000:
+                continue
+
+            alliance = (row[alliance_idx] or "").strip()
+            if filter_mfd:
+                server_val = (row[server_idx] or "").strip()
+                if not is_mfd(alliance) or str(server_val) != "77":
+                    continue
+
+            merits_now  = to_int(row[merits_idx])
+            merits_prev = prev_map.get(raw_id, 0)
+            gain = merits_now - merits_prev
+            if gain < 0:
+                gain = 0  # guard against corrections
+
+            name = (row[name_index] or "?").strip()
+            full_name = f"[{alliance}] {name}".strip()
+            results.append((full_name, gain))
+
+        if not results:
+            scope = "MFD (S77)" if filter_mfd else "All"
+            await ctx.send(f"**🏅 Top {top_n} Merits Gained — {scope}**\n`{previous.title}` → `{latest.title}`:\n_No eligible players found (≥50M power and present in both sheets)._")
+            return
+
+        # Sort + slice
+        results.sort(key=lambda x: x[1], reverse=True)
+        top_rows = results[:top_n]
+
+        # Build lines
+        lines = [f"{i+1}. `{name}` — 🧠 +{gain:,}" for i, (name, gain) in enumerate(top_rows)]
+
+        # Chunked send
+        scope = "MFD (S77)" if filter_mfd else "All"
+        header = f"**🏅 Top {top_n} Merits Gained — {scope}**\n`{previous.title}` → `{latest.title}`:\n"
+
+        chunk = header
+        chunks = []
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            chunks.append(chunk.rstrip())
+
+        for ch in chunks:
+            try:
+                await ctx.send(ch)
+            except discord.HTTPException as e:
+                if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+                    await ctx.send("⚠️ Character limit reached — result was too long for Discord (2000 chars). Try a smaller N.")
+                    return
+                if getattr(e, "status", None) == 429:
+                    await ctx.send("⏳ Rate limited. Try again in a moment.")
+                    return
+                await ctx.send(f"❌ Discord error: {e}")
+                return
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
         season = season.lower()
