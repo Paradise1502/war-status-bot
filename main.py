@@ -1961,9 +1961,9 @@ async def topmerits(ctx, *args):
         id_index      = hidx("lord_id", 0)
         name_index    = 1                   # B
         alliance_idx  = 3                   # D
-        power_idx = col_to_index("M")
-        merit_idx = col_to_index("L")
+        power_idx     = 12                  # M
         server_idx    = hidx("home_server", 5)
+        merits_idx    = hidx("merits (only 50m+ power)", 11)  # near K/L fallback
 
         def to_int(val):
             try:
