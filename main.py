@@ -1984,7 +1984,7 @@ async def topmerits(ctx, *args):
         alliance_idx  = 3                   # D
         power_idx     = 12                  # M
         server_idx    = hidx("home_server", 5)
-        merits_idx    = hidx("merits (only 50m+ power)", 11)  # near K/L fallback
+        merits_idx    = hidx("merits", 11)  # near K/L fallback
 
         def to_int(val):
             try:
