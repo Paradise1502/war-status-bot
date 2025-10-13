@@ -1641,13 +1641,13 @@ async def lowmerits(ctx, *args):
         # Column indices (prefer header lookups)
         def hidx(name, fallback=None):
             return headers.index(name) if name in headers else fallback
-
-        id_index      = hidx("lord_id", 0)
-        name_index    = 1
-        alliance_idx  = 3
-        server_idx    = hidx("home_server", 5)
-        power_idx     = 12                 # M
-        merits_idx    = hidx("merits (only 50m+ power)", 11)  # near K/L fallback
+            
+        id_index      = 0   # lord_id
+        name_index    = 1   # name
+        alliance_idx  = 3   # alliance/tag
+        server_idx    = 5   # home_server
+        merits_idx    = 11  # column 12
+        power_idx     = 12  # column 13
 
         def to_int(val):
             try:
@@ -1982,9 +1982,9 @@ async def topmerits(ctx, *args):
         id_index      = hidx("lord_id", 0)
         name_index    = 1                   # B
         alliance_idx  = 3                   # D
-        power_idx     = 12                  # M
+        power_idx = col_to_index("M")
+        merit_idx = col_to_index("L")
         server_idx    = hidx("home_server", 5)
-        merits_idx    = hidx("merits", 11)  # near K/L fallback
 
         def to_int(val):
             try:
