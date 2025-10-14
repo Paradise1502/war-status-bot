@@ -330,58 +330,91 @@ async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+# ============================
+# 📊 Helper formatting
+# ============================
 
 def fmt_int_eu(n: int) -> str:
-    """Format int with EU thousands separator: 12345678 -> '12.345.678'."""
+    """Format int with EU thousands separator."""
     return f"{n:,}".replace(",", ".")
 
 def fmt_pct(n: float) -> str:
     """Format float as percentage with 2 decimals."""
     return f"{n:.2f}%"
 
-def label_name_id(name: str, lid: str, width: int = 22) -> str:
+def label_name_id(name: str, lid: str, width: int = 24) -> str:
     """Format name and ID nicely and truncate if too long."""
-    base = f"{(name or '—')}".strip()
-    short_id = lid[-6:] if lid else ""
-    s = f"{base} ({short_id})"
+    base = (name or "—").strip()
+    short_id = (lid or "")[-6:]
+    s = f"{base} ({short_id})" if short_id else base
     if len(s) > width:
         s = s[:max(0, width-1)] + "…"
     return f"{s:<{width}}"
 
-def render_table(title: str, rows: list, mark: str) -> str:
-    """Render a nice aligned table inside a single code block."""
+def render_table_lines(title: str, rows: list) -> str:
+    """
+    Render a fixed-width table (no inline code per row).
+    Shows absolute dead numbers + % in parentheses.
+    """
     H_NAME = 24   # Name (ID)
     H_PWR  = 13   # Power
     H_MΔ   = 12   # MeritsΔ
-    H_MR   = 8    # Merits%
-    H_DR   = 8    # Deads%
+    H_MR   = 10   # Merits%
+    H_DR   = 20   # Deads (with %)
     H_SRV  = 4    # Srv
     H_TAG  = 6    # tag
 
     header = (
         f"{title}\n"
         f"{'Name (ID)':<{H_NAME}} {'Power':>{H_PWR}}  {'MeritsΔ':>{H_MΔ}}  "
-        f"{'Merits%':>{H_MR}}  {'Deads%':>{H_DR}}  {'Srv':>{H_SRV}} {'':<{H_TAG}}\n"
+        f"{'Merits%':>{H_MR}}  {'Deads':>{H_DR}}  {'Srv':>{H_SRV}} {'':<{H_TAG}}\n"
         f"{'-'*H_NAME} {'-'*H_PWR}  {'-'*H_MΔ}  {'-'*H_MR}  {'-'*H_DR}  {'-'*H_SRV} {'-'*H_TAG}\n"
     )
 
     lines = [header]
+    if not rows:
+        lines.append("(none)")
+        return "\n".join(lines)
+
     for p in rows:
         tag = "(flex)" if p.get("flex") else ""
+        dead_abs = fmt_int_eu(p.get("dead_gain", 0))
+        dead_pct = fmt_pct(p.get("dead_ratio", 0.0))
+        dead_col = f"{dead_abs} ({dead_pct})"
+
         line = (
             f"{label_name_id(p.get('name',''), p.get('lid',''), H_NAME)} "
             f"{fmt_int_eu(p.get('power',0)):>{H_PWR}}  "
             f"{fmt_int_eu(p.get('merits_gain',0)):>{H_MΔ}}  "
             f"{fmt_pct(p.get('merit_ratio',0.0)):>{H_MR}}  "
-            f"{fmt_pct(p.get('dead_ratio',0.0)):>{H_DR}}  "
+            f"{dead_col:>{H_DR}}  "
             f"{str(p.get('srv',''))[-3:]:>{H_SRV}} {tag:<{H_TAG}}"
         )
         lines.append(line)
+    return "\n".join(lines)
 
-    if len(rows) == 0:
-        lines.append("(none)")
+def to_int_eu(v):
+    """Locale-safe int parser: strips dots/commas/spaces, handles '-', ''."""
+    try:
+        s = str(v).replace(".", "").replace(",", "").replace(" ", "").strip()
+        if s in ("", "-"):
+            return 0
+        return int(s)
+    except:
+        return 0
 
-    return f"{mark} {title} — {len(rows)}\n```" + "\n".join(lines) + "```"
+async def send_table_embeds(ctx, title: str, rows: list, color: int):
+    """Send table inside embed(s) with chunking."""
+    body = render_table_lines(title, rows)
+    code = f"```{body}```"
+
+    CHUNK = 3900
+    start = 0
+    while start < len(code):
+        part = code[start:start+CHUNK]
+        embed = discord.Embed(description=part, color=color)
+        await ctx.send(embed=embed)
+        start += CHUNK
 
 
 # ============================
@@ -392,12 +425,11 @@ def render_table(title: str, rows: list, mark: str) -> str:
 async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
     """
     Kick decision tool:
-    - Merits >= 12% of Power
-    - Deads >= 0.3% of Power
-    - Flex rule: If Merits >= 20%, Deads >= 0.2%
-    - Uses gains between the last two tabs.
-    - Scope: MFD (S77) or 'all'
-    - Checks if they were in last season sheet (sos5); if not & failing -> warning.
+    - Merits ≥ 12% of Power
+    - Deads ≥ 0.3% of Power
+    - Flex: if Merits ≥ 20%, Deads ≥ 0.2%
+    - Uses gains between the last two tabs
+    - Shows absolute dead counts + % in parentheses
     """
 
     allowed_channels = {1378735765827358791, 1383515877793595435}
@@ -437,31 +469,22 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
                 raise ValueError(f"Missing column: one of {aliases}")
             return fallback
 
-        def to_int(v):
-            try:
-                s = str(v).replace(".", "").replace(",", "").replace(" ", "").strip()
-                if s in ("", "-"):
-                    return 0
-                return int(s)
-            except:
-                return 0
-
         id_idx     = col("lord_id")
         name_idx   = col("name", required=False, fallback=1)
-        server_idx = col("home_server", "server")
+        server_idx = col("home_server", "server", "home server")
         power_idx  = col("power", "m")
         merits_idx = col("merits", "merit", "merits (only 50m+ power)")
         dead_idx   = col("units_dead", "dead", "deads")
 
+        max_needed = max(power_idx, merits_idx, dead_idx, server_idx, name_idx)
         prev_map = {
             (row[id_idx] or "").strip(): row
             for row in data_prev[1:]
-            if len(row) > max(power_idx, merits_idx, dead_idx) and (row[id_idx] or "").strip()
+            if len(row) > max_needed and (row[id_idx] or "").strip()
         }
 
         ONLY_S77 = (scope.lower() != "all")
 
-        # check previous season for warnings
         prev_season_ids = set()
         try:
             prev_season_name = SEASON_SHEETS.get(season_prev.lower(), season_prev)
@@ -472,16 +495,20 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
                 if sos5_vals:
                     hdr = [h.strip().lower() for h in sos5_vals[0]]
                     if "lord_id" in hdr:
-                        idx = hdr.index("lord_id")
+                        sos5_id_idx = hdr.index("lord_id")
                         for r in sos5_vals[1:]:
-                            if len(r) > idx and (r[idx] or "").strip():
-                                prev_season_ids.add((r[idx] or "").strip())
+                            if len(r) > sos5_id_idx:
+                                lid2 = (r[sos5_id_idx] or "").strip()
+                                if lid2:
+                                    prev_season_ids.add(lid2)
         except Exception:
             prev_season_ids = set()
 
         keep, kick, warn = [], [], []
 
         for row in data_latest[1:]:
+            if len(row) <= max_needed:
+                continue
             lid = (row[id_idx] or "").strip()
             if not lid or lid not in prev_map:
                 continue
@@ -491,13 +518,13 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
             if ONLY_S77 and srv != "77":
                 continue
 
-            power = to_int(row[power_idx])
+            power = to_int_eu(row[power_idx])
             if power < MIN_POWER:
                 continue
 
             prev = prev_map[lid]
-            merits_gain = max(0, to_int(row[merits_idx]) - to_int(prev[merits_idx]))
-            dead_gain   = max(0, to_int(row[dead_idx]) - to_int(prev[dead_idx]))
+            merits_gain = max(0, to_int_eu(row[merits_idx]) - to_int_eu(prev[merits_idx]))
+            dead_gain   = max(0, to_int_eu(row[dead_idx]) - to_int_eu(prev[dead_idx]))
 
             merit_ratio = (merits_gain / power) * 100 if power > 0 else 0.0
             dead_ratio  = (dead_gain / power) * 100 if power > 0 else 0.0
@@ -527,36 +554,24 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
                 else:
                     kick.append(entry)
 
-        # sort lists
         keep.sort(key=lambda x: (-x["merit_ratio"], -x["dead_ratio"], -x["power"]))
         kick.sort(key=lambda x: (x["merit_ratio"], x["dead_ratio"], -x["power"]))
         warn.sort(key=lambda x: (x["merit_ratio"], x["dead_ratio"], -x["power"]))
 
-        header = (
+        scope_label = "MFD S77" if (scope.lower() != "all") else "All servers"
+        summary = (
             f"**Kick Check — {previous.title} → {latest.title}**\n"
-            f"Scope: {'MFD S77' if (scope.lower()!='all') else 'All servers'}, power ≥ 50M\n"
-            f"Rule: Merits ≥ **{MERIT_REQ:.2f}%** AND Deads ≥ **{DEAD_REQ:.2f}%** "
-            f"(flex: if Merits ≥ **{HIGH_MERIT:.2f}%**, Deads ≥ **{DEAD_REQ_FLEX:.2f}%**)\n"
-            f"⚠️ Not in '{season_prev}' and failing = warning\n"
+            f"Scope: {scope_label}, power ≥ 50M\n"
+            f"Rule: Merits ≥ **{MERIT_REQ:.2f}%** AND Deads ≥ **{DEAD_REQ:.2f}%**\n"
+            f"Flex: if Merits ≥ **{HIGH_MERIT:.2f}%**, Deads ≥ **{DEAD_REQ_FLEX:.2f}%**\n"
+            f"⚠️ Not in '{season_prev}' and failing → WARNING\n"
+            f"Totals — ❌ Kick: **{len(kick)}** • ✅ Keep: **{len(keep)}** • ⚠️ Warning: **{len(warn)}**"
         )
-        await ctx.send(header)
+        await ctx.send(embed=discord.Embed(description=summary, color=discord.Color.blurple()))
 
-        block_kick = render_table("KICK", kick, "❌")
-        block_keep = render_table("KEEP", keep, "✅")
-        block_warn = render_table("WARNING (not in last season & failing)", warn, "⚠️")
-
-        def chunks(s, n=1900):
-            buf, out = "", []
-            for line in s.splitlines(True):
-                if len(buf) + len(line) > n:
-                    out.append(buf); buf = ""
-                buf += line
-            if buf: out.append(buf)
-            return out
-
-        for block in (block_kick, block_keep, block_warn):
-            for ch in chunks(block):
-                await ctx.send(ch)
+        await send_table_embeds(ctx, "❌ KICK", kick, color=discord.Color.red().value)
+        await send_table_embeds(ctx, "✅ KEEP", keep, color=discord.Color.green().value)
+        await send_table_embeds(ctx, "⚠️ WARNING (not in last season & failing)", warn, color=discord.Color.orange().value)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
