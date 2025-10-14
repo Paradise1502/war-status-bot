@@ -336,14 +336,17 @@ async def stats(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 # ============================
 
 def to_int_eu(v):
+    """Parse ints from EU/US formats: '21.734.811', '21,734,811', '21 734 811', '-', '' -> 0."""
     try:
         s = str(v).replace(".", "").replace(",", "").replace(" ", "").strip()
-        if s in ("", "-"): return 0
+        if s in ("", "-"):
+            return 0
         return int(s)
     except:
         return 0
 
 def fmt_int_eu(n: int) -> str:
+    """12345678 -> '12.345.678'."""
     return f"{n:,}".replace(",", ".")
 
 def fmt_pct(n: float) -> str:
@@ -360,7 +363,7 @@ def player_field_name(p):
     return f"{base} ({short})  •  S{srv}"
 
 def player_field_value(p):
-    # Compact, readable, no monospaced table needed
+    # Clean, readable lines (no tables)
     power = fmt_int_eu(p["power"])
     meritsΔ = fmt_int_eu(p["merits_gain"])
     m_pct = fmt_pct(p["merit_ratio"])
@@ -390,11 +393,12 @@ async def send_section_cards(ctx, title: str, emoji: str, color: int, items: lis
         return
 
     MAX_FIELDS = 25
+    total_pages = (len(items) - 1) // MAX_FIELDS + 1
     page = 1
     for i in range(0, len(items), MAX_FIELDS):
         chunk = items[i:i+MAX_FIELDS]
         embed = discord.Embed(
-            title=f"{emoji} {title} — {len(items)} (page {page}/{(len(items)-1)//MAX_FIELDS+1})",
+            title=f"{emoji} {title} — {len(items)} (page {page}/{total_pages})",
             color=color
         )
         for p in chunk:
@@ -407,18 +411,20 @@ async def send_section_cards(ctx, title: str, emoji: str, color: int, items: lis
         page += 1
 
 # ============================
-# 🚪 Kickcheck Command (card layout)
+# 🚪 Kickcheck Command (card layout + hard deads floor for flex/abs)
 # ============================
 
 @bot.command()
 async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
     """
     Kick decision tool (card layout):
-      PASS merits if (Merits% ≥ 12%) OR (MeritsΔ ≥ 12,000,000).
-      Deads% ≥ 0.30% required (or ≥ 0.20% if Merits% ≥ 20% flex).
-      Uses gains between last two tabs.
-      Power ≥ 50M. Default scope S77 ('mfd'); use 'all' for all servers.
-      If not in previous season and failing → WARNING.
+      KEEP if:
+        - (Merits% ≥ 12 OR MeritsΔ ≥ 12,000,000) AND Deads% ≥ 0.30%
+        - OR (flex/abs): (Merits% ≥ 20 OR MeritsΔ ≥ 12,000,000) AND Deads% ≥ 0.20% (hard floor)
+      Else: if not in season_prev and failing -> WARNING, otherwise KICK.
+
+      Uses gains between the last two tabs; Power ≥ 50M.
+      Default scope 'mfd' = S77 only; use 'all' for all servers.
     """
     allowed_channels = {1378735765827358791, 1383515877793595435}
     if ctx.channel.id not in allowed_channels:
@@ -426,14 +432,15 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
         return
 
     # thresholds
-    MERIT_REQ     = 12.0        # % of power
-    MERIT_ABS_REQ = 12_000_000  # absolute merits override
-    DEAD_REQ      = 0.30        # % of power
-    HIGH_MERIT    = 20.0        # % triggers death flex
-    DEAD_REQ_FLEX = 0.20        # % if HIGH_MERIT
-    MIN_POWER     = 50_000_000
+    MERIT_REQ      = 12.0        # % of power
+    MERIT_ABS_REQ  = 12_000_000  # absolute merits override
+    DEAD_REQ       = 0.30        # % of power (normal rule)
+    HIGH_MERIT     = 20.0        # % triggers "flex"
+    HARD_DEAD_MIN  = 0.20        # % hard floor even for flex/abs
+    MIN_POWER      = 50_000_000
 
     try:
+        # current season sheets
         sheet_name = SEASON_SHEETS.get(DEFAULT_SEASON, DEFAULT_SEASON)
         tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
@@ -452,7 +459,8 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
         def col(*aliases, required=True, fallback=None):
             for a in aliases:
                 a = a.strip().lower()
-                if a in hmap: return hmap[a]
+                if a in hmap:
+                    return hmap[a]
             if required:
                 raise ValueError(f"Missing column: one of {aliases}")
             return fallback
@@ -473,14 +481,14 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
 
         ONLY_S77 = (scope.lower() != "all")
 
-        # previous season membership check
+        # last-season presence check (sos5 by default)
         prev_season_ids = set()
         try:
             prev_season_name = SEASON_SHEETS.get(season_prev.lower(), season_prev)
             tabs_prev = client.open(prev_season_name).worksheets()
             if tabs_prev:
-                sos5_latest = tabs_prev[-1]
-                vals = sos5_latest.get_all_values()
+                last = tabs_prev[-1]
+                vals = last.get_all_values()
                 if vals:
                     hdr = [h.strip().lower() for h in vals[0]]
                     if "lord_id" in hdr:
@@ -503,6 +511,7 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
             if not prev:
                 continue  # need both tabs
 
+            # server filter
             srv_raw = (row[server_idx] or "").strip()
             srv = "".join(ch for ch in srv_raw if ch.isdigit())
             if ONLY_S77 and srv != "77":
@@ -512,18 +521,27 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
             if power < MIN_POWER:
                 continue
 
+            # gains
             merits_gain = max(0, to_int_eu(row[merits_idx]) - to_int_eu(prev[merits_idx]))
             dead_gain   = max(0, to_int_eu(row[dead_idx])   - to_int_eu(prev[dead_idx]))
 
+            # ratios
             merit_ratio = (merits_gain / power) * 100 if power > 0 else 0.0
             dead_ratio  = (dead_gain   / power) * 100 if power > 0 else 0.0
 
-            meets_high_merit = (merit_ratio >= HIGH_MERIT)
-            min_dead_req = DEAD_REQ_FLEX if meets_high_merit else DEAD_REQ
+            # flags
+            flex   = (merit_ratio >= HIGH_MERIT)
+            abs_ok = (merits_gain >= MERIT_ABS_REQ)
 
-            abs_ok = merits_gain >= MERIT_ABS_REQ
-            meets_merit = (merit_ratio >= MERIT_REQ) or abs_ok
-            meets = meets_merit and (dead_ratio >= min_dead_req)
+            # decision
+            meets = False
+            if flex or abs_ok:
+                # must still clear hard floor for deads
+                if dead_ratio >= HARD_DEAD_MIN:
+                    meets = True
+            else:
+                if (merit_ratio >= MERIT_REQ) and (dead_ratio >= DEAD_REQ):
+                    meets = True
 
             entry = {
                 "lid": lid,
@@ -535,7 +553,7 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
                 "merits_gain": merits_gain,
                 "dead_gain": dead_gain,
                 "prev_season": (lid in prev_season_ids),
-                "flex": meets_high_merit,
+                "flex": flex,
                 "abs_ok": abs_ok,
             }
 
@@ -557,21 +575,22 @@ async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
         summary = (
             f"**Kick Check — {previous.title} → {latest.title}**\n"
             f"Scope: {scope_label}, power ≥ 50M\n"
-            f"Rule: (Merits ≥ **12%** **OR** MeritsΔ ≥ **{fmt_int_eu(12_000_000)}**) "
-            f"AND Deads ≥ **0.30%** (flex: ≥20% merits → Deads ≥ **0.20%**)\n"
+            f"Rule: (Merits ≥ **{MERIT_REQ:.0f}%** **OR** MeritsΔ ≥ **{fmt_int_eu(MERIT_ABS_REQ)}**) "
+            f"AND Deads ≥ **{DEAD_REQ:.2f}%**\n"
+            f"Flex/Abs exception: auto-keep only if **Deads ≥ {HARD_DEAD_MIN:.2f}%**\n"
             f"⚠️ Not in '{season_prev}' and failing → WARNING\n"
             f"Totals — ❌ Kick: **{len(kick)}** • ✅ Keep: **{len(keep)}** • ⚠️ Warning: **{len(warn)}**"
         )
         await ctx.send(embed=discord.Embed(description=summary, color=discord.Color.blurple()))
 
-        # Card sections (consistent, readable)
+        # Card sections
         await send_section_cards(ctx, "KICK", "❌", discord.Color.red().value, kick)
         await send_section_cards(ctx, "KEEP", "✅", discord.Color.green().value, keep)
         await send_section_cards(ctx, "WARNING (not in last season & failing)", "⚠️", discord.Color.orange().value, warn)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
-
+        
 @bot.command()
 async def totaldeads(ctx, *args):
     """
