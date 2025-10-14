@@ -2704,8 +2704,7 @@ import discord
 from discord.ext import commands
 
 @bot.command()
-@bot.command()
-async def matchups2(ctx, sheet: str = "testsheet"):
+async def matchups2(ctx, sheet: str = "test"):
     """
     KVK pair stats from two tabs (baseline=tabs[-2], current=tabs[-1]).
     Uses ONLY accounts present in BOTH tabs by lord_id.
