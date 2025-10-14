@@ -2704,6 +2704,7 @@ import discord
 from discord.ext import commands
 
 @bot.command()
+@bot.command()
 async def matchups2(ctx, sheet: str = "testsheet"):
     """
     KVK pair stats from two tabs (baseline=tabs[-2], current=tabs[-1]).
@@ -2757,13 +2758,16 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 raise ValueError(f"Missing column: one of {aliases}")
             return fallback
 
+        # EU/US-safe int parse (handles 21.734.811 / 21,734,811 / spaces / "-" / "")
         def to_int(v):
             try:
-                s = str(v).replace(",", "").replace(" ", "").strip()
+                s = str(v).replace(".", "").replace(",", "").replace(" ", "").strip()
                 if s in ("", "-"): return 0
                 return int(s)
             except:
                 return 0
+
+        def fmt_gain(v): return f"+{v:,}" if v > 0 else f"{v:,}"
 
         # Strict columns (no blind fallbacks)
         id_idx     = col("lord_id")
@@ -2775,6 +2779,14 @@ async def matchups2(ctx, sheet: str = "testsheet"):
         ore_idx    = col("stone_spent", "ore_spent", "ore spent", "stone spent")
         mana_idx   = col("mana_spent", "mana spent")
 
+        # NEW: merits (accept common aliases you use elsewhere)
+        merits_idx = col(
+            "merits",
+            "merit",
+            "merits (only 50m+ power)",
+            required=True
+        )
+
         # Tier kills (accept common aliases)
         t5_idx = col("t5_kills", "t5 kills", "t5_points", "t5 points", "killcount_t5")
         t4_idx = col("t4_kills", "t4 kills", "t4_points", "t4 points", "killcount_t4")
@@ -2782,16 +2794,18 @@ async def matchups2(ctx, sheet: str = "testsheet"):
         t2_idx = col("t2_kills", "t2 kills", "t2_points", "t2 points", "killcount_t2")
         t1_idx = col("t1_kills", "t1 kills", "t1_points", "t1 points", "killcount_t1")
 
+        max_needed_idx = max(mana_idx, t1_idx, merits_idx)
+
         # Build maps and ID intersection
         base_map = {}
         for r in base_vals[1:]:
-            if len(r) <= mana_idx: continue
+            if len(r) <= max_needed_idx: continue
             lid = (r[id_idx] or "").strip()
             if lid: base_map[lid] = r
 
         cur_map = {}
         for r in cur_vals[1:]:
-            if len(r) <= mana_idx: continue
+            if len(r) <= max_needed_idx: continue
             lid = (r[id_idx] or "").strip()
             if lid: cur_map[lid] = r
 
@@ -2802,6 +2816,7 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             "dead": 0,  "dead_gain": 0,
             "healed": 0,"healed_gain": 0,
             "gold": 0, "wood": 0, "ore": 0, "mana": 0,
+            "merits": 0, "merits_gain": 0,   # <-- ADDED
             "t5": 0, "t5_gain": 0,
             "t4": 0, "t4_gain": 0,
             "t3": 0, "t3_gain": 0,
@@ -2830,12 +2845,14 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             dead  = to_int(r[dead_idx]);   heal  = to_int(r[heal_idx])
             gold  = to_int(r[gold_idx]);   wood  = to_int(r[wood_idx])
             ore   = to_int(r[ore_idx]);    mana  = to_int(r[mana_idx])
+            merits = to_int(r[merits_idx])                 # <-- ADDED
             t5 = to_int(r[t5_idx]); t4 = to_int(r[t4_idx]); t3 = to_int(r[t3_idx]); t2 = to_int(r[t2_idx]); t1 = to_int(r[t1_idx])
 
             # baseline totals
             dead0  = to_int(b[dead_idx]);  heal0  = to_int(b[heal_idx])
             gold0  = to_int(b[gold_idx]);  wood0  = to_int(b[wood_idx])
             ore0   = to_int(b[ore_idx]);   mana0  = to_int(b[mana_idx])
+            merits0 = to_int(b[merits_idx])            # <-- ADDED
             t50 = to_int(b[t5_idx]); t40 = to_int(b[t4_idx]); t30 = to_int(b[t3_idx]); t20 = to_int(b[t2_idx]); t10 = to_int(b[t1_idx])
 
             # deltas
@@ -2845,6 +2862,7 @@ async def matchups2(ctx, sheet: str = "testsheet"):
             d_wood  = wood  - wood0
             d_ore   = ore   - ore0
             d_mana  = mana  - mana0
+            d_merits = merits - merits0                 # <-- ADDED
             d_t5 = t5 - t50; d_t4 = t4 - t40; d_t3 = t3 - t30; d_t2 = t2 - t20; d_t1 = t1 - t10
 
             if CLAMP_TIER_DELTAS_NONNEG:
@@ -2853,31 +2871,32 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 if d_t3 < 0: d_t3 = 0
                 if d_t2 < 0: d_t2 = 0
                 if d_t1 < 0: d_t1 = 0
+            # NOTE: we do NOT clamp merits/resources/deads/heals — those can go negative if data moved backwards.
 
             s = stat_map[sid_now]
             # totals
             s["dead"]   += dead
             s["healed"] += heal
+            s["merits"] += merits          # <-- ADDED
             s["t5"]     += t5; s["t4"] += t4; s["t3"] += t3; s["t2"] += t2; s["t1"] += t1
             # gains
-            s["dead_gain"]   += d_dead
-            s["healed_gain"] += d_heal
-            s["gold"]        += d_gold
-            s["wood"]        += d_wood
-            s["ore"]         += d_ore
-            s["mana"]        += d_mana
-            s["t5_gain"]     += d_t5
-            s["t4_gain"]     += d_t4
-            s["t3_gain"]     += d_t3
-            s["t2_gain"]     += d_t2
-            s["t1_gain"]     += d_t1
+            s["dead_gain"]    += d_dead
+            s["healed_gain"]  += d_heal
+            s["gold"]         += d_gold
+            s["wood"]         += d_wood
+            s["ore"]          += d_ore
+            s["mana"]         += d_mana
+            s["merits_gain"]  += d_merits   # <-- ADDED
+            s["t5_gain"]      += d_t5
+            s["t4_gain"]      += d_t4
+            s["t3_gain"]      += d_t3
+            s["t2_gain"]      += d_t2
+            s["t1_gain"]      += d_t1
 
         # derive kills from tiers
         for sid, s in stat_map.items():
             s["kills"] = s["t5"] + s["t4"] + s["t3"] + s["t2"] + s["t1"]
             s["kills_gain"] = s["t5_gain"] + s["t4_gain"] + s["t3_gain"] + s["t2_gain"] + s["t1_gain"]
-
-        def fmt_gain(v): return f"+{v:,}" if v > 0 else f"{v:,}"
 
         def format_side(name, stats):
             return (
@@ -2887,6 +2906,7 @@ async def matchups2(ctx, sheet: str = "testsheet"):
                 f"⚔️ Kills:  {stats['kills']:,} ({fmt_gain(stats['kills_gain'])})\n"
                 f"💀 Deads:  {stats['dead']:,} ({fmt_gain(stats['dead_gain'])})\n"
                 f"❤️ Heals:  {stats['healed']:,} ({fmt_gain(stats['healed_gain'])})\n"
+                f"🏅 Merits: {stats['merits']:,} ({fmt_gain(stats['merits_gain'])})\n"  # <-- ADDED
                 f"\n"
                 f"▶ Kill Breakdown\n"
                 f"🟨 T5: {stats['t5']:,} ({fmt_gain(stats['t5_gain'])})\n"
@@ -2915,7 +2935,6 @@ async def matchups2(ctx, sheet: str = "testsheet"):
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
-
 
 @bot.command()
 async def matchups3 (ctx, season: str = DEFAULT_SEASON):
