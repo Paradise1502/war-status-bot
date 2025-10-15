@@ -1493,6 +1493,161 @@ async def toprssheal(ctx, *args):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
+async def topmana(ctx, *args):
+    """
+    Show Top N mana spent (delta between the last two tabs).
+    Usage:
+      !topmana           -> Top 10 for DEFAULT_SEASON
+      !topmana 25        -> Top 25
+      !topmana sos5      -> Top 10 for 'sos5'
+      !topmana 20 sos5   -> Top 20 for 'sos5'
+    Filters: only players present in BOTH tabs, Power ≥ 25M.
+    """
+    allowed_channels = {1378735765827358791, 1383515877793595435}
+    if ctx.channel.id not in allowed_channels:
+        await ctx.send(f"❌ Commands are only allowed in <#{1378735765827358791}>.")
+        return
+
+    season = DEFAULT_SEASON
+    top_n = 10
+
+    def to_int(val):
+        # EU/US tolerant: strip dots, commas, spaces; '-' and '' -> 0
+        try:
+            s = str(val).replace(".", "").replace(",", "").replace(" ", "").strip()
+            if s in ("", "-"):
+                return 0
+            return int(s)
+        except:
+            return 0
+
+    def fmt_abbr(n: int) -> str:
+        sign = "-" if n < 0 else ""
+        x = abs(n)
+        if x >= 1_000_000_000:
+            v, s = x / 1_000_000_000, "b"
+        elif x >= 1_000_000:
+            v, s = x / 1_000_000, "m"
+        elif x >= 1_000:
+            v, s = x / 1_000, "k"
+        else:
+            return f"{sign}{x}"
+        txt = f"{v:.1f}".rstrip("0").rstrip(".")
+        return f"{sign}{txt}{s}"
+
+    def truncate(s: str, max_len: int = 64) -> str:
+        return s if len(s) <= max_len else s[:max_len-1] + "…"
+
+    # parse args (any order: number + season key)
+    try:
+        for arg in args:
+            a = str(arg).strip().lower()
+            if a.isdigit():
+                top_n = max(1, min(50, int(a)))
+            else:
+                if a in SEASON_SHEETS:
+                    season = a
+                else:
+                    await ctx.send(f"❌ Invalid season '{arg}'. Available: {', '.join(SEASON_SHEETS.keys())}")
+                    return
+
+        sheet_name = SEASON_SHEETS.get(season)
+        if not sheet_name:
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        tabs = client.open(sheet_name).worksheets()
+        if len(tabs) < 2:
+            await ctx.send("❌ Not enough sheets to compare.")
+            return
+
+        latest = tabs[-1]
+        previous = tabs[-2]
+
+        data_latest = latest.get_all_values()
+        data_prev   = previous.get_all_values()
+        headers = data_latest[0]
+
+        # required indices (0-based)
+        id_index       = headers.index("lord_id")
+        name_index     = 1
+        alliance_index = 3
+        power_idx      = 12  # M
+        mana_idx       = 34  # AI
+
+        # build prev map
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > mana_idx:
+                rid = (row[id_index] or "").strip()
+                if rid:
+                    prev_map[rid] = to_int(row[mana_idx])
+
+        # compute mana deltas
+        entries = []
+        for row in data_latest[1:]:
+            if len(row) <= mana_idx:
+                continue
+
+            rid = (row[id_index] or "").strip()
+            if not rid or rid not in prev_map:
+                continue
+
+            power = to_int(row[power_idx])
+            if power < 25_000_000:
+                continue
+
+            name = (row[name_index] if len(row) > name_index else "?").strip()
+            alliance = (row[alliance_index] if len(row) > alliance_index else "").strip()
+            display = truncate(f"[{alliance}] {name}".strip())
+
+            m_prev = prev_map[rid]
+            m_curr = to_int(row[mana_idx])
+            mana_spent = max(0, m_curr - m_prev)  # clamp corrections
+
+            if mana_spent > 0:
+                entries.append((display, mana_spent))
+
+        if not entries:
+            await ctx.send(
+                f"💧 **Top {top_n} Mana Spent** (≥25M Power)\n"
+                f"`{previous.title}` → `{latest.title}`:\n_No eligible players found._"
+            )
+            return
+
+        entries.sort(key=lambda x: x[1], reverse=True)
+
+        # Build output
+        header = (
+            f"💧 **Top {top_n} Mana Spent** (≥25M Power)\n"
+            f"`{previous.title}` → `{latest.title}`\n"
+        )
+
+        lines = []
+        for i, (name, mana) in enumerate(entries[:top_n], start=1):
+            lines.append(f"{i}. {name}  —  💧 {fmt_abbr(mana)}")
+
+        # chunked send
+        chunk = header
+        for line in lines:
+            if len(chunk) + len(line) + 2 > 2000:
+                await ctx.send(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            await ctx.send(chunk.rstrip())
+
+    except discord.HTTPException as e:
+        if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+            await ctx.send("⚠️ Message too long for Discord. Try a smaller N.")
+        elif getattr(e, "status", None) == 429:
+            await ctx.send("⏳ Rate limited. Try again in a moment.")
+        else:
+            await ctx.send(f"❌ Discord error: {e}")
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     try:
         season = season.lower()
