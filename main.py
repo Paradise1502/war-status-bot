@@ -1493,7 +1493,7 @@ async def toprssheal(ctx, *args):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def topmana(ctx, *args):
+async def topmanaspent(ctx, *args):
     """
     Show Top N mana spent (delta between the last two tabs).
     Usage:
