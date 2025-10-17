@@ -3892,10 +3892,8 @@ async def warfarm(ctx):
 
 @bot.command()
 async def commands(ctx):
-    channel_id = ctx.channel.id
     allowed_channel_id = 1378735765827358791  # allowed channel ID
-
-    if channel_id != allowed_channel_id:
+    if ctx.channel.id != allowed_channel_id:
         await ctx.send(f"❌ Commands are only allowed in <#{allowed_channel_id}>.")
         return
 
@@ -3910,16 +3908,29 @@ async def commands(ctx):
 - `!mana [lord_id] [season]` — Mana gathered (+gain & rank)
 
 **🏆 Leaderboards**
-- `!topmana` — Top mana gatherers
+- `!topmana` — Top mana spent (delta)
+- `!toprssheal` — Top RSS spent (heals/training)
 - `!topheal` — Top units healed
-- `!toprssheal` — Top RSS heal spenders
 - `!topkills` — Top kill gainers
 - `!topdeads` — Top dead units
+- `!topmerits [X]` — Top X by merits gain (optional season or alliance filter)
+- `!lowmerits [X]` — Bottom X by merits gain (optional season or alliance filter)
+
+**⚔️ Performance & Kick Tools**
+- `!lowperformer [threshold] [season]` — Shows low performers by merit ratio & activity
+- `!kickcheck` — Kick recommendation list (based on merit% and dead%)
+  - Uses flex rule for high merits (≥20%) or abs merits (≥12M)
+  - Hard floor: 0.20% deads required for everyone
+
+**🆚 Matchups & Server Stats**
+- `!matchups [season]` — Summary of server war stats (kills, deads, merits, RSS)
+- `!matchups2 [sheet]` — test matchup format (usually top kvk)
 
 **🗂️ Season Support**
-Add an optional season tag like `sos5`, `sos2`, `hk1`, etc. to pull archived data.  
+You can append an optional season key like `sos5`, `sos2`, `hk1`, etc. to pull archived data.  
 > Example: `!progress 123456 sos2`  
-If no season is given, the bot uses the current one (`sos4`).
+If no season is provided, the bot uses the current season automatically.
+
 """
     await ctx.send(help_text)
 
