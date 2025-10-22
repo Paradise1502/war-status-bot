@@ -271,7 +271,7 @@ def _compute_do_time(event_type: str, spawn_dt_utc: datetime) -> datetime:
     Ignore the spawn clock time; only the date matters.
     """
     d = (spawn_dt_utc.date() + timedelta(days=1))
-    return datetime(d.year, d.month, d.day, 14, 0, 0, tzinfo=UTC)
+    return spawn_dt_utc + timedelta(days=1)
 
 def _read_events():
     ws = client.open(SHEET_NAME).sheet1
