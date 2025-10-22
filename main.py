@@ -265,28 +265,50 @@ def _parse_mmdd(date_str):
 def _schedule_next_day_14utc(base):
     return (base + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
 
+def _compute_do_time(event_type: str, spawn_dt_utc: datetime) -> datetime:
+    """
+    We store SPAWN in the sheet. We DO the event the NEXT day at 14:00 UTC.
+    Ignore the spawn clock time; only the date matters.
+    """
+    d = (spawn_dt_utc.date() + timedelta(days=1))
+    return datetime(d.year, d.month, d.day, 14, 0, 0, tzinfo=UTC)
+
 def _read_events():
     ws = client.open(SHEET_NAME).sheet1
     data = ws.get_all_records()
     events = []
     for r in data:
         try:
-            etype = r["event_type"].strip().lower()
+            etype = str(r.get("event_type","")).strip().lower()
             if etype not in REMINDERS:
                 continue
-            start_str = r["start_time_utc"].strip()
+
+            start_str = str(r.get("start_time_utc","")).strip()
+            if not start_str:
+                continue
+            # parse SPAWN time from sheet
             if start_str.endswith("Z"):
                 start_str = start_str[:-1] + "+00:00"
-            start = datetime.fromisoformat(start_str).astimezone(UTC)
-            role_id = int(r["ping_role_id"])
-            channel_id = int(r["channel_id"])
-            name = r["event_name"].strip()
-            msg = r["message"].strip()
-            eid = f"{etype}|{int(start.timestamp())}"
+            spawn_dt = datetime.fromisoformat(start_str)
+            if spawn_dt.tzinfo is None:
+                spawn_dt = spawn_dt.replace(tzinfo=UTC)
+            else:
+                spawn_dt = spawn_dt.astimezone(UTC)
+
+            # convert SPAWN -> DO time (next day 14:00 UTC)
+            do_dt = _compute_do_time(etype, spawn_dt)
+
+            role_id = int(str(r.get("ping_role_id","")).strip() or DEFAULT_ROLE_ID)
+            channel_id = int(str(r.get("channel_id","")).strip())
+            name = str(r.get("event_name","")).strip()
+            msg  = str(r.get("message","")).strip()
+
+            # Use DO-time for all reminder timing
+            eid = f"{etype}|{int(do_dt.timestamp())}"
             events.append({
                 "id": eid,
                 "type": etype,
-                "start": start,
+                "start": do_dt,          # <-- reminders are relative to DO-time
                 "role_id": role_id,
                 "channel_id": channel_id,
                 "name": name,
