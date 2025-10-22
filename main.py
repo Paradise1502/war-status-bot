@@ -198,6 +198,194 @@ async def scheduled_event_check():
 async def test_events(ctx):
     await send_upcoming_events()
 
+# =================== EVENT QUICK-ADD + AUTO-PING ====================
+from datetime import datetime, timedelta, timezone
+from discord.ext import tasks, commands
+import asyncio, os, json
+
+UTC = timezone.utc
+
+# --- Sheet config ---
+SHEET_NAME = "Event Schedule"
+SHEET_HEADERS = ["event_name","start_time_utc","channel_id","message","event_type","ping_role_id"]
+
+# --- Role IDs ---
+DEFAULT_ROLE_ID = 1430370436222550046  # test role for all events
+
+# --- Reminder schedule ---
+REMINDERS = {
+    "caravan": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
+    "shadow_fort": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
+    "alliance_mobilization": [timedelta(days=1)],  # only 1 day before
+}
+
+FIRE_WINDOW = timedelta(minutes=2)
+SENT_STATE_FILE = "sent_event_pings.json"
+
+# ---- Helpers ----
+def _load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return default
+
+def _save_json(path, obj):
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(obj, f)
+    os.replace(tmp, path)
+
+def _ensure_headers(ws):
+    heads = [h.strip() for h in ws.row_values(1)]
+    if heads != SHEET_HEADERS:
+        ws.update("A1", [SHEET_HEADERS])
+
+def _append_row(row):
+    ws = client.open(SHEET_NAME).sheet1
+    _ensure_headers(ws)
+    ws.append_row([row.get(h, "") for h in SHEET_HEADERS], value_input_option="RAW")
+
+def _parse_mmdd(date_str):
+    now = datetime.now(UTC)
+    try:
+        if date_str.count("/") == 1:
+            dt = datetime.strptime(f"{date_str}/{now.year}", "%m/%d/%Y")
+        else:
+            dt = datetime.strptime(date_str, "%m/%d/%Y")
+        dt = dt.replace(tzinfo=UTC, hour=0, minute=0, second=0, microsecond=0)
+        if dt.date() < now.date() and date_str.count("/") == 1:
+            dt = dt.replace(year=now.year + 1)
+        return dt
+    except Exception:
+        return None
+
+def _schedule_next_day_14utc(base):
+    return (base + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
+
+def _read_events():
+    ws = client.open(SHEET_NAME).sheet1
+    data = ws.get_all_records()
+    events = []
+    for r in data:
+        try:
+            etype = r["event_type"].strip().lower()
+            if etype not in REMINDERS:
+                continue
+            start_str = r["start_time_utc"].strip()
+            if start_str.endswith("Z"):
+                start_str = start_str[:-1] + "+00:00"
+            start = datetime.fromisoformat(start_str).astimezone(UTC)
+            role_id = int(r["ping_role_id"])
+            channel_id = int(r["channel_id"])
+            name = r["event_name"].strip()
+            msg = r["message"].strip()
+            eid = f"{etype}|{int(start.timestamp())}"
+            events.append({
+                "id": eid,
+                "type": etype,
+                "start": start,
+                "role_id": role_id,
+                "channel_id": channel_id,
+                "name": name,
+                "message": msg,
+            })
+        except Exception:
+            continue
+    return events
+
+# ---- AUTO PING ----
+async def _maybe_fire_reminders():
+    now = datetime.now(UTC)
+    sent = _load_json(SENT_STATE_FILE, {})
+    for e in _read_events():
+        for off in REMINDERS[e["type"]]:
+            fire_time = e["start"] - off
+            if not (fire_time <= now <= fire_time + FIRE_WINDOW):
+                continue
+            key = f'{e["id"]}@-{int(off.total_seconds())}'
+            if key in sent:
+                continue
+            ch = bot.get_channel(e["channel_id"])
+            if not ch:
+                continue
+            ts = int(e["start"].timestamp())
+            pretty = {
+                "caravan": "Caravan",
+                "shadow_fort": "Shadow Fort",
+                "alliance_mobilization": "Alliance Mobilization"
+            }[e["type"]]
+            txt = f"<@&{e['role_id']}> **{pretty}** — starts <t:{ts}:R> (<t:{ts}:F>)\n{e['message']}"
+            try:
+                await ch.send(txt)
+                sent[key] = now.isoformat()
+            except Exception as ex:
+                print(f"[Auto-ping error] {ex}")
+    _save_json(SENT_STATE_FILE, sent)
+
+@tasks.loop(minutes=1)
+async def event_autoping_loop():
+    await bot.wait_until_ready()
+    await _maybe_fire_reminders()
+
+# ---- ADD COMMAND ----
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def add(ctx, kind: str, date_str: str):
+    """
+    !add caravan 10/27
+    !add shadow_fort 10/27
+    !add alliance_mobilization 10/27
+    Schedules the event for next day 14:00 UTC.
+    """
+    kind = kind.lower().strip()
+    if kind not in REMINDERS:
+        return await ctx.send("Invalid type. Use: caravan | shadow_fort | alliance_mobilization")
+
+    base_day = _parse_mmdd(date_str)
+    if not base_day:
+        return await ctx.send("Invalid date format. Use MM/DD or MM/DD/YYYY")
+
+    start_dt = _schedule_next_day_14utc(base_day)
+
+    names = {
+        "caravan": "Caravan",
+        "shadow_fort": "Shadow Fort",
+        "alliance_mobilization": "Alliance Mobilization"
+    }
+    messages = {
+        "caravan": "🛒 Caravan at 14:00 UTC.",
+        "shadow_fort": "🏰 Shadow Fort at 14:00 UTC.",
+        "alliance_mobilization": "📣 Alliance Mobilization starts tomorrow!"
+    }
+
+    row = {
+        "event_name": names[kind],
+        "start_time_utc": start_dt.isoformat().replace("+00:00","Z"),
+        "channel_id": str(ctx.channel.id),
+        "message": messages[kind],
+        "event_type": kind,
+        "ping_role_id": str(DEFAULT_ROLE_ID),
+    }
+
+    try:
+        _append_row(row)
+    except Exception as e:
+        return await ctx.send(f"Sheet write failed: {e}")
+
+    ts = int(start_dt.timestamp())
+    await ctx.send(f"✅ {names[kind]} scheduled for <t:{ts}:F>. Auto-ping(s) will fire.")
+
+# ---- Startup hook ----
+@bot.event
+async def on_ready():
+    if not event_autoping_loop.is_running():
+        event_autoping_loop.start()
+    print(f"[Event Pinger] running as {bot.user}")
+# ===================================================================
+
 # Config values
 CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
 WAR_CHANNEL_ID = 1369071691111600168  # ⬅️ replace with your war channel ID
