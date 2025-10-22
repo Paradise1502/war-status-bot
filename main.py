@@ -201,7 +201,7 @@ async def test_events(ctx):
 # =================== EVENT QUICK-ADD + AUTO-PING ====================
 from datetime import datetime, timedelta, timezone
 from discord.ext import tasks, commands
-import asyncio, os, json
+import asyncio, os, json, re
 
 UTC = timezone.utc
 
@@ -210,7 +210,7 @@ SHEET_NAME = "Event Schedule"
 SHEET_HEADERS = ["event_name","start_time_utc","channel_id","message","event_type","ping_role_id"]
 
 # --- Role IDs ---
-DEFAULT_ROLE_ID = 1430370436222550046  # test role for all events
+DEFAULT_ROLE_ID = 1430370436222550046  # test role for all events (change later per type if you want)
 
 # --- Reminder schedule ---
 REMINDERS = {
@@ -219,10 +219,13 @@ REMINDERS = {
     "alliance_mobilization": [timedelta(days=1)],  # only 1 day before
 }
 
-FIRE_WINDOW = timedelta(minutes=2)
+# Timing tolerances (for reliability & testing)
+FIRE_WINDOW    = timedelta(minutes=5)   # ok to fire within 5 min after scheduled ping
+CATCHUP_WINDOW = timedelta(hours=2)     # backfill missed pings up to 2h late
+
 SENT_STATE_FILE = "sent_event_pings.json"
 
-# ---- Helpers ----
+# ------------------ Helpers ------------------
 def _load_json(path, default):
     if not os.path.exists(path):
         return default
@@ -262,14 +265,9 @@ def _parse_mmdd(date_str):
     except Exception:
         return None
 
-def _schedule_next_day_14utc(base):
-    return (base + timedelta(days=1)).replace(hour=14, minute=0, second=0, microsecond=0)
-
+# ===== DO time computation =====
+# We store SPAWN in the sheet. We DO the event the NEXT day at 14:00 UTC.
 def _compute_do_time(event_type: str, spawn_dt_utc: datetime) -> datetime:
-    """
-    We store SPAWN in the sheet. We DO the event the NEXT day at 14:00 UTC.
-    Ignore the spawn clock time; only the date matters.
-    """
     d = (spawn_dt_utc.date() + timedelta(days=1))
     return spawn_dt_utc + timedelta(days=1)
 
@@ -295,20 +293,22 @@ def _read_events():
             else:
                 spawn_dt = spawn_dt.astimezone(UTC)
 
-            # convert SPAWN -> DO time (next day 14:00 UTC)
+            # convert SPAWN -> DO time
             do_dt = _compute_do_time(etype, spawn_dt)
 
-            role_id = int(str(r.get("ping_role_id","")).strip() or DEFAULT_ROLE_ID)
+            role_raw = str(r.get("ping_role_id","")).strip()
+            role_id = int(role_raw) if role_raw.isdigit() else DEFAULT_ROLE_ID
+
             channel_id = int(str(r.get("channel_id","")).strip())
             name = str(r.get("event_name","")).strip()
             msg  = str(r.get("message","")).strip()
 
-            # Use DO-time for all reminder timing
             eid = f"{etype}|{int(do_dt.timestamp())}"
+
             events.append({
                 "id": eid,
                 "type": etype,
-                "start": do_dt,          # <-- reminders are relative to DO-time
+                "start": do_dt,          # DO-time
                 "role_id": role_id,
                 "channel_id": channel_id,
                 "name": name,
@@ -318,41 +318,58 @@ def _read_events():
             continue
     return events
 
-# ---- AUTO PING ----
+# ------------------ AUTO PING ------------------
 async def _maybe_fire_reminders():
     now = datetime.now(UTC)
     sent = _load_json(SENT_STATE_FILE, {})
-    for e in _read_events():
-        for off in REMINDERS[e["type"]]:
+
+    events = _read_events()
+    for e in events:
+        offs = REMINDERS[e["type"]]
+        for off in offs:
             fire_time = e["start"] - off
-            if not (fire_time <= now <= fire_time + FIRE_WINDOW):
+
+            # tolerance + catch-up
+            should_fire = (
+                (fire_time <= now <= fire_time + FIRE_WINDOW)
+                or (now > fire_time and (now - fire_time) <= CATCHUP_WINDOW)
+            )
+            if not should_fire:
                 continue
+
             key = f'{e["id"]}@-{int(off.total_seconds())}'
             if key in sent:
-                continue
+                continue  # already sent
+
             ch = bot.get_channel(e["channel_id"])
             if not ch:
                 continue
+
             ts = int(e["start"].timestamp())
             pretty = {
                 "caravan": "Caravan",
                 "shadow_fort": "Shadow Fort",
-                "alliance_mobilization": "Alliance Mobilization"
+                "alliance_mobilization": "Alliance Mobilization",
             }[e["type"]]
-            txt = f"<@&{e['role_id']}> **{pretty}** — starts <t:{ts}:R> (<t:{ts}:F>)\n{e['message']}"
+
+            txt = f"<@&{e['role_id']}> **{pretty}** — starts <t:{ts}:R> (<t:{ts}:F>)"
+            if e["message"]:
+                txt += f"\n{e['message']}"
+
             try:
                 await ch.send(txt)
                 sent[key] = now.isoformat()
             except Exception as ex:
                 print(f"[Auto-ping error] {ex}")
+
     _save_json(SENT_STATE_FILE, sent)
 
-@tasks.loop(minutes=1)
+@tasks.loop(seconds=30)   # tighter during testing; change to minutes=1 later if you want
 async def event_autoping_loop():
     await bot.wait_until_ready()
     await _maybe_fire_reminders()
 
-# ---- ADD COMMAND ----
+# ------------------ COMMANDS ------------------
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def add(ctx, kind: str, date_str: str):
@@ -360,32 +377,36 @@ async def add(ctx, kind: str, date_str: str):
     !add caravan 10/27
     !add shadow_fort 10/27
     !add alliance_mobilization 10/27
-    Schedules the event for next day 14:00 UTC.
+
+    You enter the SPAWN date (from game calendar).
+    Bot schedules DO time = spawn+1 day @ 14:00 UTC.
     """
     kind = kind.lower().strip()
     if kind not in REMINDERS:
-        return await ctx.send("Invalid type. Use: caravan | shadow_fort | alliance_mobilization")
+        return await ctx.send("Invalid type. Use: `caravan` | `shadow_fort` | `alliance_mobilization`")
 
     base_day = _parse_mmdd(date_str)
     if not base_day:
-        return await ctx.send("Invalid date format. Use MM/DD or MM/DD/YYYY")
+        return await ctx.send("Invalid date. Use `MM/DD` or `MM/DD/YYYY` (e.g., `10/27`).")
 
-    start_dt = _schedule_next_day_14utc(base_day)
+    # We store SPAWN in sheet as midnight UTC of that date
+    spawn_dt = base_day  # midnight UTC on that day
+    do_dt = _compute_do_time(kind, spawn_dt)
 
     names = {
         "caravan": "Caravan",
         "shadow_fort": "Shadow Fort",
-        "alliance_mobilization": "Alliance Mobilization"
+        "alliance_mobilization": "Alliance Mobilization",
     }
     messages = {
         "caravan": "🛒 Caravan at 14:00 UTC.",
         "shadow_fort": "🏰 Shadow Fort at 14:00 UTC.",
-        "alliance_mobilization": "📣 Alliance Mobilization starts tomorrow!"
+        "alliance_mobilization": "📣 Alliance Mobilization tomorrow.",
     }
 
     row = {
         "event_name": names[kind],
-        "start_time_utc": start_dt.isoformat().replace("+00:00","Z"),
+        "start_time_utc": spawn_dt.isoformat().replace("+00:00","Z"),
         "channel_id": str(ctx.channel.id),
         "message": messages[kind],
         "event_type": kind,
@@ -397,16 +418,42 @@ async def add(ctx, kind: str, date_str: str):
     except Exception as e:
         return await ctx.send(f"Sheet write failed: {e}")
 
-    ts = int(start_dt.timestamp())
-    await ctx.send(f"✅ {names[kind]} scheduled for <t:{ts}:F>. Auto-ping(s) will fire.")
+    ts = int(do_dt.timestamp())
+    await ctx.send(f"✅ {names[kind]} scheduled (DO) for <t:{ts}:F>. Auto-pings will fire.")
 
-# ---- Startup hook ----
-@bot.event
-async def on_ready():
-    if not event_autoping_loop.is_running():
-        event_autoping_loop.start()
-    print(f"[Event Pinger] running as {bot.user}")
-# ===================================================================
+@bot.command()
+async def peek(ctx, n: int = 10):
+    """Show computed DO times & ping fire times the bot will use."""
+    evs = _read_events()
+    now = datetime.now(UTC)
+    lines = []
+    for e in evs[:n]:
+        fires = [e["start"] - off for off in REMINDERS[e["type"]]]
+        fires_str = ", ".join(ft.strftime("%Y-%m-%d %H:%M:%S") for ft in fires)
+        lines.append(f"{e['type']:<21} DO={e['start'].strftime('%Y-%m-%d %H:%M:%S')} | fires: {fires_str}")
+    if not lines:
+        return await ctx.send("No events parsed.")
+    await ctx.send("```\n" + "\n".join(lines) + "\n```")
+
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def eventreset(ctx):
+    """Delete sent-state so reminders can fire again (for testing)."""
+    try:
+        if os.path.exists(SENT_STATE_FILE):
+            os.remove(SENT_STATE_FILE)
+        await ctx.send("✅ Sent-state reset. Upcoming reminders can fire again.")
+    except Exception as e:
+        await ctx.send(f"Couldn't reset: {e}")
+
+# --------------- HOW TO START THE LOOP WITH YOUR EXISTING on_ready ---------------
+# You ALREADY have async def on_ready(). Inside YOUR on_ready, add:
+#
+#   if not event_autoping_loop.is_running():
+#       event_autoping_loop.start()
+#
+# That’s it. Do NOT duplicate on_ready.
+# ================================================================================
 
 # Config values
 CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
