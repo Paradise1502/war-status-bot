@@ -455,6 +455,48 @@ async def eventreset(ctx):
 # That’s it. Do NOT duplicate on_ready.
 # ================================================================================
 
+@bot.command()
+async def loopstatus(ctx):
+    await ctx.send(f"loop running: {event_autoping_loop.is_running()}")
+
+@bot.command()
+async def peeknow(ctx):
+    """Show reminders that should fire *right now* given current UTC and windows."""
+    now = datetime.now(UTC)
+    evs = _read_events()
+    hits = []
+    for e in evs:
+        for off in REMINDERS[e["type"]]:
+            fire = e["start"] - off
+            in_window = (fire <= now <= fire + FIRE_WINDOW) or (now > fire and (now - fire) <= CATCHUP_WINDOW)
+            if in_window:
+                hits.append(f"{e['type']} -> fire={fire.strftime('%Y-%m-%d %H:%M:%S')}  (DO={e['start']:%Y-%m-%d %H:%M:%S})  ch={e['channel_id']}")
+    if not hits:
+        return await ctx.send("No due reminders right now.")
+    await ctx.send("```\n" + "\n".join(hits) + "\n```")
+
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def forcefire(ctx):
+    """Force-send the first due reminder (ignores sent-state); for testing perms/channel."""
+    now = datetime.now(UTC)
+    for e in _read_events():
+        for off in REMINDERS[e["type"]]:
+            fire = e["start"] - off
+            in_window = (fire <= now <= fire + FIRE_WINDOW) or (now > fire and (now - fire) <= CATCHUP_WINDOW)
+            if not in_window:
+                continue
+            ch = bot.get_channel(e["channel_id"])
+            if not ch:
+                return await ctx.send(f"Bad channel_id: {e['channel_id']}")
+            ts = int(e["start"].timestamp())
+            pretty = {"caravan":"Caravan","shadow_fort":"Shadow Fort","alliance_mobilization":"Alliance Mobilization"}[e["type"]]
+            txt = f"<@&{e['role_id']}> **{pretty}** — starts <t:{ts}:R> (<t:{ts}:F>)"
+            if e["message"]: txt += f"\n{e['message']}"
+            await ch.send(txt)
+            return await ctx.send("Forced one send. If this shows up, perms/channel are fine.")
+    await ctx.send("Nothing appears due to force-send right now.")
+
 # Config values
 CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
 WAR_CHANNEL_ID = 1369071691111600168  # ⬅️ replace with your war channel ID
@@ -4096,8 +4138,17 @@ def role_check():
 
 @bot.event
 async def on_ready():
-    print(f'✅ Bot is online as {bot.user}')
-    scheduled_event_check.start()
+    print(f"✅ Bot is online as {bot.user}")
+
+    # your existing daily digest loop
+    if not scheduled_event_check.is_running():
+        scheduled_event_check.start()
+
+    # 🔥 start the auto-ping loop (the one that reads the sheet and pings)
+    if not event_autoping_loop.is_running():
+        event_autoping_loop.start()
+
+    print("[events] event_autoping_loop running")
 
 
 @bot.command()
