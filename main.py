@@ -205,6 +205,9 @@ import asyncio, os, json, re
 
 UTC = timezone.utc
 
+# --- Fixed Target Channel ---
+TARGET_CHANNEL_ID = 1257468695400153110  # always post pings here
+
 # --- Sheet config ---
 SHEET_NAME = "Event Schedule"
 SHEET_HEADERS = ["event_name","start_time_utc","channel_id","message","event_type","ping_role_id"]
@@ -219,7 +222,7 @@ REMINDERS = {
     "alliance_mobilization": [timedelta(days=1)],  # only 1 day before
 }
 
-# Tolerances (restarts / timing drift)
+# Tolerances
 FIRE_WINDOW    = timedelta(minutes=5)
 CATCHUP_WINDOW = timedelta(hours=2)
 
@@ -254,20 +257,19 @@ def _append_row(row):
 def _parse_event_time_utc(s: str) -> datetime | None:
     """
     Accepts:
-      - 'MM/DD HH' (UTC)
-      - 'MM/DD HH:MM' (UTC)
+      - 'MM/DD HH'
+      - 'MM/DD HH:MM'
       - 'MM/DD/YYYY HH' or 'MM/DD/YYYY HH:MM'
-      - Optional trailing 'utc' is ignored: '10/22 14 utc'
-    Defaults: if minutes omitted -> ':00'. If year omitted -> current year; if that date already passed by > 1 day, roll to next year.
+      - optional 'utc' at the end
     Returns timezone-aware UTC datetime.
     """
     s = s.strip().lower().replace(" utc", "")
     now = datetime.now(UTC)
 
-    # MM/DD[/YYYY] HH[:MM]
     m = re.match(r"^\s*(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\s+(\d{1,2})(?::(\d{2}))?\s*$", s)
     if not m:
         return None
+
     mm = int(m.group(1))
     dd = int(m.group(2))
     yyyy = int(m.group(3)) if m.group(3) else now.year
@@ -276,7 +278,6 @@ def _parse_event_time_utc(s: str) -> datetime | None:
 
     try:
         dt = datetime(yyyy, mm, dd, HH, MM, 0, tzinfo=UTC)
-        # If year omitted and the time is >1 day in the past, roll to next year (helps around year boundary)
         if not m.group(3) and (dt < now - timedelta(days=1)):
             dt = datetime(yyyy + 1, mm, dd, HH, MM, 0, tzinfo=UTC)
         return dt
@@ -296,7 +297,6 @@ def _read_events():
             start_str = str(r.get("start_time_utc","")).strip()
             if not start_str:
                 continue
-            # start_time_utc is the DO (actual event) time in UTC
             iso = start_str[:-1] + "+00:00" if start_str.endswith("Z") else start_str
             do_dt = datetime.fromisoformat(iso)
             if do_dt.tzinfo is None:
@@ -307,7 +307,8 @@ def _read_events():
             role_raw = str(r.get("ping_role_id","")).strip()
             role_id = int(role_raw) if role_raw.isdigit() else DEFAULT_ROLE_ID
 
-            channel_id = int(str(r.get("channel_id","")).strip())
+            # ✅ fixed channel
+            channel_id = TARGET_CHANNEL_ID
             name = str(r.get("event_name","")).strip()
             msg  = str(r.get("message","")).strip()
 
@@ -316,7 +317,7 @@ def _read_events():
             events.append({
                 "id": eid,
                 "type": etype,
-                "start": do_dt,          # DO-time
+                "start": do_dt,
                 "role_id": role_id,
                 "channel_id": channel_id,
                 "name": name,
@@ -331,8 +332,7 @@ async def _maybe_fire_reminders():
     now = datetime.now(UTC)
     sent = _load_json(SENT_STATE_FILE, {})
 
-    events = _read_events()
-    for e in events:
+    for e in _read_events():
         for off in REMINDERS[e["type"]]:
             fire_time = e["start"] - off
 
@@ -345,9 +345,9 @@ async def _maybe_fire_reminders():
 
             key = f'{e["id"]}@-{int(off.total_seconds())}'
             if key in sent:
-                continue  # already sent
+                continue
 
-            ch = bot.get_channel(e["channel_id"])
+            ch = bot.get_channel(TARGET_CHANNEL_ID)
             if not ch:
                 continue
 
@@ -370,7 +370,7 @@ async def _maybe_fire_reminders():
 
     _save_json(SENT_STATE_FILE, sent)
 
-@tasks.loop(seconds=30)   # tighten during testing; change to minutes=1 later if you want
+@tasks.loop(seconds=30)
 async def event_autoping_loop():
     await bot.wait_until_ready()
     await _maybe_fire_reminders()
@@ -380,11 +380,10 @@ async def event_autoping_loop():
 @commands.has_permissions(manage_guild=True)
 async def add(ctx, kind: str, *, when: str):
     """
-    Add an event at an exact UTC time (this is the DO time).
+    Add an event at an exact UTC time.
     Examples:
       !add caravan 10/22 14
-      !add caravan 10/22 14:03
-      !add shadow_fort 10/27 13 utc
+      !add shadow_fort 10/27 13:30
       !add alliance_mobilization 10/29 14
     """
     kind = kind.lower().strip()
@@ -393,7 +392,7 @@ async def add(ctx, kind: str, *, when: str):
 
     do_dt = _parse_event_time_utc(when)
     if not do_dt:
-        return await ctx.send("Time invalid. Use `MM/DD HH[:MM]` (UTC), optionally `/YYYY`. Example: `10/22 14` or `10/22/2025 14:03`.")
+        return await ctx.send("Invalid time. Use `MM/DD HH[:MM]` UTC.")
 
     names = {"caravan":"Caravan","shadow_fort":"Shadow Fort","alliance_mobilization":"Alliance Mobilization"}
     messages = {
@@ -404,8 +403,8 @@ async def add(ctx, kind: str, *, when: str):
 
     row = {
         "event_name": names[kind],
-        "start_time_utc": do_dt.isoformat().replace("+00:00","Z"),  # DO time in sheet
-        "channel_id": str(ctx.channel.id),
+        "start_time_utc": do_dt.isoformat().replace("+00:00","Z"),
+        "channel_id": str(TARGET_CHANNEL_ID),
         "message": messages[kind],
         "event_type": kind,
         "ping_role_id": str(DEFAULT_ROLE_ID),
@@ -422,7 +421,6 @@ async def add(ctx, kind: str, *, when: str):
 
 @bot.command()
 async def peek(ctx, n: int = 10):
-    """Show DO times & ping fire times."""
     evs = _read_events()
     lines = []
     for e in evs[:n]:
@@ -447,11 +445,11 @@ async def eventreset(ctx):
     except Exception as e:
         await ctx.send(f"Couldn't reset: {e}")
 
-# --------------- START THE LOOP IN YOUR EXISTING on_ready ---------------
-# In your existing on_ready, include:
+# --------------- START LOOP IN YOUR EXISTING on_ready ---------------
+# Add to your on_ready:
 #   if not event_autoping_loop.is_running():
 #       event_autoping_loop.start()
-# ========================================================================
+# ================================================================
 
 # Config values
 CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
