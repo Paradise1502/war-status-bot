@@ -213,7 +213,7 @@ SHEET_NAME = "Event Schedule"
 SHEET_HEADERS = ["event_name","start_time_utc","channel_id","message","event_type","ping_role_id"]
 
 # --- Role IDs ---
-DEFAULT_ROLE_ID = 1430370436222550046  # test role for now
+DEFAULT_ROLE_ID = 1235729244605120572  # test role for now
 
 # --- Reminder schedule ---
 REMINDERS = {
