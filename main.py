@@ -25,6 +25,7 @@ ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement ch
 SEASON_SHEETS = {
     "hk1": "Call of Dragons - HK1",
     "hk2": "Call of Dragons - HK2",
+    "hk3": "Call of Dragons - HK3",
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
     "statue": "Activity",
