@@ -378,7 +378,6 @@ async def event_autoping_loop():
 
 # ------------------ COMMANDS ------------------
 @bot.command()
-@commands.has_permissions(manage_guild=True)
 async def add(ctx, kind: str, *, when: str):
     """
     Add an event at an exact UTC time.
