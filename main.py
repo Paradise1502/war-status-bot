@@ -199,37 +199,36 @@ async def scheduled_event_check():
 async def test_events(ctx):
     await send_upcoming_events()
 
-# =================== EVENT ADD (DO=entered time) + AUTO-PING ====================
+# =================== EVENT ADD (DO=entered UTC time) + AUTO-PING ===================
 from datetime import datetime, timedelta, timezone
 from discord.ext import tasks, commands
 import asyncio, os, json, re
 
 UTC = timezone.utc
 
-# --- Fixed Target Channel ---
-TARGET_CHANNEL_ID = 1257468695400153110  # always post pings here
+# ---------- Fixed Target Channel (all pings go here) ----------
+TARGET_CHANNEL_ID = 1257468695400153110
 
-# --- Sheet config ---
+# ---------- Google Sheet config ----------
 SHEET_NAME = "Event Schedule"
 SHEET_HEADERS = ["event_name","start_time_utc","channel_id","message","event_type","ping_role_id"]
 
-# --- Role IDs ---
-DEFAULT_ROLE_ID = 1235729244605120572  # test role for now
+# ---------- Roles ----------
+DEFAULT_ROLE_ID = 1430370436222550046  # test role; change later if needed
 
-# --- Reminder schedule ---
+# ---------- Reminder schedules ----------
 REMINDERS = {
     "caravan": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
     "shadow_fort": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
-    "alliance_mobilization": [timedelta(days=1)],  # only 1 day before
+    "alliance_mobilization": [timedelta(days=1)],  # only 1 day prior
 }
 
-# Tolerances
-FIRE_WINDOW    = timedelta(minutes=5)
-CATCHUP_WINDOW = timedelta(hours=2)
-
+# ---------- Tolerances & state ----------
+FIRE_WINDOW    = timedelta(minutes=7)   # fire up to +7m late
+CATCHUP_WINDOW = timedelta(hours=12)    # backfill up to 12h late after downtime
 SENT_STATE_FILE = "sent_event_pings.json"
 
-# ------------------ Helpers ------------------
+# =================== Helpers ===================
 def _load_json(path, default):
     if not os.path.exists(path):
         return default
@@ -261,24 +260,20 @@ def _parse_event_time_utc(s: str) -> datetime | None:
       - 'MM/DD HH'
       - 'MM/DD HH:MM'
       - 'MM/DD/YYYY HH' or 'MM/DD/YYYY HH:MM'
-      - optional 'utc' at the end
-    Returns timezone-aware UTC datetime.
+      - optional trailing 'utc'
+    Returns: timezone-aware UTC datetime (event DO time).
     """
     s = s.strip().lower().replace(" utc", "")
     now = datetime.now(UTC)
-
     m = re.match(r"^\s*(\d{1,2})/(\d{1,2})(?:/(\d{4}))?\s+(\d{1,2})(?::(\d{2}))?\s*$", s)
     if not m:
         return None
-
-    mm = int(m.group(1))
-    dd = int(m.group(2))
+    mm = int(m.group(1)); dd = int(m.group(2))
     yyyy = int(m.group(3)) if m.group(3) else now.year
-    HH = int(m.group(4))
-    MM = int(m.group(5)) if m.group(5) else 0
-
+    HH = int(m.group(4)); MM = int(m.group(5)) if m.group(5) else 0
     try:
         dt = datetime(yyyy, mm, dd, HH, MM, 0, tzinfo=UTC)
+        # If year omitted and it's >1 day in the past, roll to next year (year boundary helper)
         if not m.group(3) and (dt < now - timedelta(days=1)):
             dt = datetime(yyyy + 1, mm, dd, HH, MM, 0, tzinfo=UTC)
         return dt
@@ -286,6 +281,10 @@ def _parse_event_time_utc(s: str) -> datetime | None:
         return None
 
 def _read_events():
+    """
+    Reads sheet rows and returns normalized event dicts.
+    NOTE: start_time_utc is the DO (actual event) time in UTC.
+    """
     ws = client.open(SHEET_NAME).sheet1
     data = ws.get_all_records()
     events = []
@@ -300,15 +299,12 @@ def _read_events():
                 continue
             iso = start_str[:-1] + "+00:00" if start_str.endswith("Z") else start_str
             do_dt = datetime.fromisoformat(iso)
-            if do_dt.tzinfo is None:
-                do_dt = do_dt.replace(tzinfo=UTC)
-            else:
-                do_dt = do_dt.astimezone(UTC)
+            do_dt = do_dt.replace(tzinfo=UTC) if do_dt.tzinfo is None else do_dt.astimezone(UTC)
 
             role_raw = str(r.get("ping_role_id","")).strip()
             role_id = int(role_raw) if role_raw.isdigit() else DEFAULT_ROLE_ID
 
-            # ✅ fixed channel
+            # Always use the fixed target channel
             channel_id = TARGET_CHANNEL_ID
             name = str(r.get("event_name","")).strip()
             msg  = str(r.get("message","")).strip()
@@ -324,11 +320,12 @@ def _read_events():
                 "name": name,
                 "message": msg,
             })
-        except Exception:
+        except Exception as ex:
+            print(f"[read_events] skip row error: {ex}")
             continue
     return events
 
-# ------------------ AUTO PING ------------------
+# =================== Auto-ping core ===================
 async def _maybe_fire_reminders():
     now = datetime.now(UTC)
     sent = _load_json(SENT_STATE_FILE, {})
@@ -346,10 +343,11 @@ async def _maybe_fire_reminders():
 
             key = f'{e["id"]}@-{int(off.total_seconds())}'
             if key in sent:
-                continue
+                continue  # already sent
 
             ch = bot.get_channel(TARGET_CHANNEL_ID)
             if not ch:
+                print(f"[auto-ping] channel not found: {TARGET_CHANNEL_ID}")
                 continue
 
             ts = int(e["start"].timestamp())
@@ -367,23 +365,28 @@ async def _maybe_fire_reminders():
                 await ch.send(txt)
                 sent[key] = now.isoformat()
             except Exception as ex:
-                print(f"[Auto-ping error] {ex}")
+                print(f"[auto-ping send error] {ex}")
 
     _save_json(SENT_STATE_FILE, sent)
 
-@tasks.loop(seconds=30)
+@tasks.loop(seconds=30)  # keep tight; you can switch to minutes=1 later
 async def event_autoping_loop():
     await bot.wait_until_ready()
-    await _maybe_fire_reminders()
+    try:
+        await _maybe_fire_reminders()
+    except Exception as e:
+        # Prevent the loop from dying silently
+        print(f"[event_autoping_loop ERROR] {e}")
 
-# ------------------ COMMANDS ------------------
+# =================== Commands ===================
+# NOTE: Remove the permission gate; add your own role/user gate if needed.
 @bot.command()
 async def add(ctx, kind: str, *, when: str):
     """
-    Add an event at an exact UTC time.
+    Add an event at an exact UTC time (DO time).
     Examples:
       !add caravan 10/22 14
-      !add shadow_fort 10/27 13:30
+      !add shadow_fort 10/25 13:30
       !add alliance_mobilization 10/29 14
     """
     kind = kind.lower().strip()
@@ -392,7 +395,7 @@ async def add(ctx, kind: str, *, when: str):
 
     do_dt = _parse_event_time_utc(when)
     if not do_dt:
-        return await ctx.send("Invalid time. Use `MM/DD HH[:MM]` UTC.")
+        return await ctx.send("Invalid time. Use `MM/DD HH[:MM]` UTC (optionally `/YYYY`).")
 
     names = {"caravan":"Caravan","shadow_fort":"Shadow Fort","alliance_mobilization":"Alliance Mobilization"}
     messages = {
@@ -403,8 +406,8 @@ async def add(ctx, kind: str, *, when: str):
 
     row = {
         "event_name": names[kind],
-        "start_time_utc": do_dt.isoformat().replace("+00:00","Z"),
-        "channel_id": str(TARGET_CHANNEL_ID),
+        "start_time_utc": do_dt.isoformat().replace("+00:00","Z"),  # DO time in sheet
+        "channel_id": str(TARGET_CHANNEL_ID),                       # fixed channel
         "message": messages[kind],
         "event_type": kind,
         "ping_role_id": str(DEFAULT_ROLE_ID),
@@ -416,17 +419,20 @@ async def add(ctx, kind: str, *, when: str):
         return await ctx.send(f"Sheet write failed: {e}")
 
     ts = int(do_dt.timestamp())
-    await ctx.send(f"✅ {names[kind]} set for <t:{ts}:F>. Pings: "
-                   f"{'−1d, −1h, −10m' if kind!='alliance_mobilization' else '−1d'}.")
+    await ctx.send(
+        f"✅ {names[kind]} set for <t:{ts}:F>. "
+        f"Pings: {'−1d, −1h, −10m' if kind!='alliance_mobilization' else '−1d only'}."
+    )
 
 @bot.command()
 async def peek(ctx, n: int = 10):
+    """Show upcoming events with DO times & their computed fire times (UTC)."""
     evs = _read_events()
     lines = []
     for e in evs[:n]:
         fires = [e["start"] - off for off in REMINDERS[e["type"]]]
         fires_str = ", ".join(ft.strftime("%Y-%m-%d %H:%M:%S") for ft in fires)
-        lines.append(f"{e['type']:<21} DO={e['start'].strftime('%Y-%m-%d %H:%M:%S')} | fires: {fires_str}")
+        lines.append(f"{e['type']:<21} DO={e['start']:%Y-%m-%d %H:%M:%S} | fires: {fires_str}")
     if not lines:
         return await ctx.send("No events parsed.")
     await ctx.send("```\n" + "\n".join(lines) + "\n```")
@@ -438,6 +444,7 @@ async def loopstatus(ctx):
 @bot.command()
 @commands.has_permissions(manage_guild=True)
 async def eventreset(ctx):
+    """Clear sent-state so reminders can fire again (testing)."""
     try:
         if os.path.exists(SENT_STATE_FILE):
             os.remove(SENT_STATE_FILE)
@@ -445,11 +452,48 @@ async def eventreset(ctx):
     except Exception as e:
         await ctx.send(f"Couldn't reset: {e}")
 
-# --------------- START LOOP IN YOUR EXISTING on_ready ---------------
-# Add to your on_ready:
-#   if not event_autoping_loop.is_running():
-#       event_autoping_loop.start()
-# ================================================================
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def due(ctx, minutes: int = 120):
+    """Show reminders scheduled within ±<minutes> minutes from now."""
+    now = datetime.now(UTC)
+    lo, hi = now - timedelta(minutes=minutes), now + timedelta(minutes=minutes)
+    rows = []
+    for e in _read_events():
+        for off in REMINDERS[e["type"]]:
+            fire = e["start"] - off
+            if lo <= fire <= hi:
+                rows.append(f"{e['type']:<16} fire={fire:%Y-%m-%d %H:%M}  DO={e['start']:%Y-%m-%d %H:%M}")
+    await ctx.send("```\n" + ("\n".join(rows) if rows else "No reminders in that window.") + "\n```")
+
+@bot.command()
+@commands.has_permissions(manage_guild=True)
+async def resend(ctx, *, contains: str = ""):
+    """
+    Force-send any due/overdue reminders (within catch-up window) whose label matches <contains>.
+    Example: !resend caravan
+    """
+    now = datetime.now(UTC)
+    count = 0
+    for e in _read_events():
+        label = f"{e['type']}|{e['name']}|{e['start']:%Y-%m-%d %H:%M}"
+        if contains and contains.lower() not in label.lower():
+            continue
+        for off in REMINDERS[e["type"]]:
+            fire = e["start"] - off
+            if now >= fire and (now - fire) <= CATCHUP_WINDOW:
+                ch = bot.get_channel(TARGET_CHANNEL_ID)
+                if not ch:
+                    continue
+                ts = int(e["start"].timestamp())
+                pretty = {"caravan":"Caravan","shadow_fort":"Shadow Fort","alliance_mobilization":"Alliance Mobilization"}[e["type"]]
+                txt = f"<@&{e['role_id']}> **{pretty}** — starts <t:{ts}:R> (<t:{ts}:F>)"
+                if e["message"]:
+                    txt += f"\n{e['message']}"
+                await ch.send(txt)
+                count += 1
+    await ctx.send(f"Resent {count} reminder(s).")
+# =================== END MODULE ===================
 
 # Config values
 CONFIRM_CHANNEL_ID = 1235711595645243394  # ID of the channel with the message + reactions
