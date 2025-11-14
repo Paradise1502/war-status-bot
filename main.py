@@ -28,12 +28,13 @@ SEASON_SHEETS = {
     "hk3": "Call of Dragons - HK3",
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
+    "sos6": "Call of Dragons - SoS6",
     "statue": "Activity",
     "test": "testsheet",
     "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
-DEFAULT_SEASON = "hk3"
+DEFAULT_SEASON = "sos6"
 
 # Now your bot setup
 intents = discord.Intents.default()
