@@ -221,7 +221,9 @@ DEFAULT_ROLE_ID = 1430370436222550046  # test role; change later if needed
 REMINDERS = {
     "caravan": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
     "shadow_fort": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
-    "alliance_mobilization": [timedelta(days=1)],  # only 1 day prior
+    "alliance_mobilization": [timedelta(days=1)],
+    "behemoth": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],
+    "pass": [timedelta(days=1), timedelta(hours=1), timedelta(minutes=10)],# only 1 day prior
 }
 
 # ---------- Tolerances & state ----------
@@ -356,6 +358,8 @@ async def _maybe_fire_reminders():
                 "caravan": "Caravan",
                 "shadow_fort": "Shadow Fort",
                 "alliance_mobilization": "Alliance Mobilization",
+                "behemoth": "Behemoth",
+                "pass": "Pass Opening",
             }[e["type"]]
 
             txt = f"<@&{e['role_id']}> **{pretty}** — starts <t:{ts}:R> (<t:{ts}:F>)"
