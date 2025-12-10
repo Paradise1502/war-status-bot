@@ -3446,7 +3446,7 @@ async def matchups2(ctx, sheet: str = "test"):
             "375": "NxW", "82": "CFRA", "62": "FG", "515": "FW-Y",
             "3": "RK", "77": "MFD"
         }
-        matchups = [("375", "3"), ("77", "515"), ("82", "62")]
+        MATCHUPS = [("375", "3"), ("77", "515"), ("82", "62")]
 
         tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
