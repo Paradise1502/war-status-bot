@@ -3443,14 +3443,10 @@ async def matchups2(ctx, sheet: str = "test"):
         sheet_name = SEASON_SHEETS.get(sheet.lower(), sheet)
 
         SERVER_MAP = {
-            "225": "25IW",
-            "60":  "ECHO",
-            "49":  "NTS",
-            "363": "RaGE",
-            "176": "EIS",
-            "249": "WB",
+            "375": "NxW", "82": "CFRA", "62": "FG", "515": "FW-Y",
+            "3": "RK", "77": "MFD"
         }
-        MATCHUPS = [("225", "176"), ("60", "249"), ("49", "363")]
+        matchups = [("375", "3"), ("77", "515"), ("82", "62")]
 
         tabs = client.open(sheet_name).worksheets()
         if len(tabs) < 2:
