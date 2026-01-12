@@ -35,7 +35,7 @@ SEASON_SHEETS = {
     "sos4": "Call of Dragons - SoS4"# 👈 add this line
 }
 
-DEFAULT_SEASON = "sos6"
+DEFAULT_SEASON = "sos2_2"
 
 # Now your bot setup
 intents = discord.Intents.default()
