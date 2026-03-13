@@ -32,7 +32,8 @@ SEASON_SHEETS = {
     "statue": "Activity",
     "test": "testsheet",
     "sos2_2": "Call of Dragons - SoS2_2",
-    "sos4": "Call of Dragons - SoS4"# 👈 add this line
+    "sos4": "Call of Dragons - SoS4",
+    "sos3": "NxW - SoS3",
 }
 
 DEFAULT_SEASON = "sos2_2"
