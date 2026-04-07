@@ -2949,7 +2949,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
         embed.add_field(
-            name="• Kill Breakdown",
+            name="• Kill Breakdown (Farlight removed this stat from scans)",
             value=(
                 f"T5: {t5_total:,} (+{t5_gain:,})\n"
                 f"T4: {t4_total:,} (+{t4_gain:,})\n"
@@ -2960,7 +2960,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             inline=True
         )
         embed.add_field(
-            name="📦 RSS Spent",
+            name="📦 RSS Spent (Farlight removed this stat from scans)",
             value=(
                 f"🪙 Gold: {gold:,}\n"
                 f"🪵 Wood: {wood:,}\n"
@@ -3881,22 +3881,13 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
         # indices
         id_idx     = find_idx("lord_id",        0)
         server_idx = find_idx("home_server",    5)
+        kills_idx  = find_idx("units_killed",   9)  # Column J is index 9
+        merits_idx = find_idx("merits (only 50m+ power)", 11) 
         dead_idx   = find_idx("units_dead",     17)
         heal_idx   = find_idx("units_healed",   18)
-        gold_idx   = find_idx("gold_spent",     31)
-        wood_idx   = find_idx("wood_spent",     32)
-        ore_idx    = find_idx("stone_spent",    33)
-        mana_idx   = find_idx("mana_spent",     34)
-        merits_idx = find_idx("merits (only 50m+ power)", 11)  # fallback near K/L if header missing
 
-        # tiers (AK..AO → 36..40 fallback)
-        t5_idx = find_idx("t5_kills", 36)
-        t4_idx = find_idx("t4_kills", 37)
-        t3_idx = find_idx("t3_kills", 38)
-        t2_idx = find_idx("t2_kills", 39)
-        t1_idx = find_idx("t1_kills", 40)
-
-        max_needed_idx = max(mana_idx, t1_idx, merits_idx)
+        # max_needed_idx ensures we only process rows that have enough columns
+        max_needed_idx = max(heal_idx, kills_idx, merits_idx)
 
         # prev rows by lord_id (keep last occurrence)
         prev_map = {
@@ -3909,13 +3900,7 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             "kills": 0, "kills_gain": 0,
             "dead": 0,  "dead_gain": 0,
             "healed": 0,"healed_gain": 0,
-            "gold": 0, "wood": 0, "ore": 0, "mana": 0,
-            "merits": 0, "merits_gain": 0,
-            "t5": 0, "t5_gain": 0,
-            "t4": 0, "t4_gain": 0,
-            "t3": 0, "t3_gain": 0,
-            "t2": 0, "t2_gain": 0,
-            "t1": 0, "t1_gain": 0,
+            "merits": 0, "merits_gain": 0
         } for s in SERVER_MAP}
 
         for row in data_latest[1:]:
@@ -3935,47 +3920,30 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
                 continue
 
             # current
-            dead = to_int(row[dead_idx]);   heal = to_int(row[heal_idx])
-            gold = to_int(row[gold_idx]);   wood = to_int(row[wood_idx])
-            ore  = to_int(row[ore_idx]);    mana = to_int(row[mana_idx])
+            kills  = to_int(row[kills_idx])
+            dead   = to_int(row[dead_idx])
+            heal   = to_int(row[heal_idx])
             merits = to_int(row[merits_idx])
-            t5 = to_int(row[t5_idx]); t4 = to_int(row[t4_idx]); t3 = to_int(row[t3_idx])
-            t2 = to_int(row[t2_idx]); t1 = to_int(row[t1_idx])
 
             # previous
-            dead_prev = to_int(prev_row[dead_idx]);   heal_prev = to_int(prev_row[heal_idx])
-            gold_prev = to_int(prev_row[gold_idx]);   wood_prev = to_int(prev_row[wood_idx])
-            ore_prev  = to_int(prev_row[ore_idx]);    mana_prev = to_int(prev_row[mana_idx])
+            kills_prev  = to_int(prev_row[kills_idx])
+            dead_prev   = to_int(prev_row[dead_idx])
+            heal_prev   = to_int(prev_row[heal_idx])
             merits_prev = to_int(prev_row[merits_idx])
-            t5_prev = to_int(prev_row[t5_idx]); t4_prev = to_int(prev_row[t4_idx]); t3_prev = to_int(prev_row[t3_idx])
-            t2_prev = to_int(prev_row[t2_idx]); t1_prev = to_int(prev_row[t1_idx])
 
             s = stat_map[sid]
+            
             # totals (restricted to IDs present in both)
+            s["kills"]  += kills
             s["dead"]   += dead
             s["healed"] += heal
             s["merits"] += merits
-            s["t5"]     += t5; s["t4"] += t4; s["t3"] += t3; s["t2"] += t2; s["t1"] += t1
+            
             # deltas
-            s["dead_gain"]    += (dead   - dead_prev)
-            s["healed_gain"]  += (heal   - heal_prev)
-            s["gold"]         += (gold   - gold_prev)
-            s["wood"]         += (wood   - wood_prev)
-            s["ore"]          += (ore    - ore_prev)
-            s["mana"]         += (mana   - mana_prev)
-            s["merits_gain"]  += (merits - merits_prev)
-            s["t5_gain"]      += (t5 - t5_prev)
-            s["t4_gain"]      += (t4 - t4_prev)
-            s["t3_gain"]      += (t3 - t3_prev)
-            s["t2_gain"]      += (t2 - t2_prev)
-            s["t1_gain"]      += (t1 - t1_prev)
-
-        # derive kills from tiers so totals match breakdown
-        for sid, s in stat_map.items():
-            tier_total = s["t5"] + s["t4"] + s["t3"] + s["t2"] + s["t1"]
-            tier_gain  = s["t5_gain"] + s["t4_gain"] + s["t3_gain"] + s["t2_gain"] + s["t1_gain"]
-            s["kills"] = tier_total
-            s["kills_gain"] = tier_gain
+            s["kills_gain"]  += (kills  - kills_prev)
+            s["dead_gain"]   += (dead   - dead_prev)
+            s["healed_gain"] += (heal   - heal_prev)
+            s["merits_gain"] += (merits - merits_prev)
 
         def format_side(name, stats):
             return (
@@ -3986,19 +3954,6 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
                 f"💀 Deads:   {stats['dead']:,} ({fmt_gain(stats['dead_gain'])})\n"
                 f"❤️ Heals:   {stats['healed']:,} ({fmt_gain(stats['healed_gain'])})\n"
                 f"🏅 Merits:  {stats['merits']:,} ({fmt_gain(stats['merits_gain'])})\n"
-                f"\n"
-                f"▶ Kill Breakdown\n"
-                f"🟥 T5: {stats['t5']:,} ({fmt_gain(stats['t5_gain'])})\n"
-                f"🟦 T4: {stats['t4']:,} ({fmt_gain(stats['t4_gain'])})\n"
-                f"🟩 T3: {stats['t3']:,} ({fmt_gain(stats['t3_gain'])})\n"
-                f"🟨 T2: {stats['t2']:,} ({fmt_gain(stats['t2_gain'])})\n"
-                f"⬜ T1: {stats['t1']:,} ({fmt_gain(stats['t1_gain'])})\n"
-                f"\n"
-                f"▶ Resources Spent (Δ)\n"
-                f"💰 Gold:  {stats['gold']:,}\n"
-                f"🪵 Wood:  {stats['wood']:,}\n"
-                f"⛏️ Ore:   {stats['ore']:,}\n"
-                f"💧 Mana:  {stats['mana']:,}\n"
             )
 
         title = format_title_with_dates(previous.title, latest.title)
