@@ -34,6 +34,7 @@ SEASON_SHEETS = {
     "sos2_2": "Call of Dragons - SoS2_2",
     "sos4": "Call of Dragons - SoS4",
     "sos3": "NxW - SoS3",
+    "sos4": "NxW - SoS4",
 }
 
 DEFAULT_SEASON = "sos3"
