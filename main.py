@@ -37,7 +37,7 @@ SEASON_SHEETS = {
     "sos4": "NxW - SoS4",
 }
 
-DEFAULT_SEASON = "sos3"
+DEFAULT_SEASON = "sos4"
 
 # Now your bot setup
 intents = discord.Intents.default()
