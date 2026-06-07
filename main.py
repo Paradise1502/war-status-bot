@@ -35,6 +35,8 @@ SEASON_SHEETS = {
     "sos4": "Call of Dragons - SoS4",
     "sos3": "NxW - SoS3",
     "sos4": "NxW - SoS4",
+    "z2": "NxW - SoS4 - Z2",
+    "fz": "NxW - FZ",
 }
 
 DEFAULT_SEASON = "sos4"
@@ -3836,7 +3838,7 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
     if ctx.channel.id not in allowed_channels:
         await ctx.send("❌ Command not allowed here.")
         return
-
+        
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season, season)
@@ -3870,14 +3872,22 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
 
         def emoji_bracket(server):
             return {
-                "375": "🔴 ", "77": "🔴 ",
-                "221": "🔵 ", "358": "🔵 "
+                "375": "🔴 ", "249": "🔴 ",
+                "225": "🔵 ", "49": "🔵 ",
+                "77": "🔴 ", "572": "🔴 ", "357": "🔵 " 
             }.get(server, "")
 
         SERVER_MAP = {
-            "375": "NxW", "77": "MFD", "221": "21SW", "358": "PoD"
+            "375": "NxW", "249": "WB", "225": "IMFS", "49": "NTS",
+            "77": "MFD", "572": "HUNT", "357": "YSS"
         }
-        matchups = [("375", "221"), ("77", "358")]
+
+        # Matchups structured as tuples: (Team A tuple, Team B tuple)
+        matchups = [
+            (("375",), ("225",)),          # 1v1
+            (("249",), ("49",)),           # 1v1
+            (("77", "572"), ("357",))      # 2v1
+        ]
 
         # indices
         id_idx     = find_idx("lord_id",        0)
@@ -3957,13 +3967,28 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
                 f"🏅 Merits:  {stats['merits']:,} ({fmt_gain(stats['merits_gain'])})\n"
             )
 
+        def merge_stats(team_servers):
+            merged = {
+                "kills": 0, "kills_gain": 0,
+                "dead": 0, "dead_gain": 0,
+                "healed": 0, "healed_gain": 0,
+                "merits": 0, "merits_gain": 0
+            }
+            for server in team_servers:
+                for key in merged:
+                    merged[key] += stat_map[server][key]
+            return merged
+
         title = format_title_with_dates(previous.title, latest.title)
 
-        for a, b in matchups:
-            name_a = f"{emoji_bracket(a)}{SERVER_MAP[a]}"
-            name_b = f"{emoji_bracket(b)}{SERVER_MAP[b]}"
-            stats_a = stat_map[a]
-            stats_b = stat_map[b]
+        for team_a, team_b in matchups:
+            # Combine names and emojis for the teams
+            name_a = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]}" for s in team_a])
+            name_b = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]}" for s in team_b])
+            
+            # Merge stats for multi-server teams
+            stats_a = merge_stats(team_a)
+            stats_b = merge_stats(team_b)
 
             block = (
                 f"{name_a} vs {name_b}\n\n"
@@ -3972,8 +3997,12 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
                 f"{format_side(name_b, stats_b)}"
             )
 
+            # Raw names for the embed title
+            title_a = " & ".join([SERVER_MAP[s] for s in team_a])
+            title_b = " & ".join([SERVER_MAP[s] for s in team_b])
+
             embed = discord.Embed(
-                title=f"{title} — {SERVER_MAP[a]} vs {SERVER_MAP[b]}",
+                title=f"{title} — {title_a} vs {title_b}",
                 description=f"```{block}```",
                 color=0x00ffcc
             )
