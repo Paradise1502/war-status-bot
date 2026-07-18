@@ -65,7 +65,7 @@ async def global_vacation_check(ctx):
     return True
 
 # Config values
-CONFIRM_CHANNEL_ID = 1369071691111600168  # ID of the channel with the message + reactions
+CONFIRM_CHANNEL_ID = 1527938722987900978  # ID of the channel with the message + reactions
 WAR_CHANNEL_ID = 1369071691111600168  # ⬅️ replace with your war channel ID
 REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
 ALLOWED_COMMAND_CHANNEL_ID = 1378735765827358791
