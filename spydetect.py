@@ -212,6 +212,5 @@ class SpyDetector(commands.Cog):
         else:
             await ctx.send("No exact match found. Double-check for typos or extra punctuation.")
             
-# This required function registers the Cog with your main bot
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
