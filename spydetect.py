@@ -452,7 +452,7 @@ class SpyDetector(commands.Cog):
             # ----------------
 
             try:
-                await member.send(full_msg)
+                sent_msg = await member.send(full_msg)
                 sent += 1
                 log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
 
