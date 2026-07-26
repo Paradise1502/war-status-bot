@@ -599,10 +599,10 @@ class SpyDetector(commands.Cog):
         log_buffer.close()
         await ctx.send(f"Test complete! Sent to {sent} member(s). DMs will vanish in 30 seconds.")
     
-    @commands.command(name="catchscreenshot", aliases=["catch"])
+   @commands.command(name="catchscreenshot", aliases=["catch"])
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        await ctx.send("Fetching full server member list & searching both war and social databases...")
+        await ctx.send("Fetching full server member list & searching all broadcast databases...")
         
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
@@ -620,13 +620,22 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # Inside your catchscreenshot loop:
-            expected_tactical = clean_text(generate_signoff(member.id, mode="tactical"))
-            expected_casual = clean_text(generate_signoff(member.id, mode="casual"))
-            expected_row = clean_text(generate_signoff(member.id, mode="row"))
+            # Generate the 3 randomized phrases for this user across all modes
+            tactical_phrases = generate_signoff_phrases(member.id, mode="tactical")
+            casual_phrases = generate_signoff_phrases(member.id, mode="casual")
+            row_phrases = generate_signoff_phrases(member.id, mode="row")
 
-            # Check if ANY of the three fingerprints are found
-            if expected_tactical in target_cleaned or expected_casual in target_cleaned or expected_row in target_cleaned:
+            # Clean each phrase for accurate comparison
+            clean_tactical = [clean_text(p) for p in tactical_phrases]
+            clean_casual = [clean_text(p) for p in casual_phrases]
+            clean_row = [clean_text(p) for p in row_phrases]
+
+            # Check if ALL 3 phrases of any mode appear anywhere in the leaked screenshot text
+            has_tactical = all(p in target_cleaned for p in clean_tactical)
+            has_casual = all(p in target_cleaned for p in clean_casual)
+            has_row = all(p in target_cleaned for p in clean_row)
+
+            if has_tactical or has_casual or has_row:
                 matches.append(member)
 
         if matches:
