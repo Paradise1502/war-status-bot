@@ -150,7 +150,7 @@ ROW_GROUPS = [
 ]
 
 def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
-    """Generates 3 unique, deterministic phrases based on the user's ID so tracking is 100% accurate."""
+    """Generates 3 unique, deterministic phrases based on the user's ID."""
     if mode == "tactical":
         groups = TACTICAL_GROUPS
     elif mode == "casual":
@@ -160,7 +160,6 @@ def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
     else:
         groups = TACTICAL_GROUPS
     
-    # Use the user's ID hash to deterministically select 3 phrases
     hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
     deterministic_num = int(hash_hex, 16)
     
@@ -608,21 +607,47 @@ class SpyDetector(commands.Cog):
     @commands.command(name="catchscreenshot", aliases=["catch"])
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        await ctx.send("🔍 Scanning leaked text for invisible security watermarks...")
-
-        # Extract the exact user ID hidden inside the zero-width Unicode characters
-        leaker_id = decode_watermark(screenshot_text)
+        await ctx.send("🔍 Scanning OCR screenshot text across all member databases...")
         
-        if leaker_id:
-            leaker = ctx.guild.get_member(leaker_id)
-            if leaker:
-                await ctx.send(f"🚨 **LEAKER IDENTIFIED!**\nThe invisible watermark proves this message belongs to: **{leaker.mention}** (`{leaker.name}`, ID: `{leaker.id}`)")
-                return
-            else:
-                await ctx.send(f"🚨 **WATERMARK FOUND, BUT...**\nFound user ID `{leaker_id}`, but that user is no longer in this server.")
-                return
+        if not ctx.guild.chunked:
+            await ctx.guild.chunk()
 
-        await ctx.send("❌ No valid security watermark found in this text. Make sure you copied the text directly from the screenshot or message content.")
+        def clean_text(raw_text: str) -> str:
+            # Strip zero-width characters since OCR won't have them anyway
+            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
+            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
+            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
+            return " ".join(cleaned.split())
+
+        target_cleaned = clean_text(screenshot_text)
+        matches = []
+
+        for member in ctx.guild.members:
+            if member.bot:
+                continue
+
+            # Generate the 3 unique deterministic phrases for this specific member ID
+            tactical_phrases = generate_signoff_phrases(member.id, mode="tactical")
+            casual_phrases = generate_signoff_phrases(member.id, mode="casual")
+            row_phrases = generate_signoff_phrases(member.id, mode="row")
+
+            clean_tactical = [clean_text(p) for p in tactical_phrases]
+            clean_casual = [clean_text(p) for p in casual_phrases]
+            clean_row = [clean_text(p) for p in row_phrases]
+
+            # A user is ONLY matched if ALL 3 of their unique deterministic phrases appear in the OCR text
+            has_tactical = all(p in target_cleaned for p in clean_tactical)
+            has_casual = all(p in target_cleaned for p in clean_casual)
+            has_row = all(p in target_cleaned for p in clean_row)
+
+            if has_tactical or has_casual or has_row:
+                matches.append(member)
+
+        if matches:
+            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
+            await ctx.send(f"🚨 **LEAKER IDENTIFIED VIA OCR!**\nThe screenshot text belongs to:\n{found_users}")
+        else:
+            await ctx.send("❌ No matching fingerprint found. Check if the OCR tool missed any words or punctuation.")
             
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
