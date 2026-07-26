@@ -18,27 +18,34 @@ ZW_ZERO = "\u200B"
 ZW_ONE = "\u200C"
 
 # Updated filler words (No prefixes, blends perfectly) - 7,776 combinations
-SIGN_OFF_GROUPS = [
-    ["Stay alert.", "Be prepared.", "Stand by.", "Hold the line.", "Stay focused.", "Keep watch."],
-    ["Watch the markers.", "Follow pings.", "Check alliance chat.", "Wait for orders.", "Listen to R4s.", "Track the target."],
-    ["Prep your marches.", "Ready your troops.", "Form up.", "Gather forces.", "Prepare to rally.", "Assemble."],
-    ["Check your talents.", "Ensure you are buffed.", "Refresh your shields.", "Check your stamina.", "Verify your artifacts.", "Use proper setups."],
-    ["Move out.", "Advance.", "Deploy.", "Engage.", "Push forward.", "Execute."]
+TACTICAL_GROUPS = [
+    ["Stay alert.", "Be prepared.", "Stand by.", "Hold the line.", "Stay focused.", "Keep watch.", "Eyes open.", "Stay sharp.", "Be ready.", "Hold positions.", "Watch the map.", "Stay vigilant.", "Maintain discipline.", "Stay online.", "Lock in.", "Keep your eyes peeled.", "Hold steady.", "Prepare for action.", "Stay on standby.", "Remain alert."],
+    ["Watch the markers.", "Follow pings.", "Check alliance chat.", "Wait for orders.", "Listen to R4s.", "Track the target.", "Follow commands.", "Check your mail.", "Read the pins.", "Wait for the call.", "Listen to leadership.", "Follow the rally.", "Check the markers.", "Stay grouped.", "Watch for updates.", "Wait for pings.", "Observe the field.", "Follow the leads.", "Check Discord.", "Stay coordinated."],
+    ["Move out.", "Advance.", "Deploy.", "Engage.", "Push forward.", "Execute.", "March out.", "Send troops.", "Move in.", "Attack.", "Push now.", "Go go go.", "Strike.", "Push the line.", "Advance troops.", "Move to target.", "Engage the enemy.", "Deploy forces.", "Push the objective.", "Execute orders."]
+]
+# --- CASUAL POOL (For Social) - 8,000 combinations ---
+CASUAL_GROUPS = [
+    ["Thanks for everything.", "Appreciate the effort.", "You guys are great.", "Love the energy.", "Keep it up.", "Stay awesome.", "Great job everyone.", "Thanks for playing.", "You all rock.", "Appreciate you all.", "Love this team.", "Keep up the good work.", "Thanks for being here.", "Glad you're here.", "You guys are the best.", "Thanks for the hard work.", "Love to see it.", "Great effort.", "Appreciate the activity.", "Thanks for sticking around."],
+    ["Keep growing.", "Don't forget to gather.", "Enjoy the downtime.", "Take it easy.", "Have fun out there.", "Pace yourselves.", "Keep farming.", "Enjoy the game.", "Take a breather.", "Relax for a bit.", "Keep leveling up.", "Focus on growth.", "Enjoy the peace.", "Rest your troops.", "Farm up.", "Keep upgrading.", "Take some time off.", "Enjoy the day.", "Focus on yourselves.", "Keep progressing."],
+    ["See you in chat.", "Catch you in VC.", "Ask if you need help.", "Reach out to R4s.", "Keep the vibes high.", "Stay active.", "See you around.", "Catch you later.", "Have a good one.", "Take care.", "Talk soon.", "See you on the map.", "Have a great day.", "Stay positive.", "Keep in touch.", "See you all later.", "Have a good week.", "Stay safe.", "Catch you all soon.", "See you next time."]
 ]
 
-def generate_signoff(user_id: int) -> str:
-    """Generates a deterministic string of tactical filler words."""
+def generate_signoff(user_id: int, mode: str = "tactical") -> str:
+    """Generates a secure 3-phrase string based on the chosen mode."""
     selected_words = []
     
     hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
     deterministic_num = int(hash_hex, 16)
     
-    for i, group in enumerate(SIGN_OFF_GROUPS):
-        index = (deterministic_num >> (i * 4)) % len(group)
+    groups = TACTICAL_GROUPS if mode == "tactical" else CASUAL_GROUPS
+    
+    for i, group in enumerate(groups):
+        # Shift bits safely to ensure independent selections
+        index = (deterministic_num >> (i * 8)) % len(group)
         selected_words.append(group[index])
         
-    # Just normal text separated by spaces
-    return f"{selected_words[0]} {selected_words[1]} {selected_words[2]} {selected_words[3]} {selected_words[4]}"
+    # Now only returns 3 sentences!
+    return f"{selected_words[0]} {selected_words[1]} {selected_words[2]}"
 
 def generate_visual_variation(user_id: int) -> str:
     selected_words = []
@@ -67,9 +74,11 @@ class SpyDetector(commands.Cog):
         self.bot = bot
 
     # 3. Test command (Sends a watermarked message ONLY to you)
-    @commands.command(name="testbroadcast")
+    @commands.command(name="testwarbroadcast") # <--- Renamed
     @commands.has_permissions(administrator=True)
-    async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
+    async def testwarbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str): # <--- Renamed
+        
+        # ... (Keep the rest of your OPSEC, Auto-Injector, and Logging logic the exact same) ...:
         if not members:
             await ctx.send("Please mention at least one member!")
             return
@@ -133,9 +142,9 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Test complete! Sent to {sent} member(s). Check your log channel.")
 
-    @commands.command(name="broadcast")
+    @commands.command(name="warbroadcast") # <--- Renamed
     @commands.has_permissions(administrator=True)
-    async def broadcast(self, ctx, role: discord.Role, *, announcement: str):
+    async def warbroadcast(self, ctx, role: discord.Role, *, announcement: str): # <--- Renamed
         
         # --- OPSEC SAFEGUARD ---
         # 1. Block @everyone completely
@@ -216,83 +225,120 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Broadcast complete! Sent to {sent} members of {role.name}. A full report has been sent to your log channel.")
 
-
-    @commands.command(name="catchscreenshot")
+    @commands.command(name="socialbroadcast")
     @commands.has_permissions(administrator=True)
-    async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        """Matches text from a leaked screenshot against every member's generated variation."""
-        await ctx.send("Fetching full server member list & searching...")
-        
-        if not ctx.guild.chunked:
-            await ctx.guild.chunk()
-
-        # Helper function to strip invisible characters, smart quotes, and punctuation
-        def clean_text(raw_text: str) -> str:
-            # 1. Remove all hidden zero-width / invisible Unicode characters
-            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
-            # 2. Lowercase and fix smart apostrophes/quotes
-            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
-            # 3. Strip out markdown formatting and punctuation so minor typos don't break matches
-            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
-            # 4. Collapse extra spaces
-            return " ".join(cleaned.split())
-
-        target_cleaned = clean_text(screenshot_text)
-        matches = []
-
-        for member in ctx.guild.members:
-            if member.bot:
-                continue
-
-            # Generate and clean this member's expected sign-off
-            member_signoff = generate_signoff(member.id)
-            expected_cleaned = clean_text(member_signoff)
-
-            # Check if their cleaned sign-off exists anywhere inside the pasted leak text
-            if expected_cleaned in target_cleaned:
-                matches.append(member)
-
-        if matches:
-            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
-            await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
-        else:
-            await ctx.send("No exact match found. Double-check for typos or missing words.")
-    
-    # 2. Command to catch the spy from leaked text
-    @commands.command(name="catch")
-    @commands.has_permissions(administrator=True)
-    async def catch(self, ctx, *, leaked_text: str):
-        user_id = decode_watermark(leaked_text)
-        
-        if not user_id:
-            await ctx.send("No watermark found in this text.")
+    async def socialbroadcast(self, ctx, role: discord.Role, *, announcement: str):
+        if role.is_default() or role.name == "@everyone":
+            await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
+            return
+            
+        allowed_roles = ["Fighters", "CoreTeam", "Officers", "Alliance"] 
+        if role.name not in allowed_roles:
+            await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
             return
 
-        member = ctx.guild.get_member(user_id) or await self.bot.fetch_user(user_id)
-        if member:
-            await ctx.send(f"**SPY FOUND!**\nUser: `{member.name}`\nID: `{user_id}`")
-        else:
-            await ctx.send(f"Found watermark for User ID `{user_id}`, but they left the server.")
+        await ctx.send(f"Processing social announcement and sending uniquely blended messages to **{role.name}**...")
+        
+        if "[opsec]" not in announcement.lower():
+            sentences = re.split(r'(?<=[.!?])\s+', announcement)
+            if len(sentences) > 1:
+                mid_point = len(sentences) // 2
+                sentences.insert(mid_point, "[opsec]")
+                announcement = " ".join(sentences)
+            else:
+                announcement = f"{announcement} [opsec]"
 
-    # 4. Command to find a spy from a screenshot (using visual variations)
-    @commands.command(name="catchscreenshot")
+        sent, failed = 0, 0
+        log_buffer = io.StringIO()
+        log_buffer.write(f"--- SOCIAL BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
+        
+        for member in role.members:
+            if member.bot:
+                continue
+            
+            # This is the key difference: mode="casual"
+            unique_signoff = generate_signoff(member.id, mode="casual")
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            full_msg = encode_watermark(visible_text, member.id)
+            
+            try:
+                await member.send(full_msg)
+                sent += 1
+                log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
+            except discord.Forbidden:
+                failed += 1
+                log_buffer.write(f"FAILED: {member.name} (ID: {member.id}) - DMs disabled.\n\n")
+
+        log_channel_id = 1527938722987900978
+        log_channel = ctx.bot.get_channel(log_channel_id)
+        if log_channel:
+            log_buffer.seek(0)
+            file = discord.File(fp=log_buffer, filename=f"social_log_{role.name}.txt")
+            await log_channel.send(content=f"**New Social Broadcast Report**\nInitiated by: {ctx.author.mention}\nSuccessfully sent to **{sent}** members. Failed: **{failed}**.", file=file)
+        
+        log_buffer.close()
+        await ctx.send(f"Social broadcast complete! Sent to {sent} members.")
+
+    @commands.command(name="testsocialbroadcast")
+    @commands.has_permissions(administrator=True)
+    async def testsocialbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
+        if not members:
+            await ctx.send("Please mention at least one member!")
+            return
+
+        await ctx.send(f"Processing test social announcement...")
+        
+        if "[opsec]" not in announcement.lower():
+            sentences = re.split(r'(?<=[.!?])\s+', announcement)
+            if len(sentences) > 1:
+                mid_point = len(sentences) // 2
+                sentences.insert(mid_point, "[opsec]")
+                announcement = " ".join(sentences)
+            else:
+                announcement = f"{announcement} [opsec]"
+
+        sent, failed = 0, 0
+        log_buffer = io.StringIO()
+        log_buffer.write(f"--- TEST SOCIAL LOG ---\nTarget Members: {', '.join([m.name for m in members])}\nBase Message: {announcement}\n-----------------------\n\n")
+
+        for member in members:
+            if member.bot:
+                continue
+
+            # Switch to casual mode for the test
+            unique_signoff = generate_signoff(member.id, mode="casual")
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            full_msg = encode_watermark(visible_text, member.id)
+
+            try:
+                await member.send(full_msg)
+                sent += 1
+                log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
+            except discord.Forbidden:
+                failed += 1
+
+        log_channel_id = 1527938722987900978
+        log_channel = ctx.bot.get_channel(log_channel_id)
+        if log_channel:
+            log_buffer.seek(0)
+            file = discord.File(fp=log_buffer, filename="test_social_log.txt")
+            await log_channel.send(content=f"**New Test Social Report**\nInitiated by: {ctx.author.mention}", file=file)
+            
+        log_buffer.close()
+        await ctx.send(f"Test complete! Sent to {sent} member(s). Check your log channel.")
+    
+    @commands.command(name="catchscreenshot", aliases=["catch"])
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        """Matches text from a leaked screenshot against every member's generated variation."""
-        await ctx.send("Fetching full server member list & searching...")
+        await ctx.send("Fetching full server member list & searching both war and social databases...")
         
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
 
-        # Helper function to strip invisible characters, smart quotes, and punctuation
         def clean_text(raw_text: str) -> str:
-            # 1. Remove all hidden zero-width / invisible Unicode characters
             cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
-            # 2. Lowercase and fix smart apostrophes/quotes
             cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
-            # 3. Strip out markdown formatting and punctuation so minor typos don't break matches
             cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
-            # 4. Collapse extra spaces
             return " ".join(cleaned.split())
 
         target_cleaned = clean_text(screenshot_text)
@@ -302,17 +348,17 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # Generate and clean this member's expected sign-off
-            member_signoff = generate_signoff(member.id)
-            expected_cleaned = clean_text(member_signoff)
+            # Generate both 3-phrase fingerprints for the user
+            expected_tactical = clean_text(generate_signoff(member.id, mode="tactical"))
+            expected_casual = clean_text(generate_signoff(member.id, mode="casual"))
 
-            # Check if their cleaned sign-off exists anywhere inside the pasted leak text
-            if expected_cleaned in target_cleaned:
+            # Check if EITHER fingerprint is found in the pasted text
+            if expected_tactical in target_cleaned or expected_casual in target_cleaned:
                 matches.append(member)
 
         if matches:
             found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
-            await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
+            await ctx.send(f"**MATCH FOUND!**\nThe leaked text belongs to:\n{found_users}")
         else:
             await ctx.send("No exact match found. Double-check for typos or missing words.")
             
