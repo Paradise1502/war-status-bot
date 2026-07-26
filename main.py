@@ -2001,6 +2001,7 @@ def role_check():
 
 @bot.event
 async def on_ready():
+    await bot.load_extension("spydetect")
     print(f"✅ Bot is online as {bot.user}")
 
 @bot.command(aliases=['help', 'info', 'guide'])
