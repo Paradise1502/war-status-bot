@@ -14,13 +14,27 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 ZW_ZERO = "\u200B"
 ZW_ONE = "\u200C"
 
-# 1. Define visual variation choices
-SYNONYM_GROUPS = [
-    ["Operation", "Mission", "Op"],                  # Choice 1
-    ["starts at", "begins at", "launches at"],      # Choice 2
-    ["bring armor", "bring heavy armor", "use armor"],# Choice 3
-    ["Be ready.", "Be prepared.", "Stand by."]       # Choice 4
+# 1. Useless filler words for the Tactical Sign-off (7,776 combinations)
+SIGN_OFF_GROUPS = [
+    ["Notice:", "Attention:", "Directive:", "Orders:", "Update:", "Briefing:"],
+    ["Stay alert.", "Be prepared.", "Stand by.", "Hold the line.", "Stay focused.", "Keep watch."],
+    ["Watch the markers.", "Follow pings.", "Check alliance chat.", "Wait for orders.", "Listen to R4s.", "Track the target."],
+    ["Prep your marches.", "Ready your troops.", "Form up.", "Gather forces.", "Prepare to rally.", "Assemble."],
+    ["Move out.", "Advance.", "Deploy.", "Engage.", "Push forward.", "Execute."]
 ]
+
+def generate_signoff(user_id: int) -> str:
+    """Generates a deterministic string of filler words for the bottom of the message."""
+    selected_words = []
+    
+    hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
+    deterministic_num = int(hash_hex, 16)
+    
+    for i, group in enumerate(SIGN_OFF_GROUPS):
+        index = (deterministic_num >> (i * 4)) % len(group)
+        selected_words.append(group[index])
+        
+    return f"{selected_words[0]} {selected_words[1]} {selected_words[2]} {selected_words[3]} {selected_words[4]}"
 
 def generate_visual_variation(user_id: int) -> str:
     selected_words = []
@@ -61,10 +75,9 @@ class SpyDetector(commands.Cog):
         except discord.Forbidden:
             await ctx.send("Failed to DM you. Please check if your DMs are open!")
 
-    # 1. Command to send watermarked DMs
     @commands.command(name="broadcast")
     @commands.has_permissions(administrator=True)
-    async def broadcast(self, ctx):
+    async def broadcast(self, ctx, *, announcement: str): # <--- Added 'announcement' parameter
         await ctx.send("Sending unique watermarked/varied messages...")
         sent, failed = 0, 0
 
@@ -72,14 +85,16 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
             
-            # Step A: Generate unique visible text (for screenshots)
-            visible_text = generate_visual_variation(member.id)
+            # Step A: Generate their unique filler sign-off
+            unique_signoff = generate_signoff(member.id)
             
-            # Step B: Attach invisible unicode watermark (for text copies)
+            # Step B: Combine YOUR message with THEIR unique sign-off
+            visible_text = f"{announcement}\n\n*{unique_signoff}*"
+            
+            # Step C: Attach invisible unicode watermark
             full_msg = encode_watermark(visible_text, member.id)
-
-            # Add this inside the loop in broadcast():
-            print(f"[OPSEC LOG] DM to {member.name} ({member.id}): {visible_text}")
+            
+            print(f"[OPSEC LOG] DM to {member.name} ({member.id}): {unique_signoff}")
             
             try:
                 await member.send(full_msg)
@@ -89,16 +104,15 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Broadcast complete! Sent to {sent} members.")
 
-    # 4. Command to find a spy from a screenshot (using visual variations)
     # 5. Targeted test command (Sends to mentioned users only)
     @commands.command(name="testbroadcast")
     @commands.has_permissions(administrator=True)
-    async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member]):
-        """Sends custom watermarked/varied DMs only to mentioned members.
-        Usage: !testbroadcast @Officer1 @Officer2
+    async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
+        """Sends custom announcements with sign-offs only to mentioned members.
+        Usage: !testbroadcast @Officer1 @Officer2 We are hitting the Bastion at 20:00!
         """
         if not members:
-            await ctx.send("Please mention at least one member to test with! Example: `!testbroadcast @User1 @User2`")
+            await ctx.send("Please mention at least one member to test with!\nExample: `!testbroadcast @User1 We are hitting the Bastion!`")
             return
 
         await ctx.send(f"Sending test messages to {len(members)} member(s)...")
@@ -108,14 +122,17 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # Step A: Generate unique visible text (for screenshots)
-            visible_text = generate_visual_variation(member.id)
+            # Step A: Generate their unique filler sign-off
+            unique_signoff = generate_signoff(member.id)
+            
+            # Step B: Combine YOUR custom message with THEIR unique sign-off
+            visible_text = f"{announcement}\n\n*{unique_signoff}*"
 
-            # Step B: Attach invisible unicode watermark (for text copies)
+            # Step C: Attach invisible unicode watermark (for text copies)
             full_msg = encode_watermark(visible_text, member.id)
 
             # Log to Railway console
-            print(f"[TEST OPSEC LOG] DM to {member.name} ({member.id}): {visible_text}")
+            print(f"[TEST OPSEC LOG] DM to {member.name} ({member.id}): {unique_signoff}")
 
             try:
                 await member.send(full_msg)
@@ -163,8 +180,8 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # Re-generate what this specific member's announcement text looked like
-            member_expected_text = generate_visual_variation(member.id).strip().lower()
+            # Inside your catchscreenshot loop, change this one line:
+            member_expected_text = generate_signoff(member.id).strip().lower()
 
             if member_expected_text == target_text:
                 matches.append(member)
