@@ -13,22 +13,14 @@ SYNONYM_GROUPS = [
 ]
 
 def generate_visual_variation(user_id: int) -> str:
-    """Uses the user's ID to deterministically pick a unique combination of words."""
     selected_words = []
     
     for i, group in enumerate(SYNONYM_GROUPS):
-        # Pick a word index based on user ID modulo group size
+        # Pick word based on bits of the User ID
         index = (user_id >> (i * 2)) % len(group)
         selected_words.append(group[index])
         
-    # Example template combining selected words
-    text = f"{selected_words[0]} {selected_words[1]} 20:00 UTC, {selected_words[2]}. {selected_words[3]}"
-    
-    # Optional: Toggle capitalization on the final word for extra variation
-    if (user_id % 2) == 0:
-        text = text.upper()  # Or make specific words uppercase
-        
-    return text
+    return f"{selected_words[0]} {selected_words[1]} 20:00 UTC, {selected_words[2]}. {selected_words[3]}"
 
 def encode_watermark(text: str, user_id: int) -> str:
     binary_id = f"{user_id:064b}"
@@ -145,11 +137,13 @@ class SpyDetector(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
         """Matches text from a leaked screenshot against every member's generated variation."""
-        await ctx.send("Searching through server members...")
+        await ctx.send("Fetching full server member list & searching...")
         
+        # FORCE DISCORD TO LOAD ALL MEMBERS INTO MEMORY
+        if not ctx.guild.chunked:
+            await ctx.guild.chunk()
+
         matches = []
-        
-        # Clean up whitespace/casing for an easier match
         target_text = screenshot_text.strip().lower()
 
         for member in ctx.guild.members:
@@ -159,7 +153,6 @@ class SpyDetector(commands.Cog):
             # Re-generate what this specific member's announcement text looked like
             member_expected_text = generate_visual_variation(member.id).strip().lower()
 
-            # Check if the screenshot matches this member's text
             if member_expected_text == target_text:
                 matches.append(member)
 
@@ -167,7 +160,7 @@ class SpyDetector(commands.Cog):
             found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
             await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
         else:
-            await ctx.send("No exact match found. Make sure you typed/copied the screenshot text exactly as shown.")
+            await ctx.send("No exact match found. Double-check for typos or extra punctuation.")
 
 # This required function registers the Cog with your main bot
 async def setup(bot):
