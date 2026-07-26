@@ -140,7 +140,34 @@ class SpyDetector(commands.Cog):
         else:
             await ctx.send(f"Found watermark for User ID `{user_id}`, but they left the server.")
 
+    # 4. Command to find a spy from a screenshot (using visual variations)
+    @commands.command(name="catchscreenshot")
+    @commands.has_permissions(administrator=True)
+    async def catchscreenshot(self, ctx, *, screenshot_text: str):
+        """Matches text from a leaked screenshot against every member's generated variation."""
+        await ctx.send("Searching through server members...")
+        
+        matches = []
+        
+        # Clean up whitespace/casing for an easier match
+        target_text = screenshot_text.strip().lower()
 
+        for member in ctx.guild.members:
+            if member.bot:
+                continue
+
+            # Re-generate what this specific member's announcement text looked like
+            member_expected_text = generate_visual_variation(member.id).strip().lower()
+
+            # Check if the screenshot matches this member's text
+            if member_expected_text == target_text:
+                matches.append(member)
+
+        if matches:
+            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
+            await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
+        else:
+            await ctx.send("No exact match found. Make sure you typed/copied the screenshot text exactly as shown.")
 
 # This required function registers the Cog with your main bot
 async def setup(bot):
