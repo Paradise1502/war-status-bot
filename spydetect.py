@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 import hashlib
+import re
 
 # 1. Set up default intents
 intents = discord.Intents.default()
@@ -15,17 +16,17 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 ZW_ZERO = "\u200B"
 ZW_ONE = "\u200C"
 
-# 1. Useless filler words for the Tactical Sign-off (7,776 combinations)
+# Updated filler words (No prefixes, blends perfectly) - 7,776 combinations
 SIGN_OFF_GROUPS = [
-    ["Notice:", "Attention:", "Directive:", "Orders:", "Update:", "Briefing:"],
     ["Stay alert.", "Be prepared.", "Stand by.", "Hold the line.", "Stay focused.", "Keep watch."],
     ["Watch the markers.", "Follow pings.", "Check alliance chat.", "Wait for orders.", "Listen to R4s.", "Track the target."],
     ["Prep your marches.", "Ready your troops.", "Form up.", "Gather forces.", "Prepare to rally.", "Assemble."],
+    ["Check your talents.", "Ensure you are buffed.", "Refresh your shields.", "Check your stamina.", "Verify your artifacts.", "Use proper setups."],
     ["Move out.", "Advance.", "Deploy.", "Engage.", "Push forward.", "Execute."]
 ]
 
 def generate_signoff(user_id: int) -> str:
-    """Generates a deterministic string of filler words for the bottom of the message."""
+    """Generates a deterministic string of tactical filler words."""
     selected_words = []
     
     hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
@@ -35,6 +36,7 @@ def generate_signoff(user_id: int) -> str:
         index = (deterministic_num >> (i * 4)) % len(group)
         selected_words.append(group[index])
         
+    # Just normal text separated by spaces
     return f"{selected_words[0]} {selected_words[1]} {selected_words[2]} {selected_words[3]} {selected_words[4]}"
 
 def generate_visual_variation(user_id: int) -> str:
@@ -78,24 +80,38 @@ class SpyDetector(commands.Cog):
 
     @commands.command(name="broadcast")
     @commands.has_permissions(administrator=True)
-    async def broadcast(self, ctx, *, announcement: str): # <--- Added 'announcement' parameter
-        await ctx.send("Sending unique watermarked/varied messages...")
+    async def broadcast(self, ctx, *, announcement: str):
+        await ctx.send("Processing announcement and sending uniquely blended messages...")
+        
+        # --- THE AUTO-INJECTOR ---
+        # If no tag is found, the bot intelligently inserts one in the middle of the text
+        if "[opsec]" not in announcement.lower():
+            # Splits the text into a list of sentences based on punctuation (. ! ?)
+            sentences = re.split(r'(?<=[.!?])\s+', announcement)
+            
+            if len(sentences) > 1:
+                # Find the middle of the paragraph and insert the tag
+                mid_point = len(sentences) // 2
+                sentences.insert(mid_point, "[opsec]")
+                announcement = " ".join(sentences)
+            else:
+                # If the announcement is literally just one sentence, append it to the end
+                announcement = f"{announcement} [opsec]"
+        # -------------------------
+
         sent, failed = 0, 0
 
         for member in ctx.guild.members:
             if member.bot:
                 continue
             
-            # Step A: Generate their unique filler sign-off
             unique_signoff = generate_signoff(member.id)
             
-            # Step B: Combine YOUR message with THEIR unique sign-off
-            visible_text = f"{announcement}\n\n*{unique_signoff}*"
+            # Replace the tag (whether manual or auto-injected) with the unique filler
+            # re.sub with re.IGNORECASE catches [opsec], [OPSEC], [Opsec], etc.
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
             
-            # Step C: Attach invisible unicode watermark
             full_msg = encode_watermark(visible_text, member.id)
-            
-            print(f"[OPSEC LOG] DM to {member.name} ({member.id}): {unique_signoff}")
             
             try:
                 await member.send(full_msg)
@@ -105,42 +121,43 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Broadcast complete! Sent to {sent} members.")
 
-    # 5. Targeted test command (Sends to mentioned users only)
+
     @commands.command(name="testbroadcast")
     @commands.has_permissions(administrator=True)
     async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
-        """Sends custom announcements with sign-offs only to mentioned members.
-        Usage: !testbroadcast @Officer1 @Officer2 We are hitting the Bastion at 20:00!
-        """
         if not members:
-            await ctx.send("Please mention at least one member to test with!\nExample: `!testbroadcast @User1 We are hitting the Bastion!`")
+            await ctx.send("Please mention at least one member!")
             return
 
         await ctx.send(f"Sending test messages to {len(members)} member(s)...")
+        
+        # --- THE AUTO-INJECTOR (For Tests) ---
+        if "[opsec]" not in announcement.lower():
+            sentences = re.split(r'(?<=[.!?])\s+', announcement)
+            if len(sentences) > 1:
+                mid_point = len(sentences) // 2
+                sentences.insert(mid_point, "[opsec]")
+                announcement = " ".join(sentences)
+            else:
+                announcement = f"{announcement} [opsec]"
+        # -------------------------------------
+
         sent, failed = 0, 0
 
         for member in members:
             if member.bot:
                 continue
 
-            # Step A: Generate their unique filler sign-off
             unique_signoff = generate_signoff(member.id)
             
-            # Step B: Combine YOUR custom message with THEIR unique sign-off
-            visible_text = f"{announcement}\n\n*{unique_signoff}*"
-
-            # Step C: Attach invisible unicode watermark (for text copies)
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
             full_msg = encode_watermark(visible_text, member.id)
-
-            # Log to Railway console
-            print(f"[TEST OPSEC LOG] DM to {member.name} ({member.id}): {unique_signoff}")
 
             try:
                 await member.send(full_msg)
                 sent += 1
             except discord.Forbidden:
                 failed += 1
-                await ctx.send(f"⚠️ Could not DM `{member.name}` (DMs are closed).")
 
         await ctx.send(f"Test complete! Sent to {sent} member(s).")
     
