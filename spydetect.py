@@ -149,12 +149,15 @@ class SpyDetector(commands.Cog):
         """Matches text from a leaked screenshot against every member's generated variation."""
         await ctx.send("Fetching full server member list & searching...")
         
-        # FORCE DISCORD TO LOAD ALL MEMBERS INTO MEMORY
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
 
         matches = []
-        target_text = screenshot_text.strip().lower()
+        
+        # FIX: Strip out the invisible characters just in case the text was copy-pasted!
+        ZW_ZERO = "\u200B"
+        ZW_ONE = "\u200C"
+        target_text = screenshot_text.replace(ZW_ZERO, "").replace(ZW_ONE, "").strip().lower()
 
         for member in ctx.guild.members:
             if member.bot:
@@ -171,7 +174,7 @@ class SpyDetector(commands.Cog):
             await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
         else:
             await ctx.send("No exact match found. Double-check for typos or extra punctuation.")
-
+            
 # This required function registers the Cog with your main bot
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
