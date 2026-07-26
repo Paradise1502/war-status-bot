@@ -599,7 +599,7 @@ class SpyDetector(commands.Cog):
         log_buffer.close()
         await ctx.send(f"Test complete! Sent to {sent} member(s). DMs will vanish in 30 seconds.")
     
-   @commands.command(name="catchscreenshot", aliases=["catch"])
+    @commands.command(name="catchscreenshot", aliases=["catch"])
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
         await ctx.send("Fetching full server member list & searching all broadcast databases...")
