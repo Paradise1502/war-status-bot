@@ -1,6 +1,16 @@
 import discord
 from discord.ext import commands
 
+# 1. Set up default intents
+intents = discord.Intents.default()
+
+# 2. Explicitly enable the members intent
+intents.members = True 
+intents.message_content = True # (You probably already have this for commands to work)
+
+# 3. Pass the intents into your bot variable
+bot = commands.Bot(command_prefix="!", intents=intents)
+
 ZW_ZERO = "\u200B"
 ZW_ONE = "\u200C"
 
