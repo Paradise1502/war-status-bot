@@ -24,6 +24,19 @@ class SpyDetector(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
+    # 3. Test command (Sends a watermarked message ONLY to you)
+    @commands.command(name="testbroadcast")
+    @commands.has_permissions(administrator=True)
+    async def testbroadcast(self, ctx, *, message: str):
+        # Generates watermark using YOUR user ID
+        watermarked_msg = encode_watermark(message, ctx.author.id)
+        
+        try:
+            await ctx.author.send(watermarked_msg)
+            await ctx.send("Test DM sent to you! Copy that DM and run `!catch <text>` to test.")
+        except discord.Forbidden:
+            await ctx.send("Failed to DM you. Please check if your DMs are open!")
+
     # 1. Command to send watermarked DMs
     @commands.command(name="broadcast")
     @commands.has_permissions(administrator=True)
