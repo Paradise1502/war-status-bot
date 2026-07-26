@@ -122,44 +122,46 @@ class SpyDetector(commands.Cog):
         await ctx.send(f"Broadcast complete! Sent to {sent} members.")
 
 
-    @commands.command(name="testbroadcast")
+    @commands.command(name="catchscreenshot")
     @commands.has_permissions(administrator=True)
-    async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
-        if not members:
-            await ctx.send("Please mention at least one member!")
-            return
-
-        await ctx.send(f"Sending test messages to {len(members)} member(s)...")
+    async def catchscreenshot(self, ctx, *, screenshot_text: str):
+        """Matches text from a leaked screenshot against every member's generated variation."""
+        await ctx.send("Fetching full server member list & searching...")
         
-        # --- THE AUTO-INJECTOR (For Tests) ---
-        if "[opsec]" not in announcement.lower():
-            sentences = re.split(r'(?<=[.!?])\s+', announcement)
-            if len(sentences) > 1:
-                mid_point = len(sentences) // 2
-                sentences.insert(mid_point, "[opsec]")
-                announcement = " ".join(sentences)
-            else:
-                announcement = f"{announcement} [opsec]"
-        # -------------------------------------
+        if not ctx.guild.chunked:
+            await ctx.guild.chunk()
 
-        sent, failed = 0, 0
+        # Helper function to strip invisible characters, smart quotes, and punctuation
+        def clean_text(raw_text: str) -> str:
+            # 1. Remove all hidden zero-width / invisible Unicode characters
+            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
+            # 2. Lowercase and fix smart apostrophes/quotes
+            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
+            # 3. Strip out markdown formatting and punctuation so minor typos don't break matches
+            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
+            # 4. Collapse extra spaces
+            return " ".join(cleaned.split())
 
-        for member in members:
+        target_cleaned = clean_text(screenshot_text)
+        matches = []
+
+        for member in ctx.guild.members:
             if member.bot:
                 continue
 
-            unique_signoff = generate_signoff(member.id)
-            
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
-            full_msg = encode_watermark(visible_text, member.id)
+            # Generate and clean this member's expected sign-off
+            member_signoff = generate_signoff(member.id)
+            expected_cleaned = clean_text(member_signoff)
 
-            try:
-                await member.send(full_msg)
-                sent += 1
-            except discord.Forbidden:
-                failed += 1
+            # Check if their cleaned sign-off exists anywhere inside the pasted leak text
+            if expected_cleaned in target_cleaned:
+                matches.append(member)
 
-        await ctx.send(f"Test complete! Sent to {sent} member(s).")
+        if matches:
+            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
+            await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
+        else:
+            await ctx.send("No exact match found. Double-check for typos or missing words.")
     
     # 2. Command to catch the spy from leaked text
     @commands.command(name="catch")
