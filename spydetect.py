@@ -284,8 +284,29 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            unique_signoff = generate_signoff(member.id, mode="tactical")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            # 1. Call the new function to get a list of 3 random phrases
+            phrases = generate_signoff_phrases(member.id, mode="tactical") # Change mode to "casual" or "row" depending on the command
+            
+            # 2. Scatter the 3 phrases into the message
+            current_announcement = announcement
+            if "[opsec1]" not in current_announcement.lower():
+                parts = re.split(r'(?<=[.!?])(\s+)', current_announcement)
+                if len(parts) >= 6:
+                    p1 = len(parts) // 4
+                    p2 = (len(parts) // 4) * 2
+                    p3 = (len(parts) // 4) * 3
+                    
+                    parts.insert(p1, f" {phrases[0]}")
+                    parts.insert(p2 + 1, f" {phrases[1]}")
+                    parts.insert(p3 + 2, f" {phrases[2]}")
+                    visible_text = "".join(parts)
+                else:
+                    visible_text = f"{current_announcement} {phrases[0]} {phrases[1]} {phrases[2]}"
+            else:
+                visible_text = current_announcement.replace("[opsec1]", phrases[0])
+                visible_text = visible_text.replace("[opsec2]", phrases[1])
+                visible_text = visible_text.replace("[opsec3]", phrases[2])
+
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
