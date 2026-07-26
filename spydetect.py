@@ -189,28 +189,37 @@ class SpyDetector(commands.Cog):
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
 
+        # Helper function to strip invisible characters, smart quotes, and punctuation
+        def clean_text(raw_text: str) -> str:
+            # 1. Remove all hidden zero-width / invisible Unicode characters
+            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
+            # 2. Lowercase and fix smart apostrophes/quotes
+            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
+            # 3. Strip out markdown formatting and punctuation so minor typos don't break matches
+            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
+            # 4. Collapse extra spaces
+            return " ".join(cleaned.split())
+
+        target_cleaned = clean_text(screenshot_text)
         matches = []
-        
-        # FIX: Strip out the invisible characters just in case the text was copy-pasted!
-        ZW_ZERO = "\u200B"
-        ZW_ONE = "\u200C"
-        target_text = screenshot_text.replace(ZW_ZERO, "").replace(ZW_ONE, "").strip().lower()
 
         for member in ctx.guild.members:
             if member.bot:
                 continue
 
-            # Inside your catchscreenshot loop, change this one line:
-            member_expected_text = generate_signoff(member.id).strip().lower()
+            # Generate and clean this member's expected sign-off
+            member_signoff = generate_signoff(member.id)
+            expected_cleaned = clean_text(member_signoff)
 
-            if member_expected_text == target_text:
+            # Check if their cleaned sign-off exists anywhere inside the pasted leak text
+            if expected_cleaned in target_cleaned:
                 matches.append(member)
 
         if matches:
             found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
             await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
         else:
-            await ctx.send("No exact match found. Double-check for typos or extra punctuation.")
+            await ctx.send("No exact match found. Double-check for typos or missing words.")
             
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
