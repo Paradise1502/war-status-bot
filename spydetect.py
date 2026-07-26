@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 import hashlib
 import re
+import io
 
 # 1. Set up default intents
 intents = discord.Intents.default()
@@ -68,20 +69,88 @@ class SpyDetector(commands.Cog):
     # 3. Test command (Sends a watermarked message ONLY to you)
     @commands.command(name="testbroadcast")
     @commands.has_permissions(administrator=True)
-    async def testbroadcast(self, ctx, *, message: str):
-        # Generates watermark using YOUR user ID
-        watermarked_msg = encode_watermark(message, ctx.author.id)
+    async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
+        if not members:
+            await ctx.send("Please mention at least one member!")
+            return
+
+        await ctx.send(f"Processing test announcement and sending to {len(members)} member(s)...")
         
-        try:
-            await ctx.author.send(watermarked_msg)
-            await ctx.send("Test DM sent to you! Copy that DM and run `!catch <text>` to test.")
-        except discord.Forbidden:
-            await ctx.send("Failed to DM you. Please check if your DMs are open!")
+        # --- THE AUTO-INJECTOR ---
+        if "[opsec]" not in announcement.lower():
+            sentences = re.split(r'(?<=[.!?])\s+', announcement)
+            if len(sentences) > 1:
+                mid_point = len(sentences) // 2
+                sentences.insert(mid_point, "[opsec]")
+                announcement = " ".join(sentences)
+            else:
+                announcement = f"{announcement} [opsec]"
+        # -------------------------
+
+        sent, failed = 0, 0
+        
+        # --- LOGGING SETUP ---
+        log_buffer = io.StringIO()
+        log_buffer.write(f"--- TEST BROADCAST LOG ---\n")
+        log_buffer.write(f"Target Members: {', '.join([m.name for m in members])}\n")
+        log_buffer.write(f"Base Message: {announcement}\n")
+        log_buffer.write(f"--------------------------\n\n")
+
+        for member in members:
+            if member.bot:
+                continue
+
+            unique_signoff = generate_signoff(member.id)
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            full_msg = encode_watermark(visible_text, member.id)
+
+            try:
+                await member.send(full_msg)
+                sent += 1
+                # Log successful send
+                log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
+            except discord.Forbidden:
+                failed += 1
+                # Log failed send
+                log_buffer.write(f"FAILED: {member.name} (ID: {member.id}) - DMs are disabled.\n\n")
+
+        # --- SENDING THE LOG FILE ---
+        log_channel_id = 1527938722987900978
+        log_channel = ctx.bot.get_channel(log_channel_id)
+        
+        if log_channel:
+            # Rewind the virtual file so Discord can read it
+            log_buffer.seek(0)
+            file = discord.File(fp=log_buffer, filename="testbroadcast_log.txt")
+            await log_channel.send(
+                content=f"**New Test Broadcast Report**\nInitiated by: {ctx.author.mention}\nSuccessfully sent to **{sent}** member(s). Failed: **{failed}**.", 
+                file=file
+            )
+        else:
+            await ctx.send(f"⚠️ **Warning:** Could not find log channel `{log_channel_id}`. Make sure the bot has 'View Channel' and 'Send Messages' permissions there.")
+            
+        log_buffer.close()
+
+        await ctx.send(f"Test complete! Sent to {sent} member(s). Check your log channel.")
 
     @commands.command(name="broadcast")
     @commands.has_permissions(administrator=True)
-    async def broadcast(self, ctx, *, announcement: str):
-        await ctx.send("Processing announcement and sending uniquely blended messages...")
+    async def broadcast(self, ctx, role: discord.Role, *, announcement: str):
+        
+        # --- OPSEC SAFEGUARD ---
+        # 1. Block @everyone completely
+        if role.is_default() or role.name == "@everyone":
+            await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
+            return
+            
+        # 2. Whitelist: Only allow specific roles (Edit these to match your server!)
+        allowed_roles = ["NVR Member"] 
+        if role.name not in allowed_roles:
+            await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
+            return
+        # -----------------------
+
+        await ctx.send(f"Processing announcement and sending uniquely blended messages to **{role.name}**...")
         
         # --- THE AUTO-INJECTOR ---
         # If no tag is found, the bot intelligently inserts one in the middle of the text
@@ -101,25 +170,51 @@ class SpyDetector(commands.Cog):
 
         sent, failed = 0, 0
 
-        for member in ctx.guild.members:
+        # --- LOGGING SETUP ---
+        # Create an in-memory text file to store the exact messages
+        log_buffer = io.StringIO()
+        log_buffer.write(f"--- BROADCAST LOG ---\n")
+        log_buffer.write(f"Target Role: {role.name}\n")
+        log_buffer.write(f"Base Message: {announcement}\n")
+        log_buffer.write(f"---------------------\n\n")
+
+        for member in role.members:
             if member.bot:
                 continue
             
             unique_signoff = generate_signoff(member.id)
-            
-            # Replace the tag (whether manual or auto-injected) with the unique filler
-            # re.sub with re.IGNORECASE catches [opsec], [OPSEC], [Opsec], etc.
             visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
-            
             full_msg = encode_watermark(visible_text, member.id)
             
             try:
                 await member.send(full_msg)
                 sent += 1
+                # Log successful send
+                log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
             except discord.Forbidden:
                 failed += 1
+                # Log failed send (User has DMs turned off)
+                log_buffer.write(f"FAILED: {member.name} (ID: {member.id}) - DMs are disabled.\n\n")
 
-        await ctx.send(f"Broadcast complete! Sent to {sent} members.")
+        # --- SENDING THE LOG FILE ---
+        log_channel_id = 1527938722987900978
+        log_channel = ctx.bot.get_channel(log_channel_id)
+        
+        if log_channel:
+            # Rewind the virtual file to the beginning so Discord can read it
+            log_buffer.seek(0)
+            file = discord.File(fp=log_buffer, filename=f"broadcast_log_{role.name}.txt")
+            await log_channel.send(
+                content=f"**New Broadcast Report**\nInitiated by: {ctx.author.mention}\nSuccessfully sent to **{sent}** members. Failed: **{failed}**.", 
+                file=file
+            )
+        else:
+            await ctx.send(f"⚠️ **Warning:** Could not find log channel `{log_channel_id}`. Make sure the bot has 'View Channel' and 'Send Messages' permissions there.")
+            
+        # Clean up the virtual file
+        log_buffer.close()
+
+        await ctx.send(f"Broadcast complete! Sent to {sent} members of {role.name}. A full report has been sent to your log channel.")
 
 
     @commands.command(name="catchscreenshot")
