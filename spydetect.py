@@ -608,47 +608,21 @@ class SpyDetector(commands.Cog):
     @commands.command(name="catchscreenshot", aliases=["catch"])
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        await ctx.send("Fetching full server member list & searching all broadcast databases...")
+        await ctx.send("🔍 Scanning leaked text for invisible security watermarks...")
+
+        # Extract the exact user ID hidden inside the zero-width Unicode characters
+        leaker_id = decode_watermark(screenshot_text)
         
-        if not ctx.guild.chunked:
-            await ctx.guild.chunk()
+        if leaker_id:
+            leaker = ctx.guild.get_member(leaker_id)
+            if leaker:
+                await ctx.send(f"🚨 **LEAKER IDENTIFIED!**\nThe invisible watermark proves this message belongs to: **{leaker.mention}** (`{leaker.name}`, ID: `{leaker.id}`)")
+                return
+            else:
+                await ctx.send(f"🚨 **WATERMARK FOUND, BUT...**\nFound user ID `{leaker_id}`, but that user is no longer in this server.")
+                return
 
-        def clean_text(raw_text: str) -> str:
-            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
-            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
-            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
-            return " ".join(cleaned.split())
-
-        target_cleaned = clean_text(screenshot_text)
-        matches = []
-
-        for member in ctx.guild.members:
-            if member.bot:
-                continue
-
-            # Generate the 3 randomized phrases for this user across all modes
-            tactical_phrases = generate_signoff_phrases(member.id, mode="tactical")
-            casual_phrases = generate_signoff_phrases(member.id, mode="casual")
-            row_phrases = generate_signoff_phrases(member.id, mode="row")
-
-            # Clean each phrase for accurate comparison
-            clean_tactical = [clean_text(p) for p in tactical_phrases]
-            clean_casual = [clean_text(p) for p in casual_phrases]
-            clean_row = [clean_text(p) for p in row_phrases]
-
-            # Check if ALL 3 phrases of any mode appear anywhere in the leaked screenshot text
-            has_tactical = all(p in target_cleaned for p in clean_tactical)
-            has_casual = all(p in target_cleaned for p in clean_casual)
-            has_row = all(p in target_cleaned for p in clean_row)
-
-            if has_tactical or has_casual or has_row:
-                matches.append(member)
-
-        if matches:
-            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
-            await ctx.send(f"**MATCH FOUND!**\nThe leaked text belongs to:\n{found_users}")
-        else:
-            await ctx.send("No exact match found. Double-check for typos or missing words.")
+        await ctx.send("❌ No valid security watermark found in this text. Make sure you copied the text directly from the screenshot or message content.")
             
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
