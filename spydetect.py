@@ -1,5 +1,6 @@
 import discord
 from discord.ext import commands
+import hashlib
 
 # 1. Set up default intents
 intents = discord.Intents.default()
