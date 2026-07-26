@@ -455,6 +455,17 @@ class SpyDetector(commands.Cog):
                 await member.send(full_msg)
                 sent += 1
                 log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
+
+                # --- 30-SECOND AUTO-DELETE TIMER ---
+                async def delete_after_delay(message, delay):
+                    await asyncio.sleep(delay)
+                    try:
+                        await message.delete()
+                    except discord.HTTPException:
+                        pass # Fails silently if already deleted
+
+                ctx.bot.loop.create_task(delete_after_delay(sent_msg, 30))
+                # -----------------------------------
             except discord.Forbidden:
                 failed += 1
 
