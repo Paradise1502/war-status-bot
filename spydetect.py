@@ -3,6 +3,7 @@ from discord.ext import commands
 import hashlib
 import re
 import io
+import asyncio
 
 # 1. Set up default intents
 intents = discord.Intents.default()
