@@ -284,28 +284,31 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # 1. Call the new function to get a list of 3 random phrases
-            phrases = generate_signoff_phrases(member.id, mode="tactical") # Change mode to "casual" or "row" depending on the command
+            # 1. Get 3 random phrases
+            phrases = generate_signoff_phrases(member.id, mode="tactical") # (Change mode per command: tactical, casual, or row)
             
-            # 2. Scatter the 3 phrases into the message
+            # 2. Clean Scatter Injector with proper spacing
             current_announcement = announcement
-            if "[opsec1]" not in current_announcement.lower():
-                parts = re.split(r'(?<=[.!?])(\s+)', current_announcement)
+            
+            # If user didn't manually provide custom tags, automatically scatter them
+            if "[opsec]" not in current_announcement.lower() and "[opsec1]" not in current_announcement.lower():
+                parts = re.split(r'(?<=[.!?])\s*', current_announcement)
                 if len(parts) >= 6:
                     p1 = len(parts) // 4
                     p2 = (len(parts) // 4) * 2
                     p3 = (len(parts) // 4) * 3
                     
-                    parts.insert(p1, f" {phrases[0]}")
-                    parts.insert(p2 + 1, f" {phrases[1]}")
-                    parts.insert(p3 + 2, f" {phrases[2]}")
+                    parts[p1] = f"{parts[p1]} {phrases[0]}"
+                    parts[p2] = f"{parts[p2]} {phrases[1]}"
+                    parts[p3] = f"{parts[p3]} {phrases[2]}"
                     visible_text = "".join(parts)
                 else:
-                    visible_text = f"{current_announcement} {phrases[0]} {phrases[1]} {phrases[2]}"
+                    # Fallback for short text: clean trailing space and append nicely
+                    visible_text = f"{current_announcement.strip()} {phrases[0]} {phrases[1]} {phrases[2]}"
             else:
-                visible_text = current_announcement.replace("[opsec1]", phrases[0])
-                visible_text = visible_text.replace("[opsec2]", phrases[1])
-                visible_text = visible_text.replace("[opsec3]", phrases[2])
+                # Manual replacement support if tags are used
+                visible_text = current_announcement.replace("[opsec1]", phrases[0]).replace("[opsec2]", phrases[1]).replace("[opsec3]", phrases[2])
+                visible_text = visible_text.replace("[opsec]", f"{phrases[0]} {phrases[1]} {phrases[2]}")
 
             full_msg = encode_watermark(visible_text, member.id)
 
