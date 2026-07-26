@@ -4,6 +4,7 @@ import hashlib
 import re
 import io
 import asyncio
+import random
 
 # 1. Set up default intents
 intents = discord.Intents.default()
@@ -148,13 +149,8 @@ ROW_GROUPS = [
     ]
 ]
 
-def generate_signoff(user_id: int, mode: str = "tactical") -> str:
-    """Generates a secure 3-phrase string based on the chosen mode."""
-    selected_words = []
-    
-    hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
-    deterministic_num = int(hash_hex, 16)
-    
+def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
+    """Picks 3 completely random phrases from the chosen mode's dictionary."""
     if mode == "tactical":
         groups = TACTICAL_GROUPS
     elif mode == "casual":
@@ -162,13 +158,12 @@ def generate_signoff(user_id: int, mode: str = "tactical") -> str:
     elif mode == "row":
         groups = ROW_GROUPS
     else:
-        groups = TACTICAL_GROUPS # Fallback
+        groups = TACTICAL_GROUPS
     
-    for i, group in enumerate(groups):
-        index = (deterministic_num >> (i * 8)) % len(group)
-        selected_words.append(group[index])
+    # Pick a random phrase from each of the 3 groups
+    selected_words = [random.choice(group) for group in groups]
         
-    return f"{selected_words[0]} {selected_words[1]} {selected_words[2]}"
+    return selected_words # Returns a list of 3 random phrases
 
 def generate_visual_variation(user_id: int) -> str:
     selected_words = []
