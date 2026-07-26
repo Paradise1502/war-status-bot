@@ -75,6 +75,9 @@ class SpyDetector(commands.Cog):
             
             # Step B: Attach invisible unicode watermark (for text copies)
             full_msg = encode_watermark(visible_text, member.id)
+
+            # Add this inside the loop in broadcast():
+            print(f"[OPSEC LOG] DM to {member.name} ({member.id}): {visible_text}")
             
             try:
                 await member.send(full_msg)
@@ -85,33 +88,41 @@ class SpyDetector(commands.Cog):
         await ctx.send(f"Broadcast complete! Sent to {sent} members.")
 
     # 4. Command to find a spy from a screenshot (using visual variations)
-    @commands.command(name="catchscreenshot")
+    # 5. Targeted test command (Sends to mentioned users only)
+    @commands.command(name="testbroadcast")
     @commands.has_permissions(administrator=True)
-    async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        """Matches text from a leaked screenshot against every member's generated variation."""
-        await ctx.send("Searching through server members...")
-        
-        matches = []
-        
-        # Clean up whitespace/casing for an easier match
-        target_text = screenshot_text.strip().lower()
+    async def testbroadcast(self, ctx, members: commands.Greedy[discord.Member]):
+        """Sends custom watermarked/varied DMs only to mentioned members.
+        Usage: !testbroadcast @Officer1 @Officer2
+        """
+        if not members:
+            await ctx.send("Please mention at least one member to test with! Example: `!testbroadcast @User1 @User2`")
+            return
 
-        for member in ctx.guild.members:
+        await ctx.send(f"Sending test messages to {len(members)} member(s)...")
+        sent, failed = 0, 0
+
+        for member in members:
             if member.bot:
                 continue
 
-            # Re-generate what this specific member's announcement text looked like
-            member_expected_text = generate_visual_variation(member.id).strip().lower()
+            # Step A: Generate unique visible text (for screenshots)
+            visible_text = generate_visual_variation(member.id)
 
-            # Check if the screenshot matches this member's text
-            if member_expected_text == target_text:
-                matches.append(member)
+            # Step B: Attach invisible unicode watermark (for text copies)
+            full_msg = encode_watermark(visible_text, member.id)
 
-        if matches:
-            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
-            await ctx.send(f"**MATCH FOUND!**\nThe leaked screenshot belongs to:\n{found_users}")
-        else:
-            await ctx.send("No exact match found. Make sure you typed/copied the screenshot text exactly as shown.")
+            # Log to Railway console
+            print(f"[TEST OPSEC LOG] DM to {member.name} ({member.id}): {visible_text}")
+
+            try:
+                await member.send(full_msg)
+                sent += 1
+            except discord.Forbidden:
+                failed += 1
+                await ctx.send(f"⚠️ Could not DM `{member.name}` (DMs are closed).")
+
+        await ctx.send(f"Test complete! Sent to {sent} member(s).")
     
     # 2. Command to catch the spy from leaked text
     @commands.command(name="catch")
