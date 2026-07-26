@@ -46,6 +46,45 @@ CASUAL_GROUPS = [
     ]
 ]
 
+ROW_GROUPS = [
+    [
+        "ready",
+        "prepared",
+        "focused",
+        "active",
+        "online",
+        "early",
+        "available",
+        "organized",
+        "alert",
+        "steady"
+    ],
+    [
+        "before",
+        "during",
+        "after",
+        "for",
+        "with",
+        "around",
+        "near",
+        "during",
+        "through",
+        "until"
+    ],
+    [
+        "battle",
+        "war",
+        "match",
+        "push",
+        "operation",
+        "fight",
+        "event",
+        "attack",
+        "phase",
+        "call"
+    ]
+]
+
 def generate_signoff(user_id: int, mode: str = "tactical") -> str:
     """Generates a secure 3-phrase string based on the chosen mode."""
     selected_words = []
@@ -53,14 +92,19 @@ def generate_signoff(user_id: int, mode: str = "tactical") -> str:
     hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
     deterministic_num = int(hash_hex, 16)
     
-    groups = TACTICAL_GROUPS if mode == "tactical" else CASUAL_GROUPS
+    if mode == "tactical":
+        groups = TACTICAL_GROUPS
+    elif mode == "casual":
+        groups = CASUAL_GROUPS
+    elif mode == "row":
+        groups = ROW_GROUPS
+    else:
+        groups = TACTICAL_GROUPS # Fallback
     
     for i, group in enumerate(groups):
-        # Shift bits safely to ensure independent selections
         index = (deterministic_num >> (i * 8)) % len(group)
         selected_words.append(group[index])
         
-    # Now only returns 3 sentences!
     return f"{selected_words[0]} {selected_words[1]} {selected_words[2]}"
 
 def generate_visual_variation(user_id: int) -> str:
@@ -244,6 +288,124 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Broadcast complete! Sent to {sent} members of {role.name}. A full report has been sent to your log channel.")
 
+    @commands.command(name="rowbroadcast")
+    @commands.has_permissions(administrator=True)
+    async def rowbroadcast(self, ctx, role: discord.Role, *, announcement: str):
+        if role.is_default() or role.name == "@everyone":
+            await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
+            return
+            
+        allowed_roles = ["Main RoW Team", "RoW Team 2"] 
+        if role.name not in allowed_roles:
+            await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
+            return
+
+        await ctx.send(f"Processing row announcement and sending uniquely blended messages to **{role.name}**...")
+        
+        # --- UPDATED AUTO-INJECTOR ---
+        if "[opsec]" not in announcement.lower():
+            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
+            if len(parts) > 2:
+                mid_point = (len(parts) // 4) * 2 
+                parts.insert(mid_point + 1, " [opsec]")
+                announcement = "".join(parts)
+            else:
+                announcement = f"{announcement} [opsec]"
+        # -----------------------------
+
+        sent, failed = 0, 0
+        log_buffer = io.StringIO()
+        log_buffer.write(f"--- ROW BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
+        
+        for member in role.members:
+            if member.bot:
+                continue
+            
+            # Switch to ROW mode
+            unique_signoff = generate_signoff(member.id, mode="row")
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            full_msg = encode_watermark(visible_text, member.id)
+
+            # --- FAILSAFE ---
+            if len(full_msg) > 2000:
+                await ctx.send(f"🚨 **ERROR:** Announcement too long! Reached **{len(full_msg)}/2000** characters for {member.name}. Please shorten your text and try again.")
+                return 
+            # ----------------
+            
+            try:
+                await member.send(full_msg)
+                sent += 1
+                log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
+            except discord.Forbidden:
+                failed += 1
+                log_buffer.write(f"FAILED: {member.name} (ID: {member.id}) - DMs disabled.\n\n")
+
+        log_channel_id = 1527938722987900978
+        log_channel = ctx.bot.get_channel(log_channel_id)
+        if log_channel:
+            log_buffer.seek(0)
+            file = discord.File(fp=log_buffer, filename=f"row_log_{role.name}.txt")
+            await log_channel.send(content=f"**New Row Broadcast Report**\nInitiated by: {ctx.author.mention}\nSuccessfully sent to **{sent}** members. Failed: **{failed}**.", file=file)
+        
+        log_buffer.close()
+        await ctx.send(f"Row broadcast complete! Sent to {sent} members.")
+
+    @commands.command(name="testrowbroadcast")
+    @commands.has_permissions(administrator=True)
+    async def testrowbroadcast(self, ctx, members: commands.Greedy[discord.Member], *, announcement: str):
+        if not members:
+            await ctx.send("Please mention at least one member!")
+            return
+
+        await ctx.send(f"Processing test row announcement...")
+        
+        # --- UPDATED AUTO-INJECTOR ---
+        if "[opsec]" not in announcement.lower():
+            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
+            if len(parts) > 2:
+                mid_point = (len(parts) // 4) * 2 
+                parts.insert(mid_point + 1, " [opsec]")
+                announcement = "".join(parts)
+            else:
+                announcement = f"{announcement} [opsec]"
+        # -----------------------------
+
+        sent, failed = 0, 0
+        log_buffer = io.StringIO()
+        log_buffer.write(f"--- TEST ROW LOG ---\nTarget Members: {', '.join([m.name for m in members])}\nBase Message: {announcement}\n-----------------------\n\n")
+
+        for member in members:
+            if member.bot:
+                continue
+
+            # Switch to ROW mode
+            unique_signoff = generate_signoff(member.id, mode="row")
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            full_msg = encode_watermark(visible_text, member.id)
+
+            # --- FAILSAFE ---
+            if len(full_msg) > 2000:
+                await ctx.send(f"🚨 **ERROR:** Announcement too long! Reached **{len(full_msg)}/2000** characters for {member.name}. Please shorten your text and try again.")
+                return 
+            # ----------------
+
+            try:
+                await member.send(full_msg)
+                sent += 1
+                log_buffer.write(f"Sent to: {member.name} (ID: {member.id})\nText: {visible_text}\n\n")
+            except discord.Forbidden:
+                failed += 1
+
+        log_channel_id = 1527938722987900978
+        log_channel = ctx.bot.get_channel(log_channel_id)
+        if log_channel:
+            log_buffer.seek(0)
+            file = discord.File(fp=log_buffer, filename="test_row_log.txt")
+            await log_channel.send(content=f"**New Test Row Report**\nInitiated by: {ctx.author.mention}", file=file)
+            
+        log_buffer.close()
+        await ctx.send(f"Test complete! Sent to {sent} member(s). Check your log channel.")
+
     @commands.command(name="socialbroadcast")
     @commands.has_permissions(administrator=True)
     async def socialbroadcast(self, ctx, role: discord.Role, *, announcement: str):
@@ -251,7 +413,7 @@ class SpyDetector(commands.Cog):
             await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
             return
             
-        allowed_roles = ["Fighters", "CoreTeam", "Officers", "Alliance"] 
+        allowed_roles = ["NVR Member"] 
         if role.name not in allowed_roles:
             await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
             return
@@ -376,12 +538,13 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # Generate both 3-phrase fingerprints for the user
+            # Inside your catchscreenshot loop:
             expected_tactical = clean_text(generate_signoff(member.id, mode="tactical"))
             expected_casual = clean_text(generate_signoff(member.id, mode="casual"))
+            expected_row = clean_text(generate_signoff(member.id, mode="row"))
 
-            # Check if EITHER fingerprint is found in the pasted text
-            if expected_tactical in target_cleaned or expected_casual in target_cleaned:
+            # Check if ANY of the three fingerprints are found
+            if expected_tactical in target_cleaned or expected_casual in target_cleaned or expected_row in target_cleaned:
                 matches.append(member)
 
         if matches:
