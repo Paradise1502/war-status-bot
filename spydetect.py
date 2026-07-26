@@ -4,7 +4,6 @@ import hashlib
 import re
 import io
 import asyncio
-import random
 
 # 1. Set up default intents
 intents = discord.Intents.default()
@@ -149,8 +148,13 @@ ROW_GROUPS = [
     ]
 ]
 
-def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
-    """Generates 3 unique, deterministic phrases based on the user's ID."""
+def generate_signoff(user_id: int, mode: str = "tactical") -> str:
+    """Generates a secure 3-phrase string based on the chosen mode."""
+    selected_words = []
+    
+    hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
+    deterministic_num = int(hash_hex, 16)
+    
     if mode == "tactical":
         groups = TACTICAL_GROUPS
     elif mode == "casual":
@@ -158,17 +162,13 @@ def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
     elif mode == "row":
         groups = ROW_GROUPS
     else:
-        groups = TACTICAL_GROUPS
+        groups = TACTICAL_GROUPS # Fallback
     
-    hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
-    deterministic_num = int(hash_hex, 16)
-    
-    selected_words = []
     for i, group in enumerate(groups):
         index = (deterministic_num >> (i * 8)) % len(group)
         selected_words.append(group[index])
         
-    return selected_words
+    return f"{selected_words[0]} {selected_words[1]} {selected_words[2]}"
 
 def generate_visual_variation(user_id: int) -> str:
     selected_words = []
@@ -289,32 +289,8 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # 1. Get 3 random phrases
-            phrases = generate_signoff_phrases(member.id, mode="tactical") # (Change mode per command: tactical, casual, or row)
-            
-            # 2. Clean Scatter Injector with proper spacing
-            current_announcement = announcement
-            
-            # If user didn't manually provide custom tags, automatically scatter them
-            if "[opsec]" not in current_announcement.lower() and "[opsec1]" not in current_announcement.lower():
-                parts = re.split(r'(?<=[.!?])\s*', current_announcement)
-                if len(parts) >= 6:
-                    p1 = len(parts) // 4
-                    p2 = (len(parts) // 4) * 2
-                    p3 = (len(parts) // 4) * 3
-                    
-                    parts[p1] = f"{parts[p1]} {phrases[0]}"
-                    parts[p2] = f"{parts[p2]} {phrases[1]}"
-                    parts[p3] = f"{parts[p3]} {phrases[2]}"
-                    visible_text = "".join(parts)
-                else:
-                    # Fallback for short text: clean trailing space and append nicely
-                    visible_text = f"{current_announcement.strip()} {phrases[0]} {phrases[1]} {phrases[2]}"
-            else:
-                # Manual replacement support if tags are used
-                visible_text = current_announcement.replace("[opsec1]", phrases[0]).replace("[opsec2]", phrases[1]).replace("[opsec3]", phrases[2])
-                visible_text = visible_text.replace("[opsec]", f"{phrases[0]} {phrases[1]} {phrases[2]}")
-
+            unique_signoff = generate_signoff(member.id, mode="tactical")
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
@@ -607,13 +583,12 @@ class SpyDetector(commands.Cog):
     @commands.command(name="catchscreenshot", aliases=["catch"])
     @commands.has_permissions(administrator=True)
     async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        await ctx.send("🔍 Scanning OCR screenshot text across all member databases...")
+        await ctx.send("Fetching full server member list & searching both war and social databases...")
         
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
 
         def clean_text(raw_text: str) -> str:
-            # Strip zero-width characters since OCR won't have them anyway
             cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
             cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
             cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
@@ -626,28 +601,20 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
 
-            # Generate the 3 unique deterministic phrases for this specific member ID
-            tactical_phrases = generate_signoff_phrases(member.id, mode="tactical")
-            casual_phrases = generate_signoff_phrases(member.id, mode="casual")
-            row_phrases = generate_signoff_phrases(member.id, mode="row")
+            # Inside your catchscreenshot loop:
+            expected_tactical = clean_text(generate_signoff(member.id, mode="tactical"))
+            expected_casual = clean_text(generate_signoff(member.id, mode="casual"))
+            expected_row = clean_text(generate_signoff(member.id, mode="row"))
 
-            clean_tactical = [clean_text(p) for p in tactical_phrases]
-            clean_casual = [clean_text(p) for p in casual_phrases]
-            clean_row = [clean_text(p) for p in row_phrases]
-
-            # A user is ONLY matched if ALL 3 of their unique deterministic phrases appear in the OCR text
-            has_tactical = all(p in target_cleaned for p in clean_tactical)
-            has_casual = all(p in target_cleaned for p in clean_casual)
-            has_row = all(p in target_cleaned for p in clean_row)
-
-            if has_tactical or has_casual or has_row:
+            # Check if ANY of the three fingerprints are found
+            if expected_tactical in target_cleaned or expected_casual in target_cleaned or expected_row in target_cleaned:
                 matches.append(member)
 
         if matches:
             found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
-            await ctx.send(f"🚨 **LEAKER IDENTIFIED VIA OCR!**\nThe screenshot text belongs to:\n{found_users}")
+            await ctx.send(f"**MATCH FOUND!**\nThe leaked text belongs to:\n{found_users}")
         else:
-            await ctx.send("❌ No matching fingerprint found. Check if the OCR tool missed any words or punctuation.")
+            await ctx.send("No exact match found. Double-check for typos or missing words.")
             
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
