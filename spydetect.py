@@ -243,14 +243,19 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing social announcement and sending uniquely blended messages to **{role.name}**...")
         
+        # --- UPDATED AUTO-INJECTOR ---
         if "[opsec]" not in announcement.lower():
-            sentences = re.split(r'(?<=[.!?])\s+', announcement)
-            if len(sentences) > 1:
-                mid_point = len(sentences) // 2
-                sentences.insert(mid_point, "[opsec]")
-                announcement = " ".join(sentences)
+            # Splits sentences but SAVES your exact spacing and line breaks
+            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
+            
+            if len(parts) > 2:
+                # Finds the middle of the text and injects the tag safely
+                mid_point = (len(parts) // 4) * 2 
+                parts.insert(mid_point + 1, " [opsec]")
+                announcement = "".join(parts)
             else:
                 announcement = f"{announcement} [opsec]"
+        # -----------------------------
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -292,15 +297,19 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing test social announcement...")
         
+        # --- UPDATED AUTO-INJECTOR ---
         if "[opsec]" not in announcement.lower():
-            sentences = re.split(r'(?<=[.!?])\s+', announcement)
-            if len(sentences) > 1:
-                mid_point = len(sentences) // 2
-                sentences.insert(mid_point, "[opsec]")
-                announcement = " ".join(sentences)
+            # Splits sentences but SAVES your exact spacing and line breaks
+            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
+            
+            if len(parts) > 2:
+                # Finds the middle of the text and injects the tag safely
+                mid_point = (len(parts) // 4) * 2 
+                parts.insert(mid_point + 1, " [opsec]")
+                announcement = "".join(parts)
             else:
                 announcement = f"{announcement} [opsec]"
-
+        # -----------------------------
         sent, failed = 0, 0
         log_buffer = io.StringIO()
         log_buffer.write(f"--- TEST SOCIAL LOG ---\nTarget Members: {', '.join([m.name for m in members])}\nBase Message: {announcement}\n-----------------------\n\n")
