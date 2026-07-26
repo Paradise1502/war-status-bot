@@ -26,9 +26,24 @@ TACTICAL_GROUPS = [
 # --- CASUAL POOL (For Social) - 8,000 combinations ---
 # Designed to fit universally into any appreciation, social, or general update message.
 CASUAL_GROUPS = [
-    ["Glad to have you here.", "This is a great team.", "Appreciate everyone.", "We have a solid group.", "Love the community.", "Thanks for being around.", "You all are awesome.", "Proud of this alliance.", "Great vibes lately.", "Thanks for the support.", "We are doing well.", "Love the energy here.", "Such a good group.", "Appreciate the activity.", "We have the best members.", "Thanks for reading.", "You guys rock.", "Always good to see everyone.", "Thanks for everything.", "Love this crew."],
-    ["Keep up the good work.", "Stay awesome.", "Hope you are all doing well.", "Keep the positive vibes.", "Wishing you the best.", "Stay great.", "Hope everyone is having a good week.", "Keep it up.", "Stay amazing.", "Hope you're all having fun.", "Keep enjoying the game.", "Stay positive.", "Hope you have a great day.", "Keep being awesome.", "Stay cool.", "Hope all is well.", "Keep smiling.", "Stay happy.", "Hope you are all good.", "Keep up the great energy."],
-    ["See you in chat.", "Catch you all later.", "Take care.", "Have a good one.", "See you around.", "Talk to you soon.", "Catch you in VC.", "Have a great day.", "See you all in game.", "Take it easy.", "Chat with you later.", "Have a good week.", "See you on Discord.", "Catch you next time.", "Have a good weekend.", "Talk soon.", "See you guys later.", "Take care of yourselves.", "Catch you around.", "Have fun out there."]
+    [
+        "Stay active", "Keep going", "Good work", "Stay strong", "Stay ready",
+        "Keep pushing", "Stay sharp", "Well done", "Keep grinding", "Great job",
+        "Nice work", "Stay focused", "Keep improving", "Stay motivated", "Keep fighting",
+        "Stay united", "Good luck", "Keep winning", "Stay awesome", "Much appreciated"
+    ],
+    [
+        "Thanks everyone", "Much love", "Stay safe", "Take care", "See everyone",
+        "Catch everyone", "Talk soon", "Until later", "Enjoy yourselves", "Happy gaming",
+        "Keep smiling", "Stay positive", "Good vibes", "Team first", "Always together",
+        "Strong alliance", "Keep growing", "Great energy", "Looking forward", "See ya"
+    ],
+    [
+        "Cheers everyone", "Stay tuned", "More soon", "Next update", "Keep checking",
+        "See Discord", "Join voice", "Stay online", "Until tomorrow", "Next event",
+        "See around", "Thanks again", "Have fun", "Take easy", "Stay awesome",
+        "Keep connected", "Victory awaits", "Never rivaled", "See later"
+    ]
 ]
 
 def generate_signoff(user_id: int, mode: str = "tactical") -> str:
