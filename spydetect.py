@@ -150,7 +150,7 @@ ROW_GROUPS = [
 ]
 
 def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
-    """Picks 3 completely random phrases from the chosen mode's dictionary."""
+    """Generates 3 unique, deterministic phrases based on the user's ID so tracking is 100% accurate."""
     if mode == "tactical":
         groups = TACTICAL_GROUPS
     elif mode == "casual":
@@ -160,10 +160,16 @@ def generate_signoff_phrases(user_id: int, mode: str = "tactical") -> list:
     else:
         groups = TACTICAL_GROUPS
     
-    # Pick a random phrase from each of the 3 groups
-    selected_words = [random.choice(group) for group in groups]
+    # Use the user's ID hash to deterministically select 3 phrases
+    hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
+    deterministic_num = int(hash_hex, 16)
+    
+    selected_words = []
+    for i, group in enumerate(groups):
+        index = (deterministic_num >> (i * 8)) % len(group)
+        selected_words.append(group[index])
         
-    return selected_words # Returns a list of 3 random phrases
+    return selected_words
 
 def generate_visual_variation(user_id: int) -> str:
     selected_words = []
