@@ -86,16 +86,19 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing test announcement and sending to {len(members)} member(s)...")
         
-        # --- THE AUTO-INJECTOR ---
+        # --- UPDATED AUTO-INJECTOR ---
         if "[opsec]" not in announcement.lower():
-            sentences = re.split(r'(?<=[.!?])\s+', announcement)
-            if len(sentences) > 1:
-                mid_point = len(sentences) // 2
-                sentences.insert(mid_point, "[opsec]")
-                announcement = " ".join(sentences)
+            # Splits sentences but SAVES your exact spacing and line breaks
+            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
+            
+            if len(parts) > 2:
+                # Finds the middle of the text and injects the tag safely
+                mid_point = (len(parts) // 4) * 2 
+                parts.insert(mid_point + 1, " [opsec]")
+                announcement = "".join(parts)
             else:
                 announcement = f"{announcement} [opsec]"
-        # -------------------------
+        # -----------------------------
 
         sent, failed = 0, 0
         
@@ -164,17 +167,17 @@ class SpyDetector(commands.Cog):
         
         # --- THE AUTO-INJECTOR ---
         # If no tag is found, the bot intelligently inserts one in the middle of the text
+        # --- UPDATED AUTO-INJECTOR ---
         if "[opsec]" not in announcement.lower():
-            # Splits the text into a list of sentences based on punctuation (. ! ?)
-            sentences = re.split(r'(?<=[.!?])\s+', announcement)
+            # Splits sentences but SAVES your exact spacing and line breaks
+            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
             
-            if len(sentences) > 1:
-                # Find the middle of the paragraph and insert the tag
-                mid_point = len(sentences) // 2
-                sentences.insert(mid_point, "[opsec]")
-                announcement = " ".join(sentences)
+            if len(parts) > 2:
+                # Finds the middle of the text and injects the tag safely
+                mid_point = (len(parts) // 4) * 2 
+                parts.insert(mid_point + 1, " [opsec]")
+                announcement = "".join(parts)
             else:
-                # If the announcement is literally just one sentence, append it to the end
                 announcement = f"{announcement} [opsec]"
         # -------------------------
 
