@@ -212,8 +212,10 @@ async def totaldeads(ctx, *args):
 
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     # Defaults
@@ -343,8 +345,10 @@ async def totaldeads(ctx, *args):
 async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
     try:
         season = season.lower()
@@ -444,8 +448,10 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 async def topmana(ctx, *args):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     # Defaults
@@ -549,8 +555,10 @@ async def topmana(ctx, *args):
 async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     try:
@@ -713,8 +721,10 @@ async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 async def topkills(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     try:
@@ -802,8 +812,10 @@ async def lowdeads(ctx, *args):
     """
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     # Defaults
@@ -968,10 +980,11 @@ async def lowmerits(ctx, *args):
     """
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
-
     # Defaults
     top_n = 10
     season = DEFAULT_SEASON
@@ -1119,8 +1132,10 @@ async def allmana(ctx, season: str = DEFAULT_SEASON):
     """Shows the total mana gathered by the entire alliance and its dollar value."""
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
     try:
         season = season.lower()
@@ -1218,8 +1233,10 @@ async def topdeads(ctx, *args):
     """
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     # Defaults
@@ -1809,8 +1826,10 @@ async def matchups2(ctx, season: str = "test"):
 async def matchups(ctx, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
     try:
         season = season.lower()
@@ -2011,8 +2030,10 @@ async def on_ready():
 async def commands(ctx):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     help_text = """
