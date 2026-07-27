@@ -1378,8 +1378,10 @@ async def topdeads(ctx, *args):
 async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         
-        if ctx.channel.id != ALLOWED_COMMAND_CHANNEL_ID:
-            await ctx.send(f"❌ Commands are only allowed in <#{ALLOWED_COMMAND_CHANNEL_ID}>.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
     try:
         season = season.lower()
