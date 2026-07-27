@@ -69,7 +69,7 @@ async def global_vacation_check(ctx):
 CONFIRM_CHANNEL_ID = 1527938722987900978  # ID of the channel with the message + reactions
 WAR_CHANNEL_ID = 1369071691111600168  # ⬅️ replace with your war channel ID
 REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
-ALLOWED_COMMAND_CHANNEL_ID = 1378735765827358791
+ALLOWED_COMMAND_CHANNEL_ID = [1378735765827358791, 1383515877793595435]
 
 # Emoji → new channel name mapping
 WAR_CHANNEL_REACTIONS = {
