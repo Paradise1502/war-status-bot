@@ -119,7 +119,7 @@ class OfficerPanel(View):
 
         current_time = int(time.time())
         if self.selected_alliance not in self.db["cooldowns"]:
-          await self.db["cooldowns"][self.selected_alliance] = {}
+            self.db["cooldowns"][self.selected_alliance] = {}
         
         # Store previous value for Undo tracking
         previous_val = self.db["cooldowns"][self.selected_alliance].get(action_key, 0)
