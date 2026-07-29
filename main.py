@@ -1398,16 +1398,16 @@ async def farmcheck(ctx, farm_id: str):
             return
 
         try:
-            # 2. Validate Season & Get Sheet Name
+            # 2. Get the NVR Farms Sheet Name
             sheet_name = SEASON_SHEETS.get("farms")
             if not sheet_name:
-                await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+                await ctx.send("❌ Could not find the 'farms' key configured in `SEASON_SHEETS`.")
                 return
 
             # 3. Fetch Data Asynchronously
             tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
             if not tabs:
-                await ctx.send("❌ No worksheets found in the specified season sheet.")
+                await ctx.send("❌ No worksheets found in the NVR Farms sheet.")
                 return
 
             latest = tabs[-1]
@@ -1418,16 +1418,16 @@ async def farmcheck(ctx, farm_id: str):
 
             headers = [str(h).strip().lower() for h in data[0]]
 
-            # 4. Find Column Indexes ("ID" and "Whos Farm")
+            # 4. Find Column Indexes ("ID" in Col A, "Whos Farm" in Col B)
             try:
                 id_idx = headers.index("id")
             except ValueError:
-                id_idx = 0  # Default to Column A if header string differs
+                id_idx = 0  # Fallback to Column A
 
             try:
                 owner_idx = headers.index("whos farm")
             except ValueError:
-                owner_idx = 1  # Default to Column B if header string differs
+                owner_idx = 1  # Fallback to Column B
 
             # 5. Search for the Farm ID in Column A
             search_id = farm_id.strip()
@@ -1442,7 +1442,7 @@ async def farmcheck(ctx, farm_id: str):
             if found_owner is not None:
                 embed = discord.Embed(
                     title="✅ Farm Account Verified",
-                    description=f"This farm ID is registered and verified in our database.",
+                    description="This farm ID is registered and verified in our database.",
                     color=discord.Color.green()
                 )
                 embed.add_field(name="🆔 Farm ID", value=f"`{search_id}`", inline=True)
@@ -1455,7 +1455,8 @@ async def farmcheck(ctx, farm_id: str):
                 )
                 embed.add_field(name="🆔 Searched ID", value=f"`{search_id}`", inline=True)
 
-            embed.set_footer(text=f"📅 Sheet: {latest.title} | Season: {season.upper()}")
+            # Fixed: Footer no longer references 'season'
+            embed.set_footer(text=f"📋 Sheet: {sheet_name} | Tab: {latest.title}")
             await ctx.send(embed=embed)
 
         except Exception as e:
