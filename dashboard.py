@@ -135,7 +135,7 @@ class OfficerPanel(View):
         await self.update_dashboard_message()
 
         # 3. Send the public log to your audit channel
-        log_channel = interaction.guild.get_channel(selfl.LOG_CHANNEL_ID)
+        log_channel = interaction.guild.get_channel(self.LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(f"✅ **{interaction.user.display_name}** triggered **{action_name}** for **{self.selected_alliance}**.")
 
