@@ -23,20 +23,16 @@ ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement ch
 
 # Season sheet mapping
 SEASON_SHEETS = {
-    "hk1": "Call of Dragons - HK1",
-    "hk2": "Call of Dragons - HK2",
-    "hk3": "Call of Dragons - HK3",
     "sos2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
     "sos6": "Call of Dragons - SoS6",
-    "statue": "Activity",
-    "test": "testsheet",
     "sos2_2": "Call of Dragons - SoS2_2",
     "sos4": "Call of Dragons - SoS4",
     "sos3": "NxW - SoS3",
     "sos4": "NxW - SoS4",
     "z2": "NxW - SoS4 - Z2",
     "fz": "NxW - FZ",
+    "farms": "NVR Farms",
 }
 
 DEFAULT_SEASON = "sos4"
@@ -1390,6 +1386,81 @@ async def topdeads(ctx, *args):
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
+
+@bot.command(aliases=['checkfarm', 'farm'])
+async def farmcheck(ctx, farm_id: str, season: str = DEFAULT_SEASON):
+    async with ctx.typing():
+        
+        # 1. Channel Restriction Check
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+            return
+
+        try:
+            # 2. Validate Season & Get Sheet Name
+            season = season.lower()
+            sheet_name = SEASON_SHEETS.get(season)
+            if not sheet_name:
+                await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+                return
+
+            # 3. Fetch Data Asynchronously
+            tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+            if not tabs:
+                await ctx.send("❌ No worksheets found in the specified season sheet.")
+                return
+
+            latest = tabs[-1]
+            data = await asyncio.to_thread(latest.get_all_values)
+            if not data:
+                await ctx.send("❌ The worksheet is empty.")
+                return
+
+            headers = [str(h).strip().lower() for h in data[0]]
+
+            # 4. Find Column Indexes ("ID" and "Whos Farm")
+            try:
+                id_idx = headers.index("id")
+            except ValueError:
+                id_idx = 0  # Default to Column A if header string differs
+
+            try:
+                owner_idx = headers.index("whos farm")
+            except ValueError:
+                owner_idx = 1  # Default to Column B if header string differs
+
+            # 5. Search for the Farm ID in Column A
+            search_id = farm_id.strip()
+            found_owner = None
+
+            for row in data[1:]:
+                if len(row) > id_idx and row[id_idx].strip() == search_id:
+                    found_owner = row[owner_idx].strip() if len(row) > owner_idx else "Unknown Owner"
+                    break
+
+            # 6. Build & Send Embed Response
+            if found_owner is not None:
+                embed = discord.Embed(
+                    title="✅ Farm Account Verified",
+                    description=f"This farm ID is registered and verified in our database.",
+                    color=discord.Color.green()
+                )
+                embed.add_field(name="🆔 Farm ID", value=f"`{search_id}`", inline=True)
+                embed.add_field(name="👤 Belongs To", value=f"**{found_owner or 'Unspecified'}**", inline=True)
+            else:
+                embed = discord.Embed(
+                    title="❌ Farm Account Not Verified",
+                    description=f"No verified farm account found for ID `{search_id}`.",
+                    color=discord.Color.red()
+                )
+                embed.add_field(name="🆔 Searched ID", value=f"`{search_id}`", inline=True)
+
+            embed.set_footer(text=f"📅 Sheet: {latest.title} | Season: {season.upper()}")
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"❌ Error: {e}")
         
 @bot.command(aliases=['stats'])
 async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
