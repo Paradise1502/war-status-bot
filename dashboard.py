@@ -178,13 +178,14 @@ class OfficerPanel(View):
         if log_channel:
             await log_channel.send(f"↩️ **{interaction.user.display_name}** reversed the last **{action_name}** for **{alliance}**.")
 
-    @discord.ui.button(label="🔄 Reset Selected Shell", style=discord.ButtonStyle.danger, custom_id="btn_reset_shell", row=3)
+   @discord.ui.button(label="🔄 Reset Selected Shell", style=discord.ButtonStyle.danger, custom_id="btn_reset_shell", row=3)
     async def btn_reset_shell(self, interaction: discord.Interaction, button: Button):
         if not self.selected_alliance:
             await interaction.response.send_message("❌ Please select an alliance from the dropdown menu first!", ephemeral=True)
             return
 
-        self.db["cooldowns"][self.selected_alliance] = {"bastion": 0, "build_buff": 0, "storm": 0, "fog": 0}
+        # Fix: Completely clear the shell's saved data so the embed defaults back to READY
+        self.db["cooldowns"][self.selected_alliance] = {}
         save_data(self.db)
 
         # Private reply in panel
