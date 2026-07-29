@@ -1388,7 +1388,7 @@ async def topdeads(ctx, *args):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command(aliases=['checkfarm', 'farm'])
-async def farmcheck(ctx, farm_id: str, season: str = farms):
+async def farmcheck(ctx, farm_id: strs):
     async with ctx.typing():
         
         # 1. Channel Restriction Check
@@ -1399,8 +1399,7 @@ async def farmcheck(ctx, farm_id: str, season: str = farms):
 
         try:
             # 2. Validate Season & Get Sheet Name
-            season = season.lower()
-            sheet_name = SEASON_SHEETS.get(season)
+            sheet_name = SEASON_SHEETS.get("farms")
             if not sheet_name:
                 await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
                 return
