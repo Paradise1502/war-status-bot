@@ -110,6 +110,7 @@ class OfficerPanel(View):
                     await msg.edit(embed=generate_dashboard_embed(self.db))
                 except discord.NotFound:
                     pass
+    LOG_CHANNEL_ID = 1527938722987900978
 
     async def handle_action(self, interaction: discord.Interaction, action_key: str, action_name: str):
         if not self.selected_alliance:
@@ -118,17 +119,25 @@ class OfficerPanel(View):
 
         current_time = int(time.time())
         if self.selected_alliance not in self.db["cooldowns"]:
-            self.db["cooldowns"][self.selected_alliance] = {}
-            
+          await self.db["cooldowns"][self.selected_alliance] = {}
+        
         # Store previous value for Undo tracking
         previous_val = self.db["cooldowns"][self.selected_alliance].get(action_key, 0)
         self.last_action = (self.selected_alliance, action_key, previous_val, action_name)
 
         self.db["cooldowns"][self.selected_alliance][action_key] = current_time + COOLDOWNS[action_key]
         save_data(self.db)
-        
-        await interaction.response.send_message(f"✅ **{interaction.user.display_name}** triggered **{action_name}** for **{self.selected_alliance}**.", ephemeral=False)
+    
+        # 1. Private reply so the officer knows it worked without cluttering the channel
+        await interaction.response.send_message(f"✅ Triggered **{action_name}** for **{self.selected_alliance}**.", ephemeral=True)
+    
+        # 2. Update the public dashboard embed
         await self.update_dashboard_message()
+
+        # 3. Send the public log to your audit channel
+        log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(f"✅ **{interaction.user.display_name}** triggered **{action_name}** for **{self.selected_alliance}**.")
 
     # --- COOLDOWN TRIGGER BUTTONS ---
     @discord.ui.button(label="🏰 Bastion Removed (12h)", style=discord.ButtonStyle.danger, custom_id="btn_bastion", row=1)
