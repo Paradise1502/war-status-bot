@@ -135,7 +135,7 @@ class OfficerPanel(View):
         await self.update_dashboard_message()
 
         # 3. Send the public log to your audit channel
-        log_channel = interaction.guild.get_channel(LOG_CHANNEL_ID)
+        log_channel = interaction.guild.get_channel(selfl.LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(f"✅ **{interaction.user.display_name}** triggered **{action_name}** for **{self.selected_alliance}**.")
 
@@ -157,6 +157,7 @@ class OfficerPanel(View):
         await self.handle_action(interaction, "fog", "Fog of War")
 
     # --- RESET & UNDO CONTROLS ---
+    # --- RESET & UNDO CONTROLS ---
     @discord.ui.button(label="↩️ Undo Last Action", style=discord.ButtonStyle.secondary, custom_id="btn_undo", row=3)
     async def btn_undo(self, interaction: discord.Interaction, button: Button):
         if not self.last_action:
@@ -168,8 +169,14 @@ class OfficerPanel(View):
         save_data(self.db)
         self.last_action = None  # Clear undo stack after use
 
-        await interaction.response.send_message(f"↩️ **{interaction.user.display_name}** reversed the last **{action_name}** for **{alliance}**.", ephemeral=False)
+        # Private reply in panel
+        await interaction.response.send_message(f"↩️ Reversed the last **{action_name}** for **{alliance}**.", ephemeral=True)
         await self.update_dashboard_message()
+        
+        # Public log to audit channel
+        log_channel = interaction.guild.get_channel(self.LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(f"↩️ **{interaction.user.display_name}** reversed the last **{action_name}** for **{alliance}**.")
 
     @discord.ui.button(label="🔄 Reset Selected Shell", style=discord.ButtonStyle.danger, custom_id="btn_reset_shell", row=3)
     async def btn_reset_shell(self, interaction: discord.Interaction, button: Button):
@@ -180,8 +187,14 @@ class OfficerPanel(View):
         self.db["cooldowns"][self.selected_alliance] = {"bastion": 0, "build_buff": 0, "storm": 0, "fog": 0}
         save_data(self.db)
 
-        await interaction.response.send_message(f"🔄 **{interaction.user.display_name}** reset all cooldowns for **{self.selected_alliance}**.", ephemeral=False)
+        # Private reply in panel
+        await interaction.response.send_message(f"🔄 Reset all cooldowns for **{self.selected_alliance}**.", ephemeral=True)
         await self.update_dashboard_message()
+        
+        # Public log to audit channel
+        log_channel = interaction.guild.get_channel(self.LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(f"🔄 **{interaction.user.display_name}** reset all cooldowns for **{self.selected_alliance}**.")
 
 # --- COG SETUP ---
 class AllianceDashboard(commands.Cog):
