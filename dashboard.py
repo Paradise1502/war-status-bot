@@ -42,39 +42,43 @@ def generate_dashboard_embed(db):
     )
     current_time = int(time.time())
     
-    for alliance in ALLIANCES:
+    for i, alliance in enumerate(ALLIANCES):
         timers = db["cooldowns"].get(alliance, {})
         
         # Bastion
-        bastion_ready = timers.get("bastion", 0) < current_time
-        bastion_str = "🟢 **READY**" if bastion_ready else f"🔴 Cooldown (<t:{timers['bastion']}:R>)"
+        b_time = timers.get("bastion", 0)
+        b_str = "🟢 **READY**" if b_time < current_time else f"🔴 <t:{b_time}:R>"
         
         # Build Buff
         bb_end = timers.get("build_buff", 0)
         if bb_end < current_time:
             bb_str = "🟢 **READY**"
         elif bb_end - current_time > (71 * 3600): 
-            bb_str = f"🟠 **ACTIVE** (Ends <t:{bb_end - (71*3600)}:R>)"
+            bb_str = f"🟠 **ACTIVE** (<t:{bb_end - (71*3600)}:R>)"
         else:
-            bb_str = f"🔴 Cooldown (<t:{bb_end}:R>)"
+            bb_str = f"🔴 <t:{bb_end}:R>"
 
         # Storm Vanguard
-        storm_ready = timers.get("storm", 0) < current_time
-        storm_str = "🟢 **READY**" if storm_ready else f"🔴 Cooldown (<t:{timers['storm']}:R>)"
+        s_time = timers.get("storm", 0)
+        s_str = "🟢 **READY**" if s_time < current_time else f"🔴 <t:{s_time}:R>"
         
         # Fog of War
-        fog_ready = timers.get("fog", 0) < current_time
-        fog_str = "🟢 **READY**" if fog_ready else f"🔴 Cooldown (<t:{timers['fog']}:R>)"
+        f_time = timers.get("fog", 0)
+        f_str = "🟢 **READY**" if f_time < current_time else f"🔴 <t:{f_time}:R>"
         
-        # Formatted into clean double-column blockquotes per alliance
         field_value = (
-            f"> 🏰 **Bastion:** {bastion_str}\n"
-            f"> 🔨 **Build Buff:** {bb_str}\n"
-            f"> ⚡ **Storm Vanguard:** {storm_str}\n"
-            f"> 🌫️ **Fog of War:** {fog_str}\n"
+            f"🏰 **Bastion:** {b_str}\n"
+            f"🔨 **Build:** {bb_str}\n"
+            f"⚡ **Storm:** {s_str}\n"
+            f"🌫️ **Fog:** {f_str}"
         )
         
-        embed.add_field(name=f"🛡️ {alliance}", value=field_value, inline=False)
+        # Add alliance field (inline)
+        embed.add_field(name=f"🛡️ {alliance}", value=field_value, inline=True)
+        
+        # Force a line break after every 2 alliances to maintain a clean 2-column grid
+        if (i + 1) % 2 == 0 and (i + 1) < len(ALLIANCES):
+            embed.add_field(name="\u200b", value="\u200b", inline=False)
         
     embed.set_footer(text="Dashboard updates automatically when officers trigger actions.")
     return embed
