@@ -1388,7 +1388,7 @@ async def topdeads(ctx, *args):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command(aliases=['checkfarm', 'farm'])
-async def farmcheck(ctx, farm_id: strs):
+async def farmcheck(ctx, farm_id: str):
     async with ctx.typing():
         
         # 1. Channel Restriction Check
