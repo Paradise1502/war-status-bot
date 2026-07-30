@@ -1589,6 +1589,30 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             return None
         
         rank_merit_ratio = get_merit_ratio_rank()
+
+        # New helper to rank total cumulative stats (instead of gains)
+        def get_total_rank(col_index):
+            totals = []
+            for row in data_latest[1:]:
+                if len(row) <= max(col_index, home_server_idx):
+                    continue
+                if str(row[home_server_idx]).strip() != player_server:
+                    continue
+                
+                lid_current = str(row[id_idx]).strip()
+                if not lid_current:
+                    continue
+                
+                val = to_int(row[col_index])
+                totals.append((lid_current, val))
+                
+            totals.sort(key=lambda x: x[1], reverse=True)
+            for rank, (lid_curr, _) in enumerate(totals, 1):
+                if lid_curr == str(lord_id):
+                    return rank
+            return None
+
+        rank_total_merit = get_total_rank(merit_idx)
         
         def get_rank(col_index):
             player_row = next((r for r in data_latest[1:] if r[id_idx].strip() == lord_id), None)
@@ -1641,9 +1665,14 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
         
-        # Updated Base Stats with backtick ranking formatting and "Highest Power" rename
         embed.add_field(name="🟩 Highest Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" `(#{rank_power})`" if rank_power else ""), inline=False)
-        embed.add_field(name="🧠 Merits", value=f"{merit_latest:,} ({merit_ratio:.2f}%)" + (f" `(#{rank_merit_ratio})`" if rank_merit_ratio else ""), inline=False)
+        
+        # --- NEW SPLIT MERIT FIELDS ---
+        embed.add_field(name="🧠 Total Merits", value=f"{merit_latest:,}" + (f" `(#{rank_total_merit})`" if rank_total_merit else ""), inline=True)
+        embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%" + (f" `(#{rank_merit_ratio})`" if rank_merit_ratio else ""), inline=True)
+        embed.add_field(name="\u200b", value="\u200b", inline=True) # Invisible spacer to force the next fields to a new line
+        # ------------------------------
+
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
