@@ -2431,8 +2431,8 @@ You DONT need the [].
 - `!matchups [season]` — Summary of server war stats (kills, deads, merits)
 
 **🗂️ Season Support**
-You can append an optional season key like `sos6`, `hk1`, `sos2` etc. to pull archived data.
-> Example: `!progress 123456 sos6`  
+You can append an optional season key like `sos4`or `sos2` etc. to pull archived data.
+> Example: `!progress 123456 sos4`  
 If no season is provided, the bot uses the current season automatically.
 
 """
