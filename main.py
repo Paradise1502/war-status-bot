@@ -2617,3 +2617,5 @@ You can append an optional season key like `sos4` or `sos2` etc. to pull archive
 If no season is provided, the bot uses the current season automatically.
 """
         await ctx.send(help_text)
+
+bot.run(TOKEN)
