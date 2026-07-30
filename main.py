@@ -1466,7 +1466,7 @@ async def farmcheck(ctx, farm_id: str):
         except Exception as e:
             await ctx.send(f"❌ Error: {e}")
 
-@bot.command(aliases=['stats'])
+@bot.command(aliases=['stats2'])
 async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
