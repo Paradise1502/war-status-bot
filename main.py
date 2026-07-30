@@ -1703,6 +1703,7 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                 
                 # 2. Dynamically find the column indexes
                 id_col = headers_320.index("Character ID")
+                hist_power_col = headers_320.index("Historical Highest Power") # <--- DEFINED HERE
                 inf_col = headers_320.index("Infantry Only")
                 cav_col = headers_320.index("Cavalry Only")
                 arch_col = headers_320.index("Marksman Only")
@@ -1711,35 +1712,35 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                 build_col = headers_320.index("Build Time")
                 dest_col = headers_320.index("Destruction Time")
 
-                # 3. Create a set of Character IDs that belong to the same alliance (from the main sheet)
-                alliance_member_ids = {
-                    str(r[id_idx]).strip() 
-                    for r in data_latest[1:] 
-                    if len(r) > alliance_idx and r[alliance_idx] == alliance
-                }
-
-                # 4. Filter the 320 data to ONLY include players in this alliance
-                alliance_320_data = []
+                # 3. Filter the 320 data to ONLY include players with >= 50M Highest Power
+                server_320_data = []
                 player_row_320 = None
                 
                 for r in data_320[1:]:
                     if len(r) > dest_col:
                         r_id = str(r[id_col]).strip()
-                        if r_id in alliance_member_ids:
-                            alliance_320_data.append(r)
-                            if r_id == str(lord_id):
-                                player_row_320 = r
+                        
+                        # Only include if Historical Highest Power is at least 50,000,000
+                        if to_int(r[hist_power_col]) >= 50000000:
+                            server_320_data.append(r)
+                        
+                        # Always grab the requested player's stats to display them
+                        if r_id == str(lord_id):
+                            player_row_320 = r
+                            # Guarantee the player is in the ranking pool even if they are somehow under 50m
+                            if to_int(r[hist_power_col]) < 50000000:
+                                server_320_data.append(r)
                 
-                # 5. Helper function to calculate alliance rank for a specific column
+                # 4. Helper function to calculate server rank for a specific column
                 def get_320_rank(col_index):
-                    # Sort alliance members descending based on the column value
-                    sorted_members = sorted(alliance_320_data, key=lambda x: to_int(x[col_index]), reverse=True)
+                    # Sort server members descending based on the column value
+                    sorted_members = sorted(server_320_data, key=lambda x: to_int(x[col_index]), reverse=True)
                     for rank, row in enumerate(sorted_members, 1):
                         if str(row[id_col]).strip() == str(lord_id):
                             return rank
                     return None
 
-                # 6. If they exist in the 320 sheet, calculate ranks and inject the embed
+                # 5. If they exist in the 320 sheet, calculate ranks and inject the embed
                 if player_row_320:
                     inf_val = to_int(player_row_320[inf_col])
                     cav_val = to_int(player_row_320[cav_col])
@@ -1752,7 +1753,7 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
                     # Field 1: Troop Merits
                     embed.add_field(
-                        name="Troop Merits (Alliance Rank)",
+                        name="Troop Merits (Server Rank)",
                         value=(
                             f"⚔️ **Infantry:** {inf_val:,} `(#{get_320_rank(inf_col)})`\n"
                             f"🐎 **Cavalry:** {cav_val:,} `(#{get_320_rank(cav_col)})`\n"
@@ -1764,7 +1765,7 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
                     # Field 2: Utility
                     embed.add_field(
-                        name="Utility (Alliance Rank)",
+                        name="Utility (Server Rank)",
                         value=(
                             f"❤️ **RSS Healing:** {heal_val:,} `(#{get_320_rank(heal_col)})`\n"
                             f"🔨 **Build Time:** {build_val:,} `(#{get_320_rank(build_col)})`\n"
