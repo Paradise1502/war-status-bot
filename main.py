@@ -1640,11 +1640,13 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         t1_gain = t1_total - to_int(row_prev[t1_idx])
 
         embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
-        embed.add_field(name="🟩 Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" (#{rank_power})" if rank_power else ""), inline=False)
-        embed.add_field(name="🧠 Merits", value=f"{merit_latest:,} ({merit_ratio:.2f}%)" + (f" (#{rank_merit_ratio})" if rank_merit_ratio else ""), inline=False)
-        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
-        embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
-        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
+        
+        # Updated Base Stats with backtick ranking formatting and "Highest Power" rename
+        embed.add_field(name="🟩 Highest Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" `(#{rank_power})`" if rank_power else ""), inline=False)
+        embed.add_field(name="🧠 Merits", value=f"{merit_latest:,} ({merit_ratio:.2f}%)" + (f" `(#{rank_merit_ratio})`" if rank_merit_ratio else ""), inline=False)
+        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
+        embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
+        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
         
         embed.add_field(
             name="🧑‍🌾 RSS Gathered",
@@ -1721,7 +1723,7 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
                     # Field 1: Troop Merits
                     embed.add_field(
-                        name="🌟 Troop Merits (Alliance Rank)",
+                        name="Troop Merits (Alliance Rank)",
                         value=(
                             f"⚔️ **Infantry:** {inf_val:,} `(#{get_320_rank(inf_col)})`\n"
                             f"🐎 **Cavalry:** {cav_val:,} `(#{get_320_rank(cav_col)})`\n"
@@ -1733,11 +1735,11 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
                     # Field 2: Utility
                     embed.add_field(
-                        name="🛠️ Utility (Alliance Rank)",
+                        name="Utility (Alliance Rank)",
                         value=(
                             f"❤️ **RSS Healing:** {heal_val:,} `(#{get_320_rank(heal_col)})`\n"
                             f"🔨 **Build Time:** {build_val:,} `(#{get_320_rank(build_col)})`\n"
-                            f"🧨 **Destruction:** {dest_val:,} `(#{get_320_rank(dest_col)})`"
+                            f"🔨 **Destruction:** {dest_val:,} `(#{get_320_rank(dest_col)})`"
                         ),
                         inline=True
                     )
