@@ -9,7 +9,6 @@ from discord.ext import tasks
 from datetime import datetime, timedelta, UTC
 import asyncio
 import unicodedata
-import pandas as pd
 
 # Google Sheets Auth
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
