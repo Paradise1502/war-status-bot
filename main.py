@@ -1466,6 +1466,125 @@ async def farmcheck(ctx, farm_id: str):
         except Exception as e:
             await ctx.send(f"❌ Error: {e}")
 
+async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True):
+    """Helper function to generate Top 10 or Bottom 10 leaderboards for Server 320."""
+    async with ctx.typing():
+        # Optional: Keep the channel restriction if you want
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            channels_mentions = ", ".join([f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+            return
+
+        try:
+            # 1. Fetch Data
+            sheet_320 = await asyncio.to_thread(client.open, SERVER_320_SHEET)
+            ws_320 = sheet_320.sheet1
+            data_320 = await asyncio.to_thread(ws_320.get_all_values)
+
+            headers = data_320[0]
+            name_col = headers.index("Character Name")
+            power_col = headers.index("Historical Highest Power")
+            stat_col = headers.index(stat_name)
+
+            def to_int_local(v):
+                try:
+                    return int(str(v).replace(",", "").strip()) if v not in ("-", "") else 0
+                except:
+                    return 0
+
+            # 2. Filter for Accounts >= 50M Power and extract their stats
+            valid_players = []
+            for row in data_320[1:]:
+                if len(row) > max(power_col, stat_col):
+                    power = to_int_local(row[power_col])
+                    if power >= 50000000:
+                        val = to_int_local(row[stat_col])
+                        valid_players.append((row[name_col], val))
+
+            # 3. Sort the list
+            # reverse=True means Highest to Lowest (Top). reverse=False means Lowest to Highest (Low).
+            valid_players.sort(key=lambda x: x[1], reverse=is_top)
+
+            # 4. Build the Embed (Displaying Top 10)
+            top_10 = valid_players[:10]
+            desc = ""
+            for i, (p_name, p_val) in enumerate(top_10, 1):
+                desc += f"**{i}.** {p_name} — `{p_val:,}`\n"
+
+            direction = "Top 10" if is_top else "Bottom 10"
+            color = discord.Color.gold() if is_top else discord.Color.red()
+            
+            embed = discord.Embed(title=f"{embed_title} ({direction})", description=desc, color=color)
+            embed.set_footer(text="Filtered for accounts ≥ 50M Highest Power")
+
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"❌ Error loading leaderboard: {e}")
+
+# --- INFANTRY ---
+@bot.command(aliases=['topinfantry'])
+async def topinf(ctx):
+    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=True)
+
+@bot.command(aliases=['lowinfantry'])
+async def lowinf(ctx):
+    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=False)
+
+# --- CAVALRY ---
+@bot.command(aliases=['topcavalry'])
+async def topcav(ctx):
+    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=True)
+
+@bot.command(aliases=['lowcavalry'])
+async def lowcav(ctx):
+    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=False)
+
+# --- ARCHER ---
+@bot.command(aliases=['topmarksman', 'toparchers'])
+async def toparcher(ctx):
+    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=True)
+
+@bot.command(aliases=['lowmarksman', 'lowarchers'])
+async def lowarcher(ctx):
+    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=False)
+
+# --- MAGE ---
+@bot.command(aliases=['topmagic', 'topmages'])
+async def topmage(ctx):
+    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=True)
+
+@bot.command(aliases=['lowmagic', 'lowmages'])
+async def lowmage(ctx):
+    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=False)
+
+# --- HEALING ---
+@bot.command(aliases=['tophealing', 'topheals'])
+async def topheal(ctx):
+    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=True)
+
+@bot.command(aliases=['lowhealing', 'lowheals'])
+async def lowheal(ctx):
+    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=False)
+
+# --- BUILD TIME ---
+@bot.command(aliases=['topbuildtime'])
+async def topbuild(ctx):
+    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=True)
+
+@bot.command(aliases=['lowbuildtime'])
+async def lowbuild(ctx):
+    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=False)
+
+# --- DESTRUCTION TIME ---
+@bot.command(aliases=['topdestruction', 'topdestruct'])
+async def topdest(ctx):
+    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=True)
+
+@bot.command(aliases=['lowdestruction', 'lowdestruct'])
+async def lowdest(ctx):
+    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=False)
+
 @bot.command(aliases=['stats2'])
 async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
