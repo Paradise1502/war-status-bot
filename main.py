@@ -1466,10 +1466,12 @@ async def farmcheck(ctx, farm_id: str):
         except Exception as e:
             await ctx.send(f"❌ Error: {e}")
 
-async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True):
-    """Helper function to generate Top 10 or Bottom 10 leaderboards for Server 320."""
+async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True, limit=10):
+    """Helper function to generate Top/Bottom leaderboards for Server 320 with multi-message support."""
+    # Cap limit between 1 and 100
+    limit = min(max(limit, 1), 100)
+
     async with ctx.typing():
-        # Optional: Keep the channel restriction if you want
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
             channels_mentions = ", ".join([f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
@@ -1492,7 +1494,7 @@ async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True):
                 except:
                     return 0
 
-            # 2. Filter for Accounts >= 50M Power and extract their stats
+            # 2. Filter for Accounts >= 50M Power
             valid_players = []
             for row in data_320[1:]:
                 if len(row) > max(power_col, stat_col):
@@ -1501,89 +1503,108 @@ async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True):
                         val = to_int_local(row[stat_col])
                         valid_players.append((row[name_col], val))
 
-            # 3. Sort the list
-            # reverse=True means Highest to Lowest (Top). reverse=False means Lowest to Highest (Low).
+            # 3. Sort list
             valid_players.sort(key=lambda x: x[1], reverse=is_top)
 
-            # 4. Build the Embed (Displaying Top 10)
-            top_10 = valid_players[:10]
-            desc = ""
-            for i, (p_name, p_val) in enumerate(top_10, 1):
-                desc += f"**{i}.** {p_name} — `{p_val:,}`\n"
-
-            direction = "Top 10" if is_top else "Bottom 10"
-            color = discord.Color.gold() if is_top else discord.Color.red()
+            # 4. Slice requested amount
+            sliced_players = valid_players[:limit]
             
-            embed = discord.Embed(title=f"{embed_title} ({direction})", description=desc, color=color)
-            embed.set_footer(text="Filtered for accounts ≥ 50M Highest Power")
+            if not sliced_players:
+                await ctx.send("❌ No matching players found.")
+                return
 
-            await ctx.send(embed=embed)
+            # 5. Chunk players into groups of 50 to fit inside separate messages
+            chunk_size = 50
+            chunks = [sliced_players[i:i + chunk_size] for i in range(0, len(sliced_players), chunk_size)]
+
+            direction = "Top" if is_top else "Bottom"
+            color = discord.Color.gold() if is_top else discord.Color.red()
+
+            # 6. Send each chunk as its own embed message
+            for index, chunk in enumerate(chunks):
+                start_rank = (index * chunk_size) + 1
+                end_rank = start_rank + len(chunk) - 1
+
+                desc = ""
+                for i, (p_name, p_val) in enumerate(chunk, start_rank):
+                    desc += f"**{i}.** {p_name} — `{p_val:,}`\n"
+
+                # Subtitle indicates range (e.g. "Top 100 (1-50)" and "Top 100 (51-100)")
+                chunk_title = f"{embed_title} ({direction} {len(sliced_players)} — #{start_rank} to #{end_rank})"
+                
+                embed = discord.Embed(title=chunk_title, description=desc, color=color)
+                
+                # Footer on the last chunk
+                if index == len(chunks) - 1:
+                    embed.set_footer(text="Filtered for accounts ≥ 50M Highest Power")
+
+                await ctx.send(embed=embed)
 
         except Exception as e:
             await ctx.send(f"❌ Error loading leaderboard: {e}")
 
 # --- INFANTRY ---
 @bot.command(aliases=['topinfantry'])
-async def topinf(ctx):
-    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=True)
+async def topinf(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowinfantry'])
-async def lowinf(ctx):
-    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=False)
+async def lowinf(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=False, limit=amount)
 
 # --- CAVALRY ---
 @bot.command(aliases=['topcavalry'])
-async def topcav(ctx):
-    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=True)
+async def topcav(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowcavalry'])
-async def lowcav(ctx):
-    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=False)
+async def lowcav(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=False, limit=amount)
 
 # --- ARCHER ---
 @bot.command(aliases=['topmarksman', 'toparchers'])
-async def toparcher(ctx):
-    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=True)
+async def toparcher(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowmarksman', 'lowarchers'])
-async def lowarcher(ctx):
-    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=False)
+async def lowarcher(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=False, limit=amount)
 
 # --- MAGE ---
 @bot.command(aliases=['topmagic', 'topmages'])
-async def topmage(ctx):
-    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=True)
+async def topmage(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowmagic', 'lowmages'])
-async def lowmage(ctx):
-    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=False)
+async def lowmage(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=False, limit=amount)
 
 # --- HEALING ---
-@bot.command(aliases=['tophealing', 'topheals'])
-async def topheal(ctx):
-    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=True)
+@bot.command(aliases=['toprsshealing', 'toprssheals'])
+async def toprssheal(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=True, limit=amount)
 
-@bot.command(aliases=['lowhealing', 'lowheals'])
-async def lowheal(ctx):
-    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=False)
+@bot.command(aliases=['lowrsshealing', 'lowrssheals'])
+async def lowrssheal(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=False, limit=amount)
 
 # --- BUILD TIME ---
 @bot.command(aliases=['topbuildtime'])
-async def topbuild(ctx):
-    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=True)
+async def topbuild(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowbuildtime'])
-async def lowbuild(ctx):
-    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=False)
+async def lowbuild(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=False, limit=amount)
 
 # --- DESTRUCTION TIME ---
 @bot.command(aliases=['topdestruction', 'topdestruct'])
-async def topdest(ctx):
-    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=True)
+async def topdest(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowdestruction', 'lowdestruct'])
-async def lowdest(ctx):
-    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=False)
+async def lowdest(ctx, amount: int = 10):
+    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=False, limit=amount)
 
 @bot.command(aliases=['stats2'])
 async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
@@ -2547,7 +2568,7 @@ async def on_ready():
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
     print(f"✅ Bot is online as {bot.user}")
-
+    
 @bot.command(aliases=['help', 'info', 'guide'])
 async def commands(ctx):
     async with ctx.typing():
@@ -2558,7 +2579,7 @@ async def commands(ctx):
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
-    help_text = """
+        help_text = """
 📜 **NVR Bot – Available Commands**
 You DONT need the [].
 
@@ -2568,7 +2589,7 @@ You DONT need the [].
 - `!kills [lord_id] [season]` — Kill breakdown by troop tier
 - `!mana [lord_id] [season]` — Mana gathered (+gain & rank)
 
-**🏆 Leaderboards**
+**🏆 Leaderboards (Main Season)**
 - `!topmana` — Top mana gathered (delta)
 - `!topheal` — Top units healed
 - `!topkills` — Top kill gainers
@@ -2577,15 +2598,22 @@ You DONT need the [].
 - `!topmerits [X]` — Top X by merits gain (optional season or alliance filter)
 - `!lowmerits [X]` — Bottom X by merits gain (optional season or alliance filter)
 
+**👑 Server 375 Leaderboards (≥ 50M Power)**
+*Optional limit `[amount]` up to 100 (default: 10). Example: `!topinf 50`*
+- `!topinf [N]` / `!lowinf [N]` — Infantry Merits
+- `!topcav [N]` / `!lowcav [N]` — Cavalry Merits
+- `!toparcher [N]` / `!lowarcher [N]` — Archer Merits
+- `!topmage [N]` / `!lowmage [N]` — Magic Merits
+- `!toprssheal [N]` / `!lowrssheal [N]` — RSS Healing
+- `!topbuild [N]` / `!lowbuild [N]` — Build Time
+- `!topdest [N]` / `!lowdest [N]` — Destruction Time
+
 **🆚 Matchups & Server Stats**
 - `!matchups [season]` — Summary of server war stats (kills, deads, merits)
 
 **🗂️ Season Support**
-You can append an optional season key like `sos4`or `sos2` etc. to pull archived data.
+You can append an optional season key like `sos4` or `sos2` etc. to pull archived data.
 > Example: `!progress 123456 sos4`  
 If no season is provided, the bot uses the current season automatically.
-
 """
-    await ctx.send(help_text)
-
-bot.run(TOKEN)
+        await ctx.send(help_text)
