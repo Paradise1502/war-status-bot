@@ -27,7 +27,6 @@ SEASON_SHEETS = {
     "sos5": "Call of Dragons - SoS5",
     "sos6": "Call of Dragons - SoS6",
     "sos2_2": "Call of Dragons - SoS2_2",
-    "sos4": "Call of Dragons - SoS4",
     "sos3": "NxW - SoS3",
     "sos4": "NxW - SoS4",
     "z2": "NxW - SoS4 - Z2",
