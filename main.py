@@ -353,32 +353,21 @@ async def update_utc_channels():
     try:
         now_utc = datetime.now(timezone.utc)
         
-        date_str = f"Date UTC:{now_utc.month}/{now_utc.day}/{now_utc.year}"
-        time_str = f"Time UTC:{now_utc.strftime('%H:%M')}"
+        # Formats: "📅 Date UTC: 08/08/2026" & "⏰ Time UTC: 14:05"
+        date_str = f"📅 Date UTC: {now_utc.strftime('%m/%d/%Y')}"
+        time_str = f"⏰ Time UTC: {now_utc.strftime('%H:%M')}"
 
         date_channel = bot.get_channel(DATE_CHANNEL_ID)
         time_channel = bot.get_channel(TIME_CHANNEL_ID)
 
-        if date_channel:
-            if date_channel.name != date_str:
-                await date_channel.edit(name=date_str)
-                print(f"Updated date channel to: {date_str}")
-            else:
-                print(f"Date channel already up to date: {date_str}")
-        else:
-            print(f"❌ Date channel not found! Check DATE_CHANNEL_ID.")
+        if date_channel and date_channel.name != date_str:
+            await date_channel.edit(name=date_str)
 
-        if time_channel:
-            if time_channel.name != time_str:
-                await time_channel.edit(name=time_str)
-                print(f"Updated time channel to: {time_str}")
-            else:
-                print(f"Time channel already up to date: {time_str}")
-        else:
-            print(f"❌ Time channel not found! Check TIME_CHANNEL_ID.")
+        if time_channel and time_channel.name != time_str:
+            await time_channel.edit(name=time_str)
 
     except Exception as e:
-        print(f"❌ Error updating UTC time channels: {e}")
+        print(f"Error updating UTC time channels: {e}")
 
 # Wait until the bot is completely logged in before starting the task loop
 @update_utc_channels.before_loop
