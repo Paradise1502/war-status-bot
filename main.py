@@ -383,43 +383,6 @@ async def update_utc_channels():
 # Wait until the bot is completely logged in before starting the task loop
 @update_utc_channels.before_loop
 async def before_utc_update():
-    await bot.wait_until_ready()# -------------------------------------------------------------
-# UTC TIME & DATE CHANNEL UPDATER
-# -------------------------------------------------------------
-
-# Replace these with the actual IDs of the channels you created
-DATE_CHANNEL_ID = 123456789012345678  # Channel for "Date UTC:M/D/YYYY"
-TIME_CHANNEL_ID = 123456789012345678  # Channel for "Time UTC:HH:MM"
-
-@tasks.loop(minutes=10)  # Updates every 10 minutes to respect Discord rate limits
-async def update_utc_channels():
-    try:
-        # Get current UTC time
-        now_utc = datetime.now(timezone.utc)
-        
-        # Format the strings to match your screenshot:
-        # M/D/YYYY (e.g., 8/8/2026)
-        date_str = f"Date UTC:{now_utc.month}/{now_utc.day}/{now_utc.year}"
-        
-        # HH:MM (e.g., 13:17)
-        time_str = f"Time UTC:{now_utc.strftime('%H:%M')}"
-
-        # Fetch channels and update their names
-        date_channel = bot.get_channel(DATE_CHANNEL_ID)
-        time_channel = bot.get_channel(TIME_CHANNEL_ID)
-
-        if date_channel and date_channel.name != date_str:
-            await date_channel.edit(name=date_str)
-
-        if time_channel and time_channel.name != time_str:
-            await time_channel.edit(name=time_str)
-
-    except Exception as e:
-        print(f"Error updating UTC time channels: {e}")
-
-# Wait until the bot is completely logged in before starting the task loop
-@update_utc_channels.before_loop
-async def before_utc_update():
     await bot.wait_until_ready()
 
 @bot.command()
