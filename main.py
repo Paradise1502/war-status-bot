@@ -345,8 +345,8 @@ async def totaldeads(ctx, *args):
 # -------------------------------------------------------------
 
 # Replace these with the actual IDs of the channels you created
-DATE_CHANNEL_ID = 1535645571950448660  # Channel for "Date UTC:M/D/YYYY"
-TIME_CHANNEL_ID = 1535645594381459569  # Channel for "Time UTC:HH:MM"
+DATE_CHANNEL_ID = 1535650935525609552  # Channel for "Date UTC:M/D/YYYY"
+TIME_CHANNEL_ID = 1535650977921900636  # Channel for "Time UTC:HH:MM"
 
 @tasks.loop(minutes=10)
 async def update_utc_channels():
