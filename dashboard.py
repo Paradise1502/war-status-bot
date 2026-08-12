@@ -82,6 +82,7 @@ def generate_dashboard_embed(db):
 
 # --- UI COMPONENTS ---
 # --- UI COMPONENTS ---
+# --- UI COMPONENTS ---
 class OfficerPanel(View):
     def __init__(self, bot, db):
         super().__init__(timeout=None)
@@ -94,10 +95,17 @@ class OfficerPanel(View):
         self.select = Select(placeholder="1. Select Target Alliance...", options=options, custom_id="select_alliance")
         self.select.callback = self.select_callback
         self.add_item(self.select)
+        
+        self.LOG_CHANNEL_ID = 1527938722987900978
 
     async def select_callback(self, interaction: discord.Interaction):
+        # 1. Defer immediately to prevent 3-second timeouts
+        await interaction.response.defer(ephemeral=True)
+        
         self.selected_alliance = self.select.values[0]
-        await interaction.response.send_message(f"✅ Selected **{self.selected_alliance}**. Choose an action below.", ephemeral=True)
+        
+        # 2. Use followup.send instead of response.send_message
+        await interaction.followup.send(f"✅ Selected **{self.selected_alliance}**. Choose an action below.", ephemeral=True)
 
     async def update_dashboard_message(self):
         channel_id = self.db.get("dashboard_channel_id")
@@ -110,11 +118,13 @@ class OfficerPanel(View):
                     await msg.edit(embed=generate_dashboard_embed(self.db))
                 except discord.NotFound:
                     pass
-    LOG_CHANNEL_ID = 1527938722987900978
 
     async def handle_action(self, interaction: discord.Interaction, action_key: str, action_name: str):
+        # 1. Defer immediately
+        await interaction.response.defer(ephemeral=True)
+        
         if not self.selected_alliance:
-            await interaction.response.send_message("❌ Please select an alliance from the dropdown menu first!", ephemeral=True)
+            await interaction.followup.send("❌ Please select an alliance from the dropdown menu first!", ephemeral=True)
             return
 
         current_time = int(time.time())
@@ -128,13 +138,13 @@ class OfficerPanel(View):
         self.db["cooldowns"][self.selected_alliance][action_key] = current_time + COOLDOWNS[action_key]
         save_data(self.db)
     
-        # 1. Private reply so the officer knows it worked without cluttering the channel
-        await interaction.response.send_message(f"✅ Triggered **{action_name}** for **{self.selected_alliance}**.", ephemeral=True)
+        # 2. Private reply via followup
+        await interaction.followup.send(f"✅ Triggered **{action_name}** for **{self.selected_alliance}**.", ephemeral=True)
     
-        # 2. Update the public dashboard embed
+        # 3. Update the public dashboard embed
         await self.update_dashboard_message()
 
-        # 3. Send the public log to your audit channel
+        # 4. Send the public log to your audit channel
         log_channel = interaction.guild.get_channel(self.LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(f"✅ **{interaction.user.display_name}** triggered **{action_name}** for **{self.selected_alliance}**.")
@@ -157,11 +167,13 @@ class OfficerPanel(View):
         await self.handle_action(interaction, "fog", "Fog of War")
 
     # --- RESET & UNDO CONTROLS ---
-    # --- RESET & UNDO CONTROLS ---
     @discord.ui.button(label="↩️ Undo Last Action", style=discord.ButtonStyle.secondary, custom_id="btn_undo", row=3)
     async def btn_undo(self, interaction: discord.Interaction, button: Button):
+        # 1. Defer immediately
+        await interaction.response.defer(ephemeral=True)
+        
         if not self.last_action:
-            await interaction.response.send_message("❌ No recent action available to undo!", ephemeral=True)
+            await interaction.followup.send("❌ No recent action available to undo!", ephemeral=True)
             return
 
         alliance, action_key, previous_val, action_name = self.last_action
@@ -169,30 +181,33 @@ class OfficerPanel(View):
         save_data(self.db)
         self.last_action = None  # Clear undo stack after use
 
-        # Private reply in panel
-        await interaction.response.send_message(f"↩️ Reversed the last **{action_name}** for **{alliance}**.", ephemeral=True)
+        # 2. Private reply in panel via followup
+        await interaction.followup.send(f"↩️ Reversed the last **{action_name}** for **{alliance}**.", ephemeral=True)
         await self.update_dashboard_message()
         
-        # Public log to audit channel
+        # 3. Public log to audit channel
         log_channel = interaction.guild.get_channel(self.LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(f"↩️ **{interaction.user.display_name}** reversed the last **{action_name}** for **{alliance}**.")
 
     @discord.ui.button(label="🔄 Reset Selected Shell", style=discord.ButtonStyle.danger, custom_id="btn_reset_shell", row=3)
     async def btn_reset_shell(self, interaction: discord.Interaction, button: Button):
+        # 1. Defer immediately
+        await interaction.response.defer(ephemeral=True)
+        
         if not self.selected_alliance:
-            await interaction.response.send_message("❌ Please select an alliance from the dropdown menu first!", ephemeral=True)
+            await interaction.followup.send("❌ Please select an alliance from the dropdown menu first!", ephemeral=True)
             return
 
         # Fix: Completely clear the shell's saved data so the embed defaults back to READY
         self.db["cooldowns"][self.selected_alliance] = {}
         save_data(self.db)
 
-        # Private reply in panel
-        await interaction.response.send_message(f"🔄 Reset all cooldowns for **{self.selected_alliance}**.", ephemeral=True)
+        # 2. Private reply in panel via followup
+        await interaction.followup.send(f"🔄 Reset all cooldowns for **{self.selected_alliance}**.", ephemeral=True)
         await self.update_dashboard_message()
         
-        # Public log to audit channel
+        # 3. Public log to audit channel
         log_channel = interaction.guild.get_channel(self.LOG_CHANNEL_ID)
         if log_channel:
             await log_channel.send(f"🔄 **{interaction.user.display_name}** reset all cooldowns for **{self.selected_alliance}**.")
