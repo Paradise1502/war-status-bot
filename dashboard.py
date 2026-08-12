@@ -6,8 +6,8 @@ import os
 import time
 
 # --- CONFIGURATION ---
-ALLIANCES = ["[NVR1] Main", "[NVR2] Shell", "[NVR3] Shell", "[NVR4] Shell", 
-             "[NVR5] Shell", "[NVR6] Shell", "[NVR7] Shell", "[NVR8] Shell"]
+ALLIANCES = ["[NVR!] Main", "[NVR1] Shell", "[NVR2] Shell", "[NVR3] Shell", 
+             "[NVR4] Shell", "[NVR5] Shell", "[MFD] Shell", "[NxW] Shell"]
 
 COOLDOWNS = {
     "bastion": 12 * 3600,       
