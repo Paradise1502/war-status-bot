@@ -26,24 +26,35 @@ TACTICAL_GROUPS = [
 ]
 # --- CASUAL POOL (For Social) - 8,000 combinations ---
 # Designed to fit universally into any appreciation, social, or general update message.
+# --- CASUAL POOL (For Social) - 8,000 combinations ---
+# Structured to read perfectly as: [Appreciation]. [Encouragement]. [Sign-off].
 CASUAL_GROUPS = [
     [
-        "Stay active", "Keep going", "Good work", "Stay strong", "Stay ready",
-        "Keep pushing", "Stay sharp", "Well done", "Keep grinding", "Great job",
-        "Nice work", "Stay focused", "Keep improving", "Stay motivated", "Keep fighting",
-        "Stay united", "Good luck", "Keep winning", "Stay awesome", "Much appreciated"
+        "Great work everyone", "Appreciate the effort", "Thanks for staying active", 
+        "Awesome job today", "Solid push everyone", "Thanks for the dedication", 
+        "Great activity lately", "Love the energy here", "Excellent coordination", 
+        "Proud of this team", "Good stuff everyone", "Thanks for stepping up", 
+        "Appreciate the teamwork", "Amazing turnout", "Great job as always", 
+        "Thanks for being ready", "Well played everyone", "Appreciate all of you", 
+        "Fantastic work team", "Thanks for your time"
     ],
     [
-        "Thanks everyone", "Much love", "Stay safe", "Take care", "See everyone",
-        "Catch everyone", "Talk soon", "Until later", "Enjoy yourselves", "Happy gaming",
-        "Keep smiling", "Stay positive", "Good vibes", "Team first", "Always together",
-        "Strong alliance", "Keep growing", "Great energy", "Looking forward", "See ya"
+        "Let's keep this momentum going", "Stay sharp for the next one", "Keep pushing those limits", 
+        "Let's maintain this pace", "Keep up the great work", "Stay focused on our goals", 
+        "Let's keep growing stronger", "Keep grinding those stats", "Let's stay ahead of the pack", 
+        "Keep this activity up", "Let's keep dominating", "Stay ready for more", 
+        "Keep improving every day", "Let's hold the line", "Keep your eyes on the prize", 
+        "Let's stay united", "Keep the communication up", "Let's prepare for what's next", 
+        "Keep showing up like this", "Let's keep winning together"
     ],
     [
-        "Cheers everyone", "Stay tuned", "More soon", "Next update", "Keep checking",
-        "See Discord", "Join voice", "Stay online", "Until tomorrow", "Next event",
-        "See around", "Thanks again", "Have fun", "Take easy", "Stay awesome",
-        "Keep connected", "Victory awaits", "Never rivaled", "See later"
+        "See you on the battlefield", "More updates to follow", "Catch you all later", 
+        "Have a great day", "Enjoy the rest of your week", "Talk to you all soon", 
+        "See you in Discord", "Stay safe out there", "Take it easy", 
+        "See you at reset", "Rest up for now", "Catch you at the next event", 
+        "Enjoy your downtime", "See you in the voice channel", "Have a good one", 
+        "Until next time", "Keep an eye on the pins", "See you all tomorrow", 
+        "Stay awesome", "Take care everyone"
     ]
 ]
 
@@ -605,6 +616,42 @@ class SpyDetector(commands.Cog):
             
         log_buffer.close()
         await ctx.send(f"Test complete! Sent to {sent} member(s). DMs will vanish in 30 seconds.")
+
+    @commands.command(name="catchscreenshot", aliases=["catch"])
+    @commands.has_permissions(administrator=True)
+    async def catchscreenshot(self, ctx, *, screenshot_text: str):
+        await ctx.send("Fetching full server member list & searching both war and social databases...")
+        
+        if not ctx.guild.chunked:
+            await ctx.guild.chunk()
+
+        def clean_text(raw_text: str) -> str:
+            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
+            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
+            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
+            return " ".join(cleaned.split())
+
+        target_cleaned = clean_text(screenshot_text)
+        matches = []
+
+        for member in ctx.guild.members:
+            if member.bot:
+                continue
+
+            # Inside your catchscreenshot loop:
+            expected_tactical = clean_text(generate_signoff(member.id, mode="tactical"))
+            expected_casual = clean_text(generate_signoff(member.id, mode="casual"))
+            expected_row = clean_text(generate_signoff(member.id, mode="row"))
+
+            # Check if ANY of the three fingerprints are found
+            if expected_tactical in target_cleaned or expected_casual in target_cleaned or expected_row in target_cleaned:
+                matches.append(member)
+
+        if matches:
+            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
+            await ctx.send(f"**MATCH FOUND!**\nThe leaked text belongs to:\n{found_users}")
+        else:
+            await ctx.send("No exact match found. Double-check for typos or missing words.")
             
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
