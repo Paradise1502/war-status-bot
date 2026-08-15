@@ -210,14 +210,18 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing war announcement and sending uniquely blended messages to **{role.name}** (Auto-delete: 24h)...")
         
+        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
         if "[opsec]" not in announcement.lower():
-            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
-            if len(parts) > 2:
-                mid_point = (len(parts) // 4) * 2 
-                parts.insert(mid_point + 1, " [opsec]")
-                announcement = "".join(parts)
+            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                # Place at the end of the first paragraph or middle block
+                mid = len(paragraphs) // 2
+                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                visible_text = "\n\n".join(paragraphs)
             else:
-                announcement = f"{announcement} [opsec]"
+                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+        else:
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -272,14 +276,18 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing test war announcement (with 30s auto-delete timer)...")
         
+        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
         if "[opsec]" not in announcement.lower():
-            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
-            if len(parts) > 2:
-                mid_point = (len(parts) // 4) * 2 
-                parts.insert(mid_point + 1, " [opsec]")
-                announcement = "".join(parts)
+            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                # Place at the end of the first paragraph or middle block
+                mid = len(paragraphs) // 2
+                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                visible_text = "\n\n".join(paragraphs)
             else:
-                announcement = f"{announcement} [opsec]"
+                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+        else:
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -338,15 +346,18 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing row announcement and sending uniquely blended messages to **{role.name}** (Auto-delete: 24h)...")
         
+        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
         if "[opsec]" not in announcement.lower():
-            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
-            if len(parts) > 2:
-                mid_point = (len(parts) // 4) * 2 
-                parts.insert(mid_point + 1, " [opsec]")
-                announcement = "".join(parts)
+            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                # Place at the end of the first paragraph or middle block
+                mid = len(paragraphs) // 2
+                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                visible_text = "\n\n".join(paragraphs)
             else:
-                announcement = f"{announcement} [opsec]"
-
+                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+        else:
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
         sent, failed = 0, 0
         log_buffer = io.StringIO()
         log_buffer.write(f"--- ROW BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
@@ -400,14 +411,18 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing test row announcement (with 30s auto-delete timer)...")
         
+        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
         if "[opsec]" not in announcement.lower():
-            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
-            if len(parts) > 2:
-                mid_point = (len(parts) // 4) * 2 
-                parts.insert(mid_point + 1, " [opsec]")
-                announcement = "".join(parts)
+            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                # Place at the end of the first paragraph or middle block
+                mid = len(paragraphs) // 2
+                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                visible_text = "\n\n".join(paragraphs)
             else:
-                announcement = f"{announcement} [opsec]"
+                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+        else:
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -466,15 +481,18 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing social announcement and sending uniquely blended messages to **{role.name}** (Auto-delete: 24h)...")
         
+        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
         if "[opsec]" not in announcement.lower():
-            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
-            if len(parts) > 2:
-                mid_point = (len(parts) // 4) * 2 
-                parts.insert(mid_point + 1, " [opsec]")
-                announcement = "".join(parts)
+            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                # Place at the end of the first paragraph or middle block
+                mid = len(paragraphs) // 2
+                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                visible_text = "\n\n".join(paragraphs)
             else:
-                announcement = f"{announcement} [opsec]"
-
+                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+        else:
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
         sent, failed = 0, 0
         log_buffer = io.StringIO()
         log_buffer.write(f"--- SOCIAL BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
@@ -528,14 +546,18 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing test social announcement (with 30s auto-delete timer)...")
         
+        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
         if "[opsec]" not in announcement.lower():
-            parts = re.split(r'(?<=[.!?])(\s+)', announcement)
-            if len(parts) > 2:
-                mid_point = (len(parts) // 4) * 2 
-                parts.insert(mid_point + 1, " [opsec]")
-                announcement = "".join(parts)
+            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+            if len(paragraphs) >= 2:
+                # Place at the end of the first paragraph or middle block
+                mid = len(paragraphs) // 2
+                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                visible_text = "\n\n".join(paragraphs)
             else:
-                announcement = f"{announcement} [opsec]"
+                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+        else:
+            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
