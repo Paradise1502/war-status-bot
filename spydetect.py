@@ -149,7 +149,7 @@ ROW_GROUPS = [
 ]
 
 def generate_signoff(user_id: int, mode: str = "tactical") -> str:
-    """Generates a secure 3-phrase string based on the chosen mode."""
+    """Generates a secure 3-phrase string based on the chosen mode with natural formatting."""
     selected_words = []
     
     hash_hex = hashlib.md5(str(user_id).encode()).hexdigest()
@@ -168,7 +168,18 @@ def generate_signoff(user_id: int, mode: str = "tactical") -> str:
         index = (deterministic_num >> (i * 8)) % len(group)
         selected_words.append(group[index])
         
-    return f"{selected_words[0]} {selected_words[1]} {selected_words[2]}"
+    # Format the output so it looks completely natural to human readers
+    if mode == "casual":
+        # Turns "Stay active Keep going More soon" into "Stay active. Keep going. More soon."
+        return f"{selected_words[0]}. {selected_words[1]}. {selected_words[2]}."
+        
+    elif mode == "row":
+        # Turns ["ready", "join", "battle"] into "Be ready, join the battle."
+        return f"Be {selected_words[0]}, {selected_words[1]} the {selected_words[2]}."
+        
+    else:
+        # Tactical dictionary already has periods built into the words
+        return f"{selected_words[0]} {selected_words[1]} {selected_words[2]}"
 
 def generate_visual_variation(user_id: int) -> str:
     selected_words = []
@@ -210,19 +221,6 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing war announcement and sending uniquely blended messages to **{role.name}** (Auto-delete: 24h)...")
         
-        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
-        if "[opsec]" not in announcement.lower():
-            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
-            if len(paragraphs) >= 2:
-                # Place at the end of the first paragraph or middle block
-                mid = len(paragraphs) // 2
-                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
-                visible_text = "\n\n".join(paragraphs)
-            else:
-                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
-        else:
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
-
         sent, failed = 0, 0
         log_buffer = io.StringIO()
         log_buffer.write(f"--- WAR BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
@@ -232,11 +230,22 @@ class SpyDetector(commands.Cog):
                 continue
             
             unique_signoff = generate_signoff(member.id, mode="tactical")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            
+            if "[opsec]" not in announcement.lower():
+                paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+                if len(paragraphs) >= 2:
+                    mid = len(paragraphs) // 2
+                    paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                    visible_text = "\n\n".join(paragraphs)
+                else:
+                    visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+            else:
+                visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
-                await ctx.send(f"🚨 **ERROR:** Announcement too long! Reached **{len(full_msg)}/2000** characters for {member.name}. Please shorten your text and try again.")
+                await ctx.send(f"🚨 **ERROR:** Announcement too long! Reached **{len(full_msg)}/2000** characters for {member.name}.")
                 return 
             
             try:
@@ -275,19 +284,6 @@ class SpyDetector(commands.Cog):
             return
 
         await ctx.send(f"Processing test war announcement (with 30s auto-delete timer)...")
-        
-        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
-        if "[opsec]" not in announcement.lower():
-            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
-            if len(paragraphs) >= 2:
-                # Place at the end of the first paragraph or middle block
-                mid = len(paragraphs) // 2
-                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
-                visible_text = "\n\n".join(paragraphs)
-            else:
-                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
-        else:
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -298,11 +294,22 @@ class SpyDetector(commands.Cog):
                 continue
 
             unique_signoff = generate_signoff(member.id, mode="tactical")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            
+            if "[opsec]" not in announcement.lower():
+                paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+                if len(paragraphs) >= 2:
+                    mid = len(paragraphs) // 2
+                    paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                    visible_text = "\n\n".join(paragraphs)
+                else:
+                    visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+            else:
+                visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
-                await ctx.send(f"🚨 **ERROR:** Announcement too long! Reached **{len(full_msg)}/2000** characters for {member.name}. Please shorten your text and try again.")
+                await ctx.send(f"🚨 **ERROR:** Announcement too long! Reached **{len(full_msg)}/2000** characters for {member.name}.")
                 return 
 
             try:
@@ -339,25 +346,13 @@ class SpyDetector(commands.Cog):
             await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
             return
             
-        allowed_roles = ["Main RoW Team", "RoW Team 2"] 
+        allowed_roles = ["Main RoW Team", "Test"] 
         if role.name not in allowed_roles:
             await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
             return
 
         await ctx.send(f"Processing row announcement and sending uniquely blended messages to **{role.name}** (Auto-delete: 24h)...")
         
-        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
-        if "[opsec]" not in announcement.lower():
-            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
-            if len(paragraphs) >= 2:
-                # Place at the end of the first paragraph or middle block
-                mid = len(paragraphs) // 2
-                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
-                visible_text = "\n\n".join(paragraphs)
-            else:
-                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
-        else:
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
         sent, failed = 0, 0
         log_buffer = io.StringIO()
         log_buffer.write(f"--- ROW BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
@@ -367,7 +362,18 @@ class SpyDetector(commands.Cog):
                 continue
             
             unique_signoff = generate_signoff(member.id, mode="row")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            
+            if "[opsec]" not in announcement.lower():
+                paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+                if len(paragraphs) >= 2:
+                    mid = len(paragraphs) // 2
+                    paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                    visible_text = "\n\n".join(paragraphs)
+                else:
+                    visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+            else:
+                visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
@@ -410,19 +416,6 @@ class SpyDetector(commands.Cog):
             return
 
         await ctx.send(f"Processing test row announcement (with 30s auto-delete timer)...")
-        
-        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
-        if "[opsec]" not in announcement.lower():
-            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
-            if len(paragraphs) >= 2:
-                # Place at the end of the first paragraph or middle block
-                mid = len(paragraphs) // 2
-                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
-                visible_text = "\n\n".join(paragraphs)
-            else:
-                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
-        else:
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -433,7 +426,18 @@ class SpyDetector(commands.Cog):
                 continue
 
             unique_signoff = generate_signoff(member.id, mode="row")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            
+            if "[opsec]" not in announcement.lower():
+                paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+                if len(paragraphs) >= 2:
+                    mid = len(paragraphs) // 2
+                    paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                    visible_text = "\n\n".join(paragraphs)
+                else:
+                    visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+            else:
+                visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
@@ -547,19 +551,6 @@ class SpyDetector(commands.Cog):
             return
 
         await ctx.send(f"Processing test social announcement (with 30s auto-delete timer)...")
-        
-        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
-        if "[opsec]" not in announcement.lower():
-            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
-            if len(paragraphs) >= 2:
-                # Place at the end of the first paragraph or middle block
-                mid = len(paragraphs) // 2
-                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
-                visible_text = "\n\n".join(paragraphs)
-            else:
-                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
-        else:
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
 
         sent, failed = 0, 0
         log_buffer = io.StringIO()
@@ -570,7 +561,18 @@ class SpyDetector(commands.Cog):
                 continue
 
             unique_signoff = generate_signoff(member.id, mode="casual")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            
+            if "[opsec]" not in announcement.lower():
+                paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+                if len(paragraphs) >= 2:
+                    mid = len(paragraphs) // 2
+                    paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                    visible_text = "\n\n".join(paragraphs)
+                else:
+                    visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+            else:
+                visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
@@ -603,42 +605,6 @@ class SpyDetector(commands.Cog):
             
         log_buffer.close()
         await ctx.send(f"Test complete! Sent to {sent} member(s). DMs will vanish in 30 seconds.")
-    
-    @commands.command(name="catchscreenshot", aliases=["catch"])
-    @commands.has_permissions(administrator=True)
-    async def catchscreenshot(self, ctx, *, screenshot_text: str):
-        await ctx.send("Fetching full server member list & searching both war and social databases...")
-        
-        if not ctx.guild.chunked:
-            await ctx.guild.chunk()
-
-        def clean_text(raw_text: str) -> str:
-            cleaned = re.sub(r'[\u200b-\u200d\ufeff\u200e\u200f\u202a-\u202e]', '', raw_text)
-            cleaned = cleaned.lower().replace("’", "'").replace("“", '"').replace("”", '"')
-            cleaned = re.sub(r'[^a-z0-9\s]', '', cleaned)
-            return " ".join(cleaned.split())
-
-        target_cleaned = clean_text(screenshot_text)
-        matches = []
-
-        for member in ctx.guild.members:
-            if member.bot:
-                continue
-
-            # Inside your catchscreenshot loop:
-            expected_tactical = clean_text(generate_signoff(member.id, mode="tactical"))
-            expected_casual = clean_text(generate_signoff(member.id, mode="casual"))
-            expected_row = clean_text(generate_signoff(member.id, mode="row"))
-
-            # Check if ANY of the three fingerprints are found
-            if expected_tactical in target_cleaned or expected_casual in target_cleaned or expected_row in target_cleaned:
-                matches.append(member)
-
-        if matches:
-            found_users = "\n".join([f"- `{m.name}` (ID: `{m.id}`)" for m in matches])
-            await ctx.send(f"**MATCH FOUND!**\nThe leaked text belongs to:\n{found_users}")
-        else:
-            await ctx.send("No exact match found. Double-check for typos or missing words.")
             
 async def setup(bot):
     await bot.add_cog(SpyDetector(bot))
