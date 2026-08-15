@@ -203,7 +203,7 @@ class SpyDetector(commands.Cog):
             await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
             return
             
-        allowed_roles = ["NVR Member"] 
+        allowed_roles = ["Test"] 
         if role.name not in allowed_roles:
             await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
             return
@@ -459,7 +459,7 @@ class SpyDetector(commands.Cog):
             await ctx.send("🚨 **OPSEC ALERT:** Broadcasting to everyone is explicitly blocked to prevent leaks.")
             return
             
-        allowed_roles = ["NVR Member"] 
+        allowed_roles = ["Test"] 
         if role.name not in allowed_roles:
             await ctx.send(f"🚨 **OPSEC ALERT:** Broadcasts are restricted. You can only send to: `{', '.join(allowed_roles)}`")
             return
