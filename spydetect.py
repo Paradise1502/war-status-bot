@@ -481,18 +481,6 @@ class SpyDetector(commands.Cog):
 
         await ctx.send(f"Processing social announcement and sending uniquely blended messages to **{role.name}** (Auto-delete: 24h)...")
         
-        # Smarter auto-injection: Inserts cleanly at paragraph breaks, ignoring numbered lists
-        if "[opsec]" not in announcement.lower():
-            paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
-            if len(paragraphs) >= 2:
-                # Place at the end of the first paragraph or middle block
-                mid = len(paragraphs) // 2
-                paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
-                visible_text = "\n\n".join(paragraphs)
-            else:
-                visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
-        else:
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
         sent, failed = 0, 0
         log_buffer = io.StringIO()
         log_buffer.write(f"--- SOCIAL BROADCAST LOG ---\nTarget Role: {role.name}\nBase Message: {announcement}\n--------------------------\n\n")
@@ -501,8 +489,22 @@ class SpyDetector(commands.Cog):
             if member.bot:
                 continue
             
+            # 1. Generate unique signoff per member
             unique_signoff = generate_signoff(member.id, mode="casual")
-            visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+            
+            # 2. Clean paragraph-based injection per member
+            if "[opsec]" not in announcement.lower():
+                paragraphs = [p for p in announcement.split("\n\n") if p.strip()]
+                if len(paragraphs) >= 2:
+                    mid = len(paragraphs) // 2
+                    paragraphs[mid] = f"{paragraphs[mid]}\n{unique_signoff}"
+                    visible_text = "\n\n".join(paragraphs)
+                else:
+                    visible_text = f"{announcement.strip()}\n\n{unique_signoff}"
+            else:
+                visible_text = re.sub(r'\[opsec\]', unique_signoff, announcement, flags=re.IGNORECASE)
+
+            # 3. Watermark and Send
             full_msg = encode_watermark(visible_text, member.id)
 
             if len(full_msg) > 2000:
