@@ -838,7 +838,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         for row in data_latest[1:]:
             if len(row) <= max_needed_idx: continue
             lid = (row[id_idx] or "").strip()
-            group = .get(lid)
+            group = TEAM_ROSTER.get(lid)
             if not group: continue 
 
             prev_row = prev_map.get(lid)
