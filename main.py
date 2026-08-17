@@ -23,19 +23,20 @@ ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement ch
 
 # Season sheet mapping
 SEASON_SHEETS = {
-    "sos2": "Call of Dragons - SoS2",
+    "sos2_2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
     "sos6": "Call of Dragons - SoS6",
-    "sos2_2": "Call of Dragons - SoS2_2",
+    "sos2_3": "Call of Dragons - SoS2_2",
     "sos3": "NxW - SoS3",
     "sos4": "NxW - SoS4",
     "z2": "NxW - SoS4 - Z2",
     "fz": "NxW - FZ",
     "farms": "NVR Farms",
     "sos7": "EvG - SoS7",
+    "sos2": "NVR - SoS2",
 }
 
-SERVER_320_SHEET = "Call of Dragons - Server 320 Stats"
+SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
 
 DEFAULT_SEASON = "sos7"
 
@@ -583,6 +584,493 @@ async def topmana(ctx, *args):
             await ctx.send(f"❌ Discord error: {e}")
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
+async def groupstats(ctx, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
+    
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+            return
+
+    # 1. ADD YOUR TEAM ROSTER HERE
+    TEAM_ROSTER = {
+    "15165964": "Sun",
+    "12857281": "Moon",
+    "4000088": "Sun",
+    "3569766": "Moon",
+    "6420073": "Sun",
+    "12907861": "Moon",
+    "15309669": "Sun",
+    "12600393": "Moon",
+    "15168167": "Sun",
+    "2604968": "Moon",
+    "14931101": "Sun",
+    "14986396": "Moon",
+    "15137525": "Sun",
+    "15859464": "Moon",
+    "14920281": "Sun",
+    "15416591": "Moon",
+    "16007668": "Moon",
+    "15140100": "Sun",
+    "14685384": "Moon",
+    "15880004": "Sun",
+    "12564527": "Moon",
+    "12042542": "Sun",
+    "2404030": "Moon",
+    "11659353": "Sun",
+    "10046314": "Moon",
+    "1015374": "Sun",
+    "4188458": "Moon",
+    "13484309": "Sun",
+    "3246823": "Moon",
+    "13848161": "Sun",
+    "4352097": "Moon",
+    "12386205": "Sun",
+    "12391559": "Moon",
+    "11769711": "Sun",
+    "11589778": "Moon",
+    "2774776": "Sun",
+    "15719441": "Moon",
+    "8498158": "Sun",
+    "15727504": "Moon",
+    "9093069": "Sun",
+    "4188659": "Moon",
+    "1301820": "Sun",
+    "15203473": "Moon",
+    "9089694": "Sun",
+    "4781116": "Moon",
+    "11487055": "Sun",
+    "4475636": "Moon",
+    "10339011": "Sun",
+    "8532169": "Moon",
+    "15292305": "Sun",
+    "8654500": "Moon",
+    "4123943": "Sun",
+    "2069785": "Moon",
+    "2382626": "Sun",
+    "8167052": "Moon",
+    "93496": "Sun",
+    "14645040": "Moon",
+    "15344782": "Sun",
+    "12121490": "Moon",
+    "1157541": "Sun",
+    "15253936": "Moon",
+    "1207595": "Sun",
+    "14534389": "Moon",
+    "11648388": "Sun",
+    "9076185": "Moon",
+    "14841316": "Sun",
+    "1358230": "Moon",
+    "11498431": "Sun",
+    "1038031": "Moon",
+    "16072454": "Sun",
+    "12239902": "Moon",
+    "10870772": "Sun",
+    "1191528": "Moon",
+    "3568431": "Sun",
+    "1480794": "Moon",
+    "15137458": "Sun",
+    "15872187": "Moon",
+    "14860406": "Sun",
+    "3452794": "Moon",
+    "3911741": "Sun",
+    "14454676": "Moon",
+    "7871135": "Sun",
+    "921581": "Moon",
+    "11597010": "Sun",
+    "1363017": "Moon",
+    "12451416": "Sun",
+    "14894521": "Moon",
+    "3788189": "Sun",
+    "14991669": "Moon",
+    "12581309": "Sun",
+    "1177659": "Moon",
+    "472059": "Sun",
+    "15673802": "Moon",
+    "12049853": "Sun",
+    "12913373": "Moon",
+    "12861502": "Sun",
+    "11699043": "Moon",
+    "15888878": "Sun",
+    "15017853": "Moon",
+    "15592594": "Sun",
+    "7741397": "Moon",
+    "1288862": "Sun",
+    "4508150": "Moon",
+    "15639051": "Sun",
+    "3446240": "Moon",
+    "2355170": "Sun",
+    "14892554": "Moon",
+    "8218786": "Sun",
+    "12467111": "Moon",
+    "1475373": "Sun",
+    "15029841": "Moon",
+    "1129896": "Sun",
+    "9561066": "Moon",
+    "12426797": "Sun",
+    "11529501": "Moon",
+    "124604": "Sun",
+    "3937721": "Moon",
+    "1652362": "Sun",
+    "11516385": "Moon",
+    "3763091": "Sun",
+    "5306715": "Moon",
+    "14893533": "Sun",
+    "3238703": "Moon",
+    "12993192": "Sun",
+    "6409636": "Moon",
+    "3383792": "Sun",
+    "767323": "Moon",
+    "1327811": "Sun",
+    "14835271": "Moon",
+    "1696957": "Sun",
+    "15384392": "Moon",
+    "15138989": "Sun",
+    "14625955": "Moon",
+    "9011380": "Sun",
+    "14840981": "Moon",
+    "3884083": "Sun",
+    "13255722": "Moon",
+    "10403218": "Sun",
+    "5949871": "Moon",
+    "15039904": "Sun",
+    "3566602": "Moon",
+    "8347543": "Sun",
+    "3221838": "Moon",
+    "1902775": "Sun",
+    "1292270": "Moon",
+    "9298611": "Sun",
+    "15240107": "Moon",
+    "15808179": "Sun",
+    "4942738": "Moon",
+    "15665516": "Sun",
+    "11434627": "Moon",
+    "1896011": "Sun",
+    "3282829": "Moon",
+    "14868918": "Sun",
+    "6554196": "Moon",
+    "19117667": "Sun",
+    "1186483": "Moon",
+    "14859151": "Sun",
+    "14855893": "Moon",
+    "4213197": "Sun",
+    "12909862": "Moon",
+    "5465713": "Sun",
+    "1209648": "Moon",
+    "12049278": "Sun",
+    "1987541": "Moon",
+    "9900242": "Sun",
+    "2554608": "Moon",
+    "1485262": "Sun",
+    "37360": "Moon",
+    "15406991": "Sun",
+    "1666865": "Moon",
+    "16457327": "Sun",
+    "5501734": "Moon",
+    "14990715": "Sun",
+    "14891433": "Moon",
+    "13756181": "Sun",
+    "1426605": "Moon",
+    "14249731": "Sun",
+    "15238376": "Moon",
+    "9947044": "Sun",
+    "1771679": "Moon",
+    "14840896": "Sun",
+    "15985931": "Moon",
+    "15138403": "Sun",
+    "14322410": "Moon",
+    "8350805": "Sun",
+    "14697698": "Moon"
+}
+
+    try:
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season, season)
+        tabs = client.open(sheet_name).worksheets()
+        scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
+        
+        if len(scan_tabs) < 2:
+            await ctx.send("❌ Not enough scan sheets to compare.")
+            return
+
+        latest = scan_tabs[-1]
+        previous = scan_tabs[-2]
+        data_latest = latest.get_all_values()
+        data_prev   = previous.get_all_values()
+        headers = data_latest[0]
+
+        def find_idx(name, fallback):
+            if name in headers: return headers.index(name)
+            for i, h in enumerate(headers):
+                if name.lower() in h.lower(): return i
+            return fallback
+
+        def to_int(val):
+            try:
+                v = str(val).replace(',', '').replace(' ', '').strip()
+                return int(v) if v not in ("", "-") else 0
+            except: return 0
+
+        # Indices
+        id_idx     = find_idx("lord_id", 0)
+        name_idx   = find_idx("name", 1)
+        power_idx  = find_idx("highest_power", 2)
+        kills_idx  = find_idx("units_killed", 9) 
+        merits_idx = find_idx("merits", 11) 
+        heal_idx   = find_idx("units_healed", 18)
+        dead_idx   = find_idx("units_dead", 17)
+
+        max_needed_idx = max(heal_idx, kills_idx, merits_idx, power_idx, dead_idx)
+
+        prev_map = {
+            row[id_idx].strip(): row for row in data_prev[1:]
+            if len(row) > max_needed_idx and row[id_idx].strip()
+        }
+
+        group_data = {
+            "Sun":  {"power": 0, "kills": 0, "deads": 0, "heals": 0, "merits": 0, "players": []},
+            "Moon": {"power": 0, "kills": 0, "deads": 0, "heals": 0, "merits": 0, "players": []}
+        }
+
+        for row in data_latest[1:]:
+            if len(row) <= max_needed_idx: continue
+            lid = (row[id_idx] or "").strip()
+            group = TEAM_ROSTER.get(lid)
+            if not group: continue 
+
+            prev_row = prev_map.get(lid)
+            if prev_row is None: continue
+
+            p_gain = {
+                "name": row[name_idx],
+                "power": to_int(row[power_idx]),
+                "kills": to_int(row[kills_idx]) - to_int(prev_row[kills_idx]),
+                "deads": to_int(row[dead_idx]) - to_int(prev_row[dead_idx]),
+                "heals": to_int(row[heal_idx]) - to_int(prev_row[heal_idx]),
+                "merits": to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
+            }
+
+            g_stats = group_data[group]
+            g_stats["power"]  += p_gain["power"]
+            g_stats["kills"]  += p_gain["kills"]
+            g_stats["deads"]  += p_gain["deads"]
+            g_stats["heals"]  += p_gain["heals"]
+            g_stats["merits"] += p_gain["merits"]
+            g_stats["players"].append(p_gain)
+
+        # UI FORMATTING
+        def format_group_section(name, emoji, stats):
+            power = stats["power"]
+            merits = stats["merits"]
+            efficiency = (merits / power * 100) if power > 0 else 0
+            
+            # CRITICAL FIX: The spaces after the colons have been reduced. 
+            # If you add too many spaces here, Discord will push the right column down again.
+            def fmt(num):
+                if num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
+                elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
+                elif num >= 1_000: return f"{num / 1_000:.1f}K"
+                return str(num)
+            
+            stats_block = (
+                f"```yaml\n"
+                f"Power:  {fmt(power)}\n"
+                f"Merits: {fmt(merits)}\n"
+                f"Kills:  {fmt(stats['kills'])}\n"
+                f"Deads:  {fmt(stats['deads'])}\n"
+                f"Heals:  {fmt(stats['heals'])}\n"
+                f"Eff:    {efficiency:.2f}%\n"
+                f"```"
+            )
+
+            # Top Performers Block
+            top_players = sorted(stats["players"], key=lambda x: x["merits"], reverse=True)[:3]
+            medals = ["🥇", "🥈", "🥉"]
+            top_str = ""
+            for i, p in enumerate(top_players):
+                # Force long names to be shorter to protect the layout width
+                display_name = p['name'][:13] + ".." if len(p['name']) > 13 else p['name']
+                
+                # Removed the word " merits" at the end to save even more space!
+                top_str += f"{medals[i]} **{display_name}**\n└ `{fmt(p['merits'])}` Merits\n"
+
+            return f"{emoji} __**GROUP {name.upper()}**__", stats_block, top_str
+
+        # Create Single Embed
+        embed = discord.Embed(
+            title="📊 Group Stats - Sun vs Moon",
+            description=f"**Comparing:** `{previous.title}` ➔ `{latest.title}`\n" + "▬" * 15,
+            color=0x2f3136 # Dark "Discord" theme color
+        )
+
+        # Sun Group Fields
+        title_s, stats_s, top_s = format_group_section("Sun", "☀️", group_data["Sun"])
+        embed.add_field(name=title_s, value=stats_s, inline=True)
+        embed.add_field(name="⭐ TOP PERFORMERS", value=top_s, inline=True)
+        
+        # Spacer Field (Forces the next group to the bottom)
+        embed.add_field(name="\u200b", value="▬" * 30, inline=False)
+
+        # Moon Group Fields
+        title_m, stats_m, top_m = format_group_section("Moon", "🌙", group_data["Moon"])
+        embed.add_field(name=title_m, value=stats_m, inline=True)
+        embed.add_field(name="⭐ TOP PERFORMERS", value=top_m, inline=True)
+
+        embed.set_footer(text="If you read this, sun sucks.")
+        
+        # Ensure your datetime import matches this format
+        embed.timestamp = datetime.now(UTC) 
+
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ **Error:** {e}")
+
+@bot.command(aliases=['grouplb', 'gl'])
+async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
+    
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+        await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+        return
+
+    try:
+        # 1. FETCH SEASON DATA (For Merits & Deads Gains)
+        season = season.lower()
+        sheet_name = SEASON_SHEETS.get(season, season)
+        
+        # We need asyncio.to_thread if you are using it elsewhere to prevent blocking
+        tabs = client.open(sheet_name).worksheets()
+        scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
+        
+        if len(scan_tabs) < 2:
+            await ctx.send("❌ Not enough scan sheets to calculate leaderboard gains.")
+            return
+
+        latest = scan_tabs[-1]
+        previous = scan_tabs[-2]
+        data_latest = latest.get_all_values()
+        data_prev   = previous.get_all_values()
+        headers = data_latest[0]
+
+        def find_idx(name, fallback):
+            if name in headers: return headers.index(name)
+            for i, h in enumerate(headers):
+                if name.lower() in h.lower(): return i
+            return fallback
+
+        def to_int(val):
+            try:
+                v = str(val).replace(',', '').replace(' ', '').strip()
+                return int(v) if v not in ("", "-") else 0
+            except: return 0
+
+        id_idx     = find_idx("lord_id", 0)
+        name_idx   = find_idx("name", 1)
+        merits_idx = find_idx("merits", 11) 
+        dead_idx   = find_idx("units_dead", 17)
+        max_needed_idx = max(id_idx, name_idx, merits_idx, dead_idx)
+
+        prev_map = {
+            row[id_idx].strip(): row for row in data_prev[1:]
+            if len(row) > max_needed_idx and row[id_idx].strip()
+        }
+
+        # 2. FETCH SERVER 375 DATA (For Infantry Merits)
+        sheet_375 = client.open(SERVER_375_SHEET)
+        data_375 = sheet_375.sheet1.get_all_values()
+        headers_375 = data_375[0]
+        
+        id_col_375 = headers_375.index("Character ID")
+        inf_col_375 = headers_375.index("Infantry Only")
+        
+        # Create a dictionary mapping Lord ID to their Infantry Merits
+        inf_map = {}
+        for r in data_375[1:]:
+            if len(r) > max(id_col_375, inf_col_375):
+                inf_map[str(r[id_col_375]).strip()] = to_int(r[inf_col_375])
+
+        # 3. CALCULATE SCORES
+        sun_players = []
+        moon_players = []
+
+        for row in data_latest[1:]:
+            if len(row) <= max_needed_idx: continue
+            
+            lid = (row[id_idx] or "").strip()
+            group = TEAM_ROSTER.get(lid)
+            if not group: continue
+
+            prev_row = prev_map.get(lid)
+            if prev_row is None: continue
+
+            # Gains from Season Sheet
+            merits_gain = to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
+            deads_gain  = to_int(row[dead_idx]) - to_int(prev_row[dead_idx])
+            
+            # Static Total from 375 Sheet
+            inf_val = inf_map.get(lid, 0)
+            
+            # Scoring Formula: Merits (1x) + Infantry (2x) + Deads (5x)
+            score = (merits_gain * 1) + (inf_val * 2) + (deads_gain * 5)
+            
+            p_data = {
+                "name": row[name_idx],
+                "score": score,
+                "merits": merits_gain,
+                "infantry": inf_val,
+                "deads": deads_gain
+            }
+            
+            if group == "Sun":
+                sun_players.append(p_data)
+            elif group == "Moon":
+                moon_players.append(p_data)
+
+        # Sort both teams highest score to lowest
+        sun_players.sort(key=lambda x: x["score"], reverse=True)
+        moon_players.sort(key=lambda x: x["score"], reverse=True)
+
+        # UI FORMATTING HELPER
+        def fmt(num):
+            if num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
+            elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
+            elif num >= 1_000: return f"{num / 1_000:.1f}K"
+            return str(num)
+
+        def build_lb_text(players_list, limit=10):
+            if not players_list: return "No data available."
+            medals = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."]
+            lines = []
+            
+            for i, p in enumerate(players_list[:limit]):
+                medal = medals[i] if i < len(medals) else f"{i+1}."
+                name = p['name'][:14] + ".." if len(p['name']) > 14 else p['name']
+                lines.append(f"{medal} **{name}** — `{fmt(p['score'])}` pts")
+                lines.append(f"> M: {fmt(p['merits'])} | Inf: {fmt(p['infantry'])} | D: {fmt(p['deads'])}")
+            
+            return "\n".join(lines)
+
+        # Create the Embed
+        embed = discord.Embed(
+            title="🏆 Group Leaderboard - Sun vs Moon",
+            description=f"**Comparing:** `{previous.title}` ➔ `{latest.title}`\n"
+                        f"*Scoring: Merits (1x) | Infantry (2x) | Deads (5x)*\n" + "▬" * 15,
+            color=0x2f3136
+        )
+        
+        embed.add_field(name="☀️ TEAM SUN TOP 10", value=build_lb_text(sun_players, 10), inline=True)
+        embed.add_field(name="🌙 TEAM MOON TOP 10", value=build_lb_text(moon_players, 10), inline=True)
+        
+        embed.timestamp = datetime.now(UTC) 
+        await ctx.send(embed=embed)
+
+    except Exception as e:
+        await ctx.send(f"❌ **Error:** {e}")
 
 @bot.command()
 async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
@@ -1499,8 +1987,8 @@ async def farmcheck(ctx, farm_id: str):
         except Exception as e:
             await ctx.send(f"❌ Error: {e}")
 
-async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True, limit=10):
-    """Helper function to generate Top/Bottom leaderboards for Server 320 with multi-message support."""
+async def generate_375_leaderboard(ctx, stat_name, embed_title, is_top=True, limit=10):
+    """Helper function to generate Top/Bottom leaderboards for Server 375 with multi-message support."""
     # Cap limit between 1 and 100
     limit = min(max(limit, 1), 100)
 
@@ -1512,11 +2000,11 @@ async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True, lim
 
         try:
             # 1. Fetch Data
-            sheet_320 = await asyncio.to_thread(client.open, SERVER_320_SHEET)
-            ws_320 = sheet_320.sheet1
-            data_320 = await asyncio.to_thread(ws_320.get_all_values)
+            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
+            ws_375 = sheet_375.sheet1
+            data_375 = await asyncio.to_thread(ws_375.get_all_values)
 
-            headers = data_320[0]
+            headers = data_375[0]
             name_col = headers.index("Character Name")
             power_col = headers.index("Historical Highest Power")
             stat_col = headers.index(stat_name)
@@ -1529,7 +2017,7 @@ async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True, lim
 
             # 2. Filter for Accounts >= 50M Power
             valid_players = []
-            for row in data_320[1:]:
+            for row in data_375[1:]:
                 if len(row) > max(power_col, stat_col):
                     power = to_int_local(row[power_col])
                     if power >= 50000000:
@@ -1579,68 +2067,68 @@ async def generate_320_leaderboard(ctx, stat_name, embed_title, is_top=True, lim
 # --- INFANTRY ---
 @bot.command(aliases=['topinfantry'])
 async def topinf(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowinfantry'])
 async def lowinf(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=False, limit=amount)
 
 # --- CAVALRY ---
 @bot.command(aliases=['topcavalry'])
 async def topcav(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowcavalry'])
 async def lowcav(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=False, limit=amount)
 
 # --- ARCHER ---
 @bot.command(aliases=['topmarksman', 'toparchers'])
 async def toparcher(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowmarksman', 'lowarchers'])
 async def lowarcher(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Marksman Only", "🏹 Archer Merits", is_top=False, limit=amount)
 
 # --- MAGE ---
 @bot.command(aliases=['topmagic', 'topmages'])
 async def topmage(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowmagic', 'lowmages'])
 async def lowmage(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Magic Only", "🪄 Magic Merits", is_top=False, limit=amount)
 
 # --- HEALING ---
 @bot.command(aliases=['toprsshealing', 'toprssheals'])
 async def toprssheal(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowrsshealing', 'lowrssheals'])
 async def lowrssheal(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=False, limit=amount)
 
 # --- BUILD TIME ---
 @bot.command(aliases=['topbuildtime'])
 async def topbuild(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowbuildtime'])
 async def lowbuild(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=False, limit=amount)
 
 # --- DESTRUCTION TIME ---
 @bot.command(aliases=['topdestruction', 'topdestruct'])
 async def topdest(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowdestruction', 'lowdestruct'])
 async def lowdest(ctx, amount: int = 10):
-    await generate_320_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, "Destruction Time", "🧨 Destruction", is_top=False, limit=amount)
 
-@bot.command(aliases=['stats2'])
-async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+@bot.command(aliases=['stats'])
+async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
             # This creates a nicely formatted string of clickable channel links for the error message
@@ -1863,75 +2351,75 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         )
 
        # -------------------------------------------------------------
-        # NEW SECTION: Server 320 Exclusive Stats Check (Google Sheets)
+        # NEW SECTION: Server 375 Exclusive Stats Check (Google Sheets)
         # -------------------------------------------------------------
-        if player_server == "320":
+        if player_server == "375":
             try:
-                # 1. Open the Server 320 specific Google Sheet
-                sheet_320 = await asyncio.to_thread(client.open, SERVER_320_SHEET)
-                ws_320 = sheet_320.sheet1
-                data_320 = await asyncio.to_thread(ws_320.get_all_values)
+                # 1. Open the Server 375 specific Google Sheet
+                sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
+                ws_375 = sheet_375.sheet1
+                data_375 = await asyncio.to_thread(ws_375.get_all_values)
                 
-                headers_320 = data_320[0]
+                headers_375 = data_375[0]
                 
                 # 2. Dynamically find the column indexes
-                id_col = headers_320.index("Character ID")
-                hist_power_col = headers_320.index("Historical Highest Power") # <--- DEFINED HERE
-                inf_col = headers_320.index("Infantry Only")
-                cav_col = headers_320.index("Cavalry Only")
-                arch_col = headers_320.index("Marksman Only")
-                magic_col = headers_320.index("Magic Only")
-                heal_col = headers_320.index("Healing (T4/T5)")
-                build_col = headers_320.index("Build Time")
-                dest_col = headers_320.index("Destruction Time")
+                id_col = headers_375.index("Character ID")
+                hist_power_col = headers_375.index("Historical Highest Power") # <--- DEFINED HERE
+                inf_col = headers_375.index("Infantry Only")
+                cav_col = headers_375.index("Cavalry Only")
+                arch_col = headers_375.index("Marksman Only")
+                magic_col = headers_375.index("Magic Only")
+                heal_col = headers_375.index("Healing (T4/T5)")
+                build_col = headers_375.index("Build Time")
+                dest_col = headers_375.index("Destruction Time")
 
-                # 3. Filter the 320 data to ONLY include players with >= 50M Highest Power
-                server_320_data = []
-                player_row_320 = None
+                # 3. Filter the 375 data to ONLY include players with >= 50M Highest Power
+                server_375_data = []
+                player_row_375 = None
                 
-                for r in data_320[1:]:
+                for r in data_375[1:]:
                     if len(r) > dest_col:
                         r_id = str(r[id_col]).strip()
                         
                         # Only include if Historical Highest Power is at least 50,000,000
                         if to_int(r[hist_power_col]) >= 50000000:
-                            server_320_data.append(r)
+                            server_375_data.append(r)
                         
                         # Always grab the requested player's stats to display them
                         if r_id == str(lord_id):
-                            player_row_320 = r
+                            player_row_375 = r
                             # Guarantee the player is in the ranking pool even if they are somehow under 50m
                             if to_int(r[hist_power_col]) < 50000000:
-                                server_320_data.append(r)
+                                server_375_data.append(r)
                 
                 # 4. Helper function to calculate server rank for a specific column
-                def get_320_rank(col_index):
+                def get_375_rank(col_index):
                     # Sort server members descending based on the column value
-                    sorted_members = sorted(server_320_data, key=lambda x: to_int(x[col_index]), reverse=True)
+                    sorted_members = sorted(server_375_data, key=lambda x: to_int(x[col_index]), reverse=True)
                     for rank, row in enumerate(sorted_members, 1):
                         if str(row[id_col]).strip() == str(lord_id):
                             return rank
                     return None
 
-                # 5. If they exist in the 320 sheet, calculate ranks and inject the embed
-                if player_row_320:
-                    inf_val = to_int(player_row_320[inf_col])
-                    cav_val = to_int(player_row_320[cav_col])
-                    arch_val = to_int(player_row_320[arch_col])
-                    magic_val = to_int(player_row_320[magic_col])
+                # 5. If they exist in the 375 sheet, calculate ranks and inject the embed
+                if player_row_375:
+                    inf_val = to_int(player_row_375[inf_col])
+                    cav_val = to_int(player_row_375[cav_col])
+                    arch_val = to_int(player_row_375[arch_col])
+                    magic_val = to_int(player_row_375[magic_col])
                     
-                    heal_val = to_int(player_row_320[heal_col])
-                    build_val = to_int(player_row_320[build_col])
-                    dest_val = to_int(player_row_320[dest_col])
+                    heal_val = to_int(player_row_375[heal_col])
+                    build_val = to_int(player_row_375[build_col])
+                    dest_val = to_int(player_row_375[dest_col])
 
                     # Field 1: Troop Merits
                     embed.add_field(
                         name="Troop Merits (Server Rank)",
                         value=(
-                            f"⚔️ **Infantry:** {inf_val:,} `(#{get_320_rank(inf_col)})`\n"
-                            f"🐎 **Cavalry:** {cav_val:,} `(#{get_320_rank(cav_col)})`\n"
-                            f"🏹 **Archer:** {arch_val:,} `(#{get_320_rank(arch_col)})`\n"
-                            f"🪄 **Magic:** {magic_val:,} `(#{get_320_rank(magic_col)})`"
+                            f"⚔️ **Infantry:** {inf_val:,} `(#{get_375_rank(inf_col)})`\n"
+                            f"🐎 **Cavalry:** {cav_val:,} `(#{get_375_rank(cav_col)})`\n"
+                            f"🏹 **Archer:** {arch_val:,} `(#{get_375_rank(arch_col)})`\n"
+                            f"🪄 **Magic:** {magic_val:,} `(#{get_375_rank(magic_col)})`"
                         ),
                         inline=True
                     )
@@ -1940,14 +2428,14 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                     embed.add_field(
                         name="Utility (Server Rank)",
                         value=(
-                            f"❤️ **RSS Healing:** {heal_val:,} `(#{get_320_rank(heal_col)})`\n"
-                            f"🔨 **Build Time:** {build_val:,} `(#{get_320_rank(build_col)})`\n"
-                            f"🔨 **Destruction:** {dest_val:,} `(#{get_320_rank(dest_col)})`"
+                            f"❤️ **RSS Healing:** {heal_val:,} `(#{get_375_rank(heal_col)})`\n"
+                            f"🔨 **Build Time:** {build_val:,} `(#{get_375_rank(build_col)})`\n"
+                            f"🔨 **Destruction:** {dest_val:,} `(#{get_375_rank(dest_col)})`"
                         ),
                         inline=True
                     )
             except Exception as ex:
-                print(f"Failed to load Server 320 stats for {lord_id}: {ex}")
+                print(f"Failed to load Server 375 stats for {lord_id}: {ex}")
         # -------------------------------------------------------------
 
         if is_default_season:
@@ -1966,235 +2454,6 @@ async def progress2(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-@bot.command(aliases=['stats'])
-async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
-    async with ctx.typing():
-        
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
-    try:
-        season = season.lower()
-        is_default_season = (season == DEFAULT_SEASON)
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
-            return
-
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
-            return
-
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
-
-        def col_idx(col): return headers.index(col)
-
-        id_idx = col_idx("lord_id")
-        name_idx = 1
-        alliance_idx = 3
-        power_idx = headers.index("highest_power")
-        kills_idx = headers.index("units_killed")
-        dead_idx = headers.index("units_dead")
-        healed_idx = headers.index("units_healed")
-        gold_idx = headers.index("gold_spent")
-        wood_idx = headers.index("wood_spent")
-        ore_idx = headers.index("stone_spent")
-        mana_idx = headers.index("mana_spent")
-        t5_idx = headers.index("killcount_t5")
-        t4_idx = headers.index("killcount_t4")
-        t3_idx = headers.index("killcount_t3")
-        t2_idx = headers.index("killcount_t2")
-        t1_idx = headers.index("killcount_t1")
-        gold_gathered_idx = headers.index("gold")
-        wood_gathered_idx = headers.index("wood")
-        ore_gathered_idx = headers.index("ore")
-        mana_gathered_idx = headers.index("mana")
-        home_server_idx = headers.index("home_server")
-        merit_idx = headers.index("merits")  # L
-
-        def idx_any(*names):
-            for n in names:
-                if n in headers:
-                    return headers.index(n)
-            raise ValueError(f"Missing column; tried: {names}")
-        
-        def to_int(v):
-            try:
-                return int(v.replace(",", "").strip()) if v not in ("-", "") else 0
-            except:
-                return 0
-
-        def find_row(data):
-            for row in data[1:]:
-                if row[id_idx] == lord_id:
-                    return row
-            return None
-
-        row_latest = find_row(data_latest)
-        row_prev = find_row(data_prev)
-
-        if not row_latest or not row_prev:
-            await ctx.send("❌ Lord ID not found in both sheets. That's likely because you recently migrated in and don't show up in the first scan at the start of the season because of that.")
-            return
-
-        name = row_latest[name_idx]
-        alliance = row_latest[alliance_idx]
-        power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
-        power_latest = to_int(row_latest[power_idx])
-        merit_latest = to_int(row_latest[merit_idx])
-        merit_ratio = (merit_latest / to_int(row_latest[power_idx]) * 100) if to_int(row_latest[power_idx]) > 0 else 0
-        kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
-        dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
-        healed_gain = to_int(row_latest[healed_idx]) - to_int(row_prev[healed_idx])
-        gold = to_int(row_latest[gold_idx]) - to_int(row_prev[gold_idx])
-        wood = to_int(row_latest[wood_idx]) - to_int(row_prev[wood_idx])
-        ore = to_int(row_latest[ore_idx]) - to_int(row_prev[ore_idx])
-        mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
-        total_rss = gold + wood + ore + mana
-        gold_gathered = to_int(row_latest[gold_gathered_idx]) - to_int(row_prev[gold_gathered_idx])
-        wood_gathered = to_int(row_latest[wood_gathered_idx]) - to_int(row_prev[wood_gathered_idx])
-        ore_gathered = to_int(row_latest[ore_gathered_idx]) - to_int(row_prev[ore_gathered_idx])
-        mana_gathered = to_int(row_latest[mana_gathered_idx]) - to_int(row_prev[mana_gathered_idx])
-        total_gathered = gold_gathered + wood_gathered + ore_gathered + mana_gathered
-
-        # Create lookup from previous sheet
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
-
-        def get_merit_ratio_rank():
-            player_server = str(row_latest[home_server_idx]).strip()
-            ratios = []
-            for row in data_latest[1:]:
-                if len(row) <= max(merit_idx, power_idx, home_server_idx):
-                    continue
-                if str(row[home_server_idx]).strip() != player_server:
-                    continue
-                p_power = to_int(row[power_idx])
-                if p_power <= 0:
-                    continue
-                p_merit = to_int(row[merit_idx])
-                p_ratio = (p_merit / p_power) * 100
-                ratios.append((row[id_idx], p_ratio))
-
-            ratios.sort(key=lambda x: x[1], reverse=True)
-            for rank, (lid, _) in enumerate(ratios, 1):
-                if lid == lord_id:
-                    return rank
-            return None
-        
-        rank_merit_ratio = get_merit_ratio_rank()
-        
-        def get_rank(col_index):
-            player_row = next((r for r in data_latest[1:] if r[id_idx].strip() == lord_id), None)
-            if not player_row or len(player_row) <= home_server_idx:
-                return None
-
-            player_server = str(player_row[home_server_idx]).strip()
-            if not player_server:
-                return None
-
-            gains = []
-            for row in data_latest[1:]:
-                if len(row) <= col_index or len(row) <= home_server_idx:
-                    continue
-                if str(row[home_server_idx]).strip() != player_server:
-                    continue
-
-                lid = row[id_idx].strip()
-                prev_row = prev_map.get(lid)
-                if not prev_row:
-                    continue
-
-                val = to_int(row[col_index]) - to_int(prev_row[col_index])
-                gains.append((lid, val))
-
-            gains.sort(key=lambda x: x[1], reverse=True)
-
-            for rank, (lid, _) in enumerate(gains, 1):
-                if lid == lord_id:
-                    return rank
-
-            return None
-
-        rank_power = get_rank(power_idx)
-        rank_kills = get_rank(kills_idx)
-        rank_dead = get_rank(dead_idx)
-        rank_healed = get_rank(healed_idx)
-        rank_merit = get_rank(merit_idx)
-
-        t5_total = to_int(row_latest[t5_idx])
-        t4_total = to_int(row_latest[t4_idx])
-        t3_total = to_int(row_latest[t3_idx])
-        t2_total = to_int(row_latest[t2_idx])
-        t1_total = to_int(row_latest[t1_idx])
-
-        t5_gain = t5_total - to_int(row_prev[t5_idx])
-        t4_gain = t4_total - to_int(row_prev[t4_idx])
-        t3_gain = t3_total - to_int(row_prev[t3_idx])
-        t2_gain = t2_total - to_int(row_prev[t2_idx])
-        t1_gain = t1_total - to_int(row_prev[t1_idx])
-
-        embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
-        embed.add_field(name="🟩 Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" (#{rank_power})" if rank_power else ""), inline=False)
-        embed.add_field(name="🧠 Merits", value=f"{merit_latest:,} ({merit_ratio:.2f}%)" + (f" (#{rank_merit_ratio})" if rank_merit_ratio else ""), inline=False)
-        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" (#{rank_kills})" if rank_kills else ""), inline=True)
-        embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" (#{rank_dead})" if rank_dead else ""), inline=True)
-        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" (#{rank_healed})" if rank_healed else ""), inline=True)
-        """embed.add_field(
-            name="• Kill Breakdown (Farlight removed this stat from scans)",
-            value=(
-                f"T5: {t5_total:,} (+{t5_gain:,})\n"
-                f"T4: {t4_total:,} (+{t4_gain:,})\n"
-                f"T3: {t3_total:,} (+{t3_gain:,})\n"
-                f"T2: {t2_total:,} (+{t2_gain:,})\n"
-                f"T1: {t1_total:,} (+{t1_gain:,})"
-            ),
-            inline=True
-        )
-        embed.add_field(
-            name="📦 RSS Spent (Farlight removed this stat from scans)",
-            value=(
-                f"🪙 Gold: {gold:,}\n"
-                f"🪵 Wood: {wood:,}\n"
-                f"⛏️ Ore: {ore:,}\n"
-                f"💧 Mana: {mana:,}\n"
-                f"📦 Total: {total_rss:,}"
-            ),
-            inline=False
-        )"""
-        embed.add_field(
-            name="🧑‍🌾 RSS Gathered",
-            value=(
-                f"🪙 Gold: {gold_gathered:,}\n"
-                f"🪵 Wood: {wood_gathered:,}\n"
-                f"⛏️ Ore: {ore_gathered:,}\n"
-                f"💧 Mana: {mana_gathered:,}\n"
-                f"📦 **Total**: {total_gathered:,}"
-            ),
-            inline=False
-        )
-        if is_default_season:
-            embed.set_footer(
-                text=(
-                    f"📅 Timespan: {previous.title} → {latest.title}\n"
-                    "To view stats from the previous season, add 'sos2' or 'sos6' at the end of the command.\n"
-                    "Example: !progress 123456 sos6"
-                )
-            )
-        else:
-            embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
-
-        await ctx.send(embed=embed)
-
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
 
 from discord.ext import commands
 import discord
