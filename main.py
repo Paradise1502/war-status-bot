@@ -1241,8 +1241,7 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
                 medal = medals[i] if i < len(medals) else f"{i+1}."
                 name = p['name'][:14] + ".." if len(p['name']) > 14 else p['name']
                 lines.append(f"{medal} **{name}** — `{fmt(p['score'])}` pts")
-                # Swapped the ">" for "└"
-                lines.append(f"└ M: {fmt(p['merits'])} | Inf: {fmt(p['infantry'])} | D: {fmt(p['deads'])}")
+                lines.append(f"> M: {fmt(p['merits'])} | Inf: {fmt(p['infantry'])} | D: {fmt(p['deads'])}")
             
             return "\n".join(lines)
         # Calculate Total Points for each team
