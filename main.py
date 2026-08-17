@@ -585,16 +585,6 @@ async def topmana(ctx, *args):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-@bot.command()
-async def groupstats(ctx, season: str = DEFAULT_SEASON):
-    allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
-    
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
-
     # 1. ADD YOUR TEAM ROSTER HERE
     TEAM_ROSTER = {
     "15165964": "Sun",
@@ -786,6 +776,16 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
     "14697698": "Moon"
 }
 
+@bot.command()
+async def groupstats(ctx, season: str = DEFAULT_SEASON):
+    allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
+    
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            # This creates a nicely formatted string of clickable channel links for the error message
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+            return
+
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season, season)
@@ -838,7 +838,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         for row in data_latest[1:]:
             if len(row) <= max_needed_idx: continue
             lid = (row[id_idx] or "").strip()
-            group = TEAM_ROSTER.get(lid)
+            group = .get(lid)
             if not group: continue 
 
             prev_row = prev_map.get(lid)
