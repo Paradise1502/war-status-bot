@@ -585,7 +585,7 @@ async def topmana(ctx, *args):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-    # 1. ADD YOUR TEAM ROSTER HERE
+    # ADD YOUR TEAM ROSTER HERE
     TEAM_ROSTER = {
     "15165964": "Sun",
     "12857281": "Moon",
