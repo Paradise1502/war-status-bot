@@ -1244,6 +1244,9 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
                 lines.append(f"> M: {fmt(p['merits'])} | Inf: {fmt(p['infantry'])} | D: {fmt(p['deads'])}")
             
             return "\n".join(lines)
+        # Calculate Total Points for each team
+        sun_total = sum(p["score"] for p in sun_players)
+        moon_total = sum(p["score"] for p in moon_players)
 
         # Create the Embed
         embed = discord.Embed(
@@ -1253,8 +1256,8 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
             color=0x2f3136
         )
         
-        embed.add_field(name="☀️ TEAM SUN TOP 10", value=build_lb_text(sun_players, 10), inline=True)
-        embed.add_field(name="🌙 TEAM MOON TOP 10", value=build_lb_text(moon_players, 10), inline=True)
+        embed.add_field(name=f"☀️ TEAM SUN — {fmt(sun_total)} pts", value=build_lb_text(sun_players, 10), inline=True)
+        embed.add_field(name=f"🌙 TEAM MOON — {fmt(moon_total)} pts", value=build_lb_text(moon_players, 10), inline=True)
         
         embed.timestamp = datetime.now(UTC) 
         await ctx.send(embed=embed)
