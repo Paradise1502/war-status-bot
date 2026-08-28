@@ -2140,9 +2140,8 @@ async def farmcheck(ctx, farm_id: str):
         except Exception as e:
             await ctx.send(f"❌ Error: {e}")
 
-async def generate_375_leaderboard(ctx, stat_name, embed_title, is_top=True, limit=10):
+async def generate_375_leaderboard(ctx, stat_names, embed_title, is_top=True, limit=10):
     """Helper function to generate Top/Bottom leaderboards for Server 375 with multi-message support."""
-    # Cap limit between 1 and 100
     limit = min(max(limit, 1), 100)
 
     async with ctx.typing():
@@ -2160,7 +2159,12 @@ async def generate_375_leaderboard(ctx, stat_name, embed_title, is_top=True, lim
             headers = data_375[0]
             name_col = headers.index("Character Name")
             power_col = headers.index("Historical Highest Power")
-            stat_col = headers.index(stat_name)
+            
+            # Allow single string or list of strings for multiple columns
+            if isinstance(stat_names, str):
+                stat_names = [stat_names]
+            
+            stat_cols = [headers.index(name) for name in stat_names if name in headers]
 
             def to_int_local(v):
                 try:
@@ -2168,13 +2172,16 @@ async def generate_375_leaderboard(ctx, stat_name, embed_title, is_top=True, lim
                 except:
                     return 0
 
-            # 2. Filter for Accounts >= 50M Power
+            # 2. Filter for Accounts >= 50M Power & sum the requested columns
             valid_players = []
+            max_col_needed = max([power_col] + stat_cols)
+            
             for row in data_375[1:]:
-                if len(row) > max(power_col, stat_col):
+                if len(row) > max_col_needed:
                     power = to_int_local(row[power_col])
                     if power >= 50000000:
-                        val = to_int_local(row[stat_col])
+                        # Sum all columns provided (e.g., T4 + T5)
+                        val = sum(to_int_local(row[c]) for c in stat_cols)
                         valid_players.append((row[name_col], val))
 
             # 3. Sort list
@@ -2203,12 +2210,10 @@ async def generate_375_leaderboard(ctx, stat_name, embed_title, is_top=True, lim
                 for i, (p_name, p_val) in enumerate(chunk, start_rank):
                     desc += f"**{i}.** {p_name} — `{p_val:,}`\n"
 
-                # Subtitle indicates range (e.g. "Top 100 (1-50)" and "Top 100 (51-100)")
                 chunk_title = f"{embed_title} ({direction} {len(sliced_players)} — #{start_rank} to #{end_rank})"
                 
                 embed = discord.Embed(title=chunk_title, description=desc, color=color)
                 
-                # Footer on the last chunk
                 if index == len(chunks) - 1:
                     embed.set_footer(text="Filtered for accounts ≥ 50M Highest Power")
 
@@ -2256,11 +2261,11 @@ async def lowmage(ctx, amount: int = 10):
 # --- HEALING ---
 @bot.command(aliases=['toprsshealing', 'toprssheals'])
 async def toprssheal(ctx, amount: int = 10):
-    await generate_375_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=True, limit=amount)
+    await generate_375_leaderboard(ctx, ["T4 Healed", "T5 Healed"], "❤️ RSS Healing", is_top=True, limit=amount)
 
 @bot.command(aliases=['lowrsshealing', 'lowrssheals'])
 async def lowrssheal(ctx, amount: int = 10):
-    await generate_375_leaderboard(ctx, "Healing (T4/T5)", "❤️ RSS Healing", is_top=False, limit=amount)
+    await generate_375_leaderboard(ctx, ["T4 Healed", "T5 Healed"], "❤️ RSS Healing", is_top=False, limit=amount)
 
 # --- BUILD TIME ---
 @bot.command(aliases=['topbuildtime'])
@@ -2508,64 +2513,72 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         # -------------------------------------------------------------
         if player_server == "375":
             try:
-                # 1. Open the Server 375 specific Google Sheet
                 sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
                 ws_375 = sheet_375.sheet1
                 data_375 = await asyncio.to_thread(ws_375.get_all_values)
                 
                 headers_375 = data_375[0]
                 
-                # 2. Dynamically find the column indexes
                 id_col = headers_375.index("Character ID")
-                hist_power_col = headers_375.index("Historical Highest Power") # <--- DEFINED HERE
+                hist_power_col = headers_375.index("Historical Highest Power")
                 inf_col = headers_375.index("Infantry Only")
                 cav_col = headers_375.index("Cavalry Only")
                 arch_col = headers_375.index("Marksman Only")
                 magic_col = headers_375.index("Magic Only")
-                heal_col = headers_375.index("Healing (T4/T5)")
+                total_merit_col = headers_375.index("Total Merits")
+                enemy_merit_col = headers_375.index("Enemy Merits")
+                
+                # Split healing columns
+                t4_heal_col = headers_375.index("T4 Healed")
+                t5_heal_col = headers_375.index("T5 Healed")
+                heal_cols = [t4_heal_col, t5_heal_col]
+                
                 build_col = headers_375.index("Build Time")
                 dest_col = headers_375.index("Destruction Time")
 
-                # 3. Filter the 375 data to ONLY include players with >= 50M Highest Power
                 server_375_data = []
                 player_row_375 = None
                 
+                max_needed_375 = max(id_col, hist_power_col, inf_col, cav_col, arch_col, magic_col, t4_heal_col, t5_heal_col, build_col, dest_col)
+
                 for r in data_375[1:]:
-                    if len(r) > dest_col:
+                    if len(r) > max_needed_375:
                         r_id = str(r[id_col]).strip()
-                        
-                        # Only include if Historical Highest Power is at least 50,000,000
                         if to_int(r[hist_power_col]) >= 50000000:
                             server_375_data.append(r)
                         
-                        # Always grab the requested player's stats to display them
                         if r_id == str(lord_id):
                             player_row_375 = r
-                            # Guarantee the player is in the ranking pool even if they are somehow under 50m
                             if to_int(r[hist_power_col]) < 50000000:
                                 server_375_data.append(r)
                 
-                # 4. Helper function to calculate server rank for a specific column
-                def get_375_rank(col_index):
-                    # Sort server members descending based on the column value
-                    sorted_members = sorted(server_375_data, key=lambda x: to_int(x[col_index]), reverse=True)
+                def get_375_rank(col_indices):
+                    if isinstance(col_indices, int):
+                        col_indices = [col_indices]
+                    # Sum columns dynamically for sorting
+                    sorted_members = sorted(server_375_data, key=lambda x: sum(to_int(x[c]) for c in col_indices), reverse=True)
                     for rank, row in enumerate(sorted_members, 1):
                         if str(row[id_col]).strip() == str(lord_id):
                             return rank
                     return None
 
-                # 5. If they exist in the 375 sheet, calculate ranks and inject the embed
                 if player_row_375:
                     inf_val = to_int(player_row_375[inf_col])
                     cav_val = to_int(player_row_375[cav_col])
                     arch_val = to_int(player_row_375[arch_col])
                     magic_val = to_int(player_row_375[magic_col])
+                    total_merits_lifetime = to_int(player_row_375[total_merit_col])
+                    enemy_merits_lifetime = to_int(player_row_375[enemy_merit_col])
+                    traded_merits_lifetime = max(0, total_merits_lifetime - enemy_merits_lifetime)
+
+                    pvp_ratio = (enemy_merits_lifetime / total_merits_lifetime * 100) if total_merits_lifetime > 0 else 0
                     
-                    heal_val = to_int(player_row_375[heal_col])
+                    # Add T4 and T5 together
+                    heal_val = to_int(player_row_375[t4_heal_col]) + to_int(player_row_375[t5_heal_col])
+                    
                     build_val = to_int(player_row_375[build_col])
                     dest_val = to_int(player_row_375[dest_col])
 
-                    # Field 1: Troop Merits
                     embed.add_field(
                         name="Troop Merits (Server Rank)",
                         value=(
@@ -2577,18 +2590,29 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                         inline=True
                     )
 
-                    # Field 2: Utility
                     embed.add_field(
                         name="Utility (Server Rank)",
                         value=(
-                            f"❤️ **RSS Healing:** {heal_val:,} `(#{get_375_rank(heal_col)})`\n"
+                            f"❤️ **RSS Healing:** {heal_val:,} `(#{get_375_rank(heal_cols)})`\n"
                             f"🔨 **Build Time:** {build_val:,} `(#{get_375_rank(build_col)})`\n"
                             f"🔨 **Destruction:** {dest_val:,} `(#{get_375_rank(dest_col)})`"
                         ),
                         inline=True
                     )
+
+                    embed.add_field(
+                        name="⚔️ Combat Breakdown (Server Stats)",
+                        value=(
+                            f"🎯 **Enemy (Real) Merits:** {enemy_merits_lifetime:,} `(#{get_375_rank(enemy_merit_col)})`\n"
+                            f"🤝 **Traded Merits:** {traded_merits_lifetime:,}\n"
+                            f"🛡️ **PvP Legitimacy:** `{pvp_ratio:.1f}%`"
+                        ),
+                        inline=False
+                    )
+            
             except Exception as ex:
                 print(f"Failed to load Server 375 stats for {lord_id}: {ex}")
+        # -------------------------------------------------------------
         # -------------------------------------------------------------
 
         if is_default_season:
