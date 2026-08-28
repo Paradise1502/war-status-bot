@@ -1892,10 +1892,19 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
                 leader_text = "⚖️ **IT'S A PERFECT TIE!**"
                 color = discord.Color.gold()
 
+            # Calculate Tug-of-War Bar (10 blocks total)
+            total_points = p1_data["score"] + p2_data["score"]
+            if total_points > 0:
+                p1_blocks = round((p1_data["score"] / total_points) * 10)
+                p2_blocks = 10 - p1_blocks
+                tug_of_war = ("🟦" * p1_blocks) + ("🟥" * p2_blocks)
+            else:
+                tug_of_war = "⬛" * 10 # Empty bar if both are at 0
+
             # 6. BUILD UI
             embed = discord.Embed(
                 title="⚔️ THE MAGE DUEL ⚔️",
-                description=f"*Rules: All Merits (1x) | Infantry Merits (2x)*\n\n{leader_text}\n" + "▬" * 15,
+                description=f"*Rules: All Merits (1x) | Infantry Merits (2x)*\n\n{leader_text}\n{tug_of_war}\n" + "━" * 15,
                 color=color
             )
             
@@ -2621,15 +2630,9 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%" + (f" `(#{rank_merit_ratio})`" if rank_merit_ratio else ""), inline=True)
         embed.add_field(name="💧 Mana Gathered", value=f"**+{mana_gathered:,}**" + (f" `(#{rank_mana_gathered})`" if rank_mana_gathered and mana_gathered > 0 else ""), inline=True)
 
-       # --- DIVIDER ---
-        embed.add_field(name="━━━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
-
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
-
-        # --- DIVIDER ---
-        embed.add_field(name="━━━━━━━━━━━━━━━━━━━━━━", value="\u200b", inline=False)
        
        # -------------------------------------------------------------
         # NEW SECTION: Server 375 Exclusive Stats Check (Google Sheets)
