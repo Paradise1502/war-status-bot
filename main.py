@@ -2625,7 +2625,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
-        
+        # Invisible spacer to force the next fields to a new line
+        # ------------------------------
         embed.add_field(
             name="💧 Mana Gathered",
             value=f"**+{mana_gathered:,}**" + (f" `(#{rank_mana_gathered})`" if rank_mana_gathered and mana_gathered > 0 else ""),
