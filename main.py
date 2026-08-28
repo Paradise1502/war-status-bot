@@ -2223,20 +2223,20 @@ async def generate_375_leaderboard(ctx, stat_names, embed_title, is_top=True, li
             await ctx.send(f"❌ Error loading leaderboard: {e}")
 
 # --- INFANTRY ---
-@bot.command(aliases=['topinfantry'])
+@bot.command(aliases=['topinfantry', 'topinf'])
 async def topinf(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=True, limit=amount)
 
-@bot.command(aliases=['lowinfantry'])
+@bot.command(aliases=['lowinfantry', 'lowinf'])
 async def lowinf(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, "Infantry Only", "⚔️ Infantry Merits", is_top=False, limit=amount)
 
 # --- CAVALRY ---
-@bot.command(aliases=['topcavalry'])
+@bot.command(aliases=['topcavalry', 'topcav'])
 async def topcav(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=True, limit=amount)
 
-@bot.command(aliases=['lowcavalry'])
+@bot.command(aliases=['lowcavalry', 'lowcav'])
 async def lowcav(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, "Cavalry Only", "🐎 Cavalry Merits", is_top=False, limit=amount)
 
@@ -2268,11 +2268,11 @@ async def lowrssheal(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, ["T4 Healed", "T5 Healed"], "❤️ RSS Healing", is_top=False, limit=amount)
 
 # --- BUILD TIME ---
-@bot.command(aliases=['topbuildtime'])
+@bot.command(aliases=['topbuildtime', 'topbuild'])
 async def topbuild(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=True, limit=amount)
 
-@bot.command(aliases=['lowbuildtime'])
+@bot.command(aliases=['lowbuildtime', 'lowbuild'])
 async def lowbuild(ctx, amount: int = 10):
     await generate_375_leaderboard(ctx, "Build Time", "🔨 Build Time", is_top=False, limit=amount)
 
