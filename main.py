@@ -1210,9 +1210,9 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
                     
             return desc
         
-        # Then assign these to your embed fields:
-        sun_text = build_team_desc(sun_sorted)
-        moon_text = build_team_desc(moon_sorted)
+        # Change these variables to match what you named them above!
+        sun_text = build_team_desc(sun_players) 
+        moon_text = build_team_desc(moon_players)
 
         # Create the Embed
         embed = discord.Embed(
