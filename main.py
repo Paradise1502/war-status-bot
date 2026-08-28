@@ -2552,11 +2552,15 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                             if to_int(r[hist_power_col]) < 50000000:
                                 server_375_data.append(r)
                 
-                def get_375_rank(col_indices):
+                def get_375_rank(col_indices, operation="sum"):
                     if isinstance(col_indices, int):
                         col_indices = [col_indices]
-                    # Sum columns dynamically for sorting
-                    sorted_members = sorted(server_375_data, key=lambda x: sum(to_int(x[c]) for c in col_indices), reverse=True)
+                    
+                    if operation == "subtract" and len(col_indices) == 2:
+                        sorted_members = sorted(server_375_data, key=lambda x: to_int(x[col_indices[0]]) - to_int(x[col_indices[1]]), reverse=True)
+                    else:
+                        sorted_members = sorted(server_375_data, key=lambda x: sum(to_int(x[c]) for c in col_indices), reverse=True)
+                        
                     for rank, row in enumerate(sorted_members, 1):
                         if str(row[id_col]).strip() == str(lord_id):
                             return rank
@@ -2601,10 +2605,10 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                     )
 
                     embed.add_field(
-                        name="⚔️ Combat Breakdown (Server Stats)",
+                        name="Combat Breakdown (Server Stats)",
                         value=(
                             f"🎯 **Enemy (Real) Merits:** {enemy_merits_lifetime:,} `(#{get_375_rank(enemy_merit_col)})`\n"
-                            f"🤝 **Traded Merits:** {traded_merits_lifetime:,}\n"
+                            f"🤝 **Traded Merits:** {traded_merits_lifetime:,} `(#{get_375_rank([total_merit_col, enemy_merit_col], operation='subtract')})`\n"
                             f"🛡️ **PvP Legitimacy:** `{pvp_ratio:.1f}%`"
                         ),
                         inline=False
