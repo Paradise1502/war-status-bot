@@ -2741,8 +2741,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                     embed.add_field(
                         name="Utility (Server Rank)",
                         value=(
-                            f"❤️ **T4 RSS Healing:** {t4_heal_val:,} `(#{get_375_rank(t4_heal_col)})`\n"
                             f"❤️ **T5 RSS Healing:** {t5_heal_val:,} `(#{get_375_rank(t5_heal_col)})`\n"
+                            f"❤️ **T4 RSS Healing:** {t4_heal_val:,} `(#{get_375_rank(t4_heal_col)})`\n"
                             f"🔨 **Build Time:** {build_val:,} `(#{get_375_rank(build_col)})`\n"
                             f"🔨 **Destruction:** {dest_val:,} `(#{get_375_rank(dest_col)})`"
                         ),
