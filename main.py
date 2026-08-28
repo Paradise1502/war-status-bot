@@ -1801,6 +1801,135 @@ async def lowmerits(ctx, *args):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+@bot.command(aliases=['mage1v1', 'duel', 'challenge'])
+async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
+    """Custom 1v1 Challenge: Tinzy vs Balakas"""
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        channels_mentions = ", ".join([f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID])
+        await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+        return
+
+    async with ctx.typing():
+        try:
+            # 1. FETCH SEASON DATA (For Merits Gains)
+            season = season.lower()
+            sheet_name = SEASON_SHEETS.get(season, season)
+            
+            tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+            scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
+            
+            if len(scan_tabs) < 2:
+                await ctx.send("❌ Not enough scan sheets to calculate gains.")
+                return
+
+            latest = scan_tabs[-1]
+            previous = scan_tabs[-2]
+            data_latest = latest.get_all_values()
+            data_prev   = previous.get_all_values()
+            headers = data_latest[0]
+
+            id_idx = headers.index("lord_id") if "lord_id" in headers else 0
+            name_idx = 1
+            merits_idx = headers.index("merits")
+
+            prev_map = {row[id_idx].strip(): row for row in data_prev[1:] if len(row) > merits_idx}
+
+            # 2. FETCH SERVER 375 DATA (For Infantry)
+            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
+            data_375 = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
+            headers_375 = data_375[0]
+            
+            id_col_375 = headers_375.index("Character ID")
+            inf_col_375 = headers_375.index("Infantry Only")
+            
+            inf_map = {str(r[id_col_375]).strip(): int(str(r[inf_col_375]).replace(",", "").strip() or 0) for r in data_375[1:] if len(r) > inf_col_375}
+
+            # 3. CONTENDERS SETUP
+            contenders = {
+                "1240639": {"display": "Tinzy", "emoji": "🔵"},
+                "12451416": {"display": "BaLaKaS", "emoji": "🔴"}
+            }
+            
+            results = {}
+
+            # 4. CALCULATE SCORES
+            for row in data_latest[1:]:
+                lid = str(row[id_idx]).strip()
+                if lid in contenders:
+                    prev_row = prev_map.get(lid)
+                    if not prev_row: continue
+                    
+                    # Math: Merit Gain (1x) + Infantry Total (2x)
+                    merit_gain = int(str(row[merits_idx]).replace(",", "").strip() or 0) - int(str(prev_row[merits_idx]).replace(",", "").strip() or 0)
+                    inf_total = inf_map.get(lid, 0)
+                    
+                    score = merit_gain + (inf_total * 2)
+                    
+                    results[lid] = {
+                        "name": row[name_idx],
+                        "merit_gain": merit_gain,
+                        "inf_total": inf_total,
+                        "score": score
+                    }
+
+            if len(results) < 2:
+                await ctx.send("❌ Could not find both contenders in the current scan data.")
+                return
+
+            # 5. DETERMINE LEADER
+            p1_id = "1240639"
+            p2_id = "12451416"
+            p1_data = results[p1_id]
+            p2_data = results[p2_id]
+            
+            if p1_data["score"] > p2_data["score"]:
+                leader_text = f"🏆 **{contenders[p1_id]['display']}** is leading by **{p1_data['score'] - p2_data['score']:,}** pts!"
+                color = discord.Color.blue()
+            elif p2_data["score"] > p1_data["score"]:
+                leader_text = f"🏆 **{contenders[p2_id]['display']}** is leading by **{p2_data['score'] - p1_data['score']:,}** pts!"
+                color = discord.Color.red()
+            else:
+                leader_text = "⚖️ **IT'S A PERFECT TIE!**"
+                color = discord.Color.gold()
+
+            # 6. BUILD UI
+            embed = discord.Embed(
+                title="⚔️ THE MAGE DUEL ⚔️",
+                description=f"*Rules: All Merits (1x) | Infantry Merits (2x)*\n\n{leader_text}\n" + "▬" * 15,
+                color=color
+            )
+            
+            # Format numbers helper
+            def fmt(num): return f"{num:,}"
+
+            embed.add_field(
+                name=f"{contenders[p1_id]['emoji']} {p1_data['name']}",
+                value=(
+                    f"**Score:** `{fmt(p1_data['score'])}` pts\n"
+                    f"└ Merits: {fmt(p1_data['merit_gain'])}\n"
+                    f"└ Infantry: {fmt(p1_data['inf_total'])}"
+                ),
+                inline=True
+            )
+            
+            embed.add_field(name="🆚", value="\u200b\n\u200b", inline=True) # Spacer
+
+            embed.add_field(
+                name=f"{contenders[p2_id]['emoji']} {p2_data['name']}",
+                value=(
+                    f"**Score:** `{fmt(p2_data['score'])}` pts\n"
+                    f"└ Merits: {fmt(p2_data['merit_gain'])}\n"
+                    f"└ Infantry: {fmt(p2_data['inf_total'])}"
+                ),
+                inline=True
+            )
+            
+            embed.set_footer(text=f"Comparing: {previous.title} → {latest.title}")
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"❌ **Error generating duel:** {e}")
+
 @bot.command()
 async def allmana(ctx, season: str = DEFAULT_SEASON):
     """Shows the total mana gathered by the entire alliance and its dollar value."""
