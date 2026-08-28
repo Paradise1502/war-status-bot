@@ -2593,7 +2593,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
             return None
 
-        rank_power = get_rank(power_idx)
+        rank_power = get_total_rank(power_idx)
         rank_kills = get_rank(kills_idx)
         rank_dead = get_rank(dead_idx)
         rank_healed = get_rank(healed_idx)
@@ -2626,13 +2626,9 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
         
         embed.add_field(
-            name="🧑‍🌾 RSS Gathered",
+            name="🧑‍🌾 Mana Gathered",
             value=(
-                f"🪙 Gold: {gold_gathered:,}\n"
-                f"🪵 Wood: {wood_gathered:,}\n"
-                f"⛏️ Ore: {ore_gathered:,}\n"
-                f"💧 Mana: {mana_gathered:,}\n"
-                f"📦 **Total**: {total_gathered:,}"
+                f"💧 **Mana**: {mana_gathered:,}\n"
             ),
             inline=False
         )
