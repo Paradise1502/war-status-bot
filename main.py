@@ -2598,6 +2598,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         rank_dead = get_rank(dead_idx)
         rank_healed = get_rank(healed_idx)
         rank_merit = get_rank(merit_idx)
+        rank_mana_gathered = get_rank(mana_gathered_idx)
 
         t5_total = to_int(row_latest[t5_idx])
         t4_total = to_int(row_latest[t4_idx])
@@ -2626,11 +2627,9 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
         
         embed.add_field(
-            name="🧑‍🌾 Mana Gathered",
-            value=(
-                f"💧 **Mana**: {mana_gathered:,}\n"
-            ),
-            inline=False
+            name="💧 Mana Gathered",
+            value=f"**+{mana_gathered:,}**" + (f" `(#{rank_mana_gathered})`" if rank_mana_gathered and mana_gathered > 0 else ""),
+            inline=True
         )
 
        # -------------------------------------------------------------
@@ -2749,9 +2748,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             embed.set_footer(
                 text=(
                     f"📅 Timespan: {previous.title} → {latest.title}\n"
-                    "Some stats can be different, because I pull data from my own scans and ingame tool (resets later).\n"
-                    "To view stats from the previous season, add 'sos2' or 'sos6' at the end of the command.\n"
-                    "Example: !progress 123456 sos6"
+                    "⚠️ Stats may vary slightly from in-game counters due to scan timing.\n"
+                    "🔍 View past seasons by appending a season code (e.g., !progress 123456 sos6)."
                 )
             )
         else:
