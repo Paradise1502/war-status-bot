@@ -1177,28 +1177,42 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
         sun_players.sort(key=lambda x: x["score"], reverse=True)
         moon_players.sort(key=lambda x: x["score"], reverse=True)
 
-        # UI FORMATTING HELPER
+                # Helper to format big numbers cleanly (if you don't already have one)
         def fmt(num):
-            if num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
-            elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
-            elif num >= 1_000: return f"{num / 1_000:.1f}K"
+            if num >= 1_000_000:
+                return f"{num/1_000_000:.2f}M"
+            elif num >= 1_000:
+                return f"{num/1_000:.1f}K"
             return str(num)
-
-        def build_lb_text(players_list, limit=10):
-            if not players_list: return "No data available."
-            medals = ["🥇", "🥈", "🥉", "4.", "5.", "6.", "7.", "8.", "9.", "10."]
-            lines = []
-            
-            for i, p in enumerate(players_list[:limit]):
-                medal = medals[i] if i < len(medals) else f"{i+1}."
-                name = p['name'][:14] + ".." if len(p['name']) > 14 else p['name']
-                lines.append(f"{medal} **{name}** — `{fmt(p['score'])}` pts")
-                lines.append(f"> M: {fmt(p['merits'])} | Inf: {fmt(p['infantry'])} | D: {fmt(p['deads'])}")
-            
-            return "\n".join(lines)
-        # Calculate Total Points for each team
-        sun_total = sum(p["score"] for p in sun_players)
-        moon_total = sum(p["score"] for p in moon_players)
+        
+        def build_team_desc(team_players):
+            desc = ""
+            for i, p in enumerate(team_players[:10], 1):
+                # 1. Truncate long names to prevent Discord text wrapping
+                raw_name = p['name']
+                display_name = raw_name[:12] + ".." if len(raw_name) > 12 else raw_name
+                
+                # 2. Assign Medals
+                if i == 1: rank_icon = "🥇"
+                elif i == 2: rank_icon = "🥈"
+                elif i == 3: rank_icon = "🥉"
+                else: rank_icon = f"**{i}.**"
+        
+                score_val = p['score']
+                
+                # 3. Main Player Line
+                desc += f"{rank_icon} {display_name} — `{fmt(score_val)}`\n"
+        
+                # 4. Only show the detailed breakdown for Top 3 MVPs (if they actually scored!)
+                if i <= 3 and score_val > 0:
+                    # Using emojis instead of 'M:' and 'Inf:' saves even more horizontal space
+                    desc += f"└ 🧠 {fmt(p['merits'])} | ⚔️ {fmt(p['infantry'])} | 💀 {fmt(p['deads'])}\n"
+                    
+            return desc
+        
+        # Then assign these to your embed fields:
+        sun_text = build_team_desc(sun_sorted)
+        moon_text = build_team_desc(moon_sorted)
 
         # Create the Embed
         embed = discord.Embed(
