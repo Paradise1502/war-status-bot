@@ -2616,17 +2616,10 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         
         embed.add_field(name="🟩 Highest Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" `(#{rank_power})`" if rank_power else ""), inline=False)
         
-        # --- NEW SPLIT MERIT FIELDS ---
+        # Row 2 (3 Items)
         embed.add_field(name="🧠 Total Merits", value=f"{merit_latest:,}" + (f" `(#{rank_total_merit})`" if rank_total_merit else ""), inline=True)
         embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%" + (f" `(#{rank_merit_ratio})`" if rank_merit_ratio else ""), inline=True)
-        embed.add_field(name="\u200b", value="\u200b", inline=True) 
-
-        # We replaced the invisible spacer with Mana Gathered so it sits on the same row!
-        embed.add_field(
-            name="💧 Mana Gathered",
-            value=f"**+{mana_gathered:,}**" + (f" `(#{rank_mana_gathered})`" if rank_mana_gathered and mana_gathered > 0 else ""),
-            inline=True
-        )
+        embed.add_field(name="💧 Mana Gathered", value=f"**+{mana_gathered:,}**" + (f" `(#{rank_mana_gathered})`" if rank_mana_gathered and mana_gathered > 0 else ""), inline=True)
 
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
