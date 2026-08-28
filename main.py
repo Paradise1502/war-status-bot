@@ -38,7 +38,7 @@ SEASON_SHEETS = {
 
 SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
 
-DEFAULT_SEASON = "sos7"
+DEFAULT_SEASON = "sos2"
 
 # Now your bot setup
 intents = discord.Intents.default()
