@@ -2577,8 +2577,9 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
                     pvp_ratio = (enemy_merits_lifetime / total_merits_lifetime * 100) if total_merits_lifetime > 0 else 0
                     
-                    # Add T4 and T5 together
-                    heal_val = to_int(player_row_375[t4_heal_col]) + to_int(player_row_375[t5_heal_col])
+                    # Extract T4 and T5 separately instead of adding them
+                    t4_heal_val = to_int(player_row_375[t4_heal_col])
+                    t5_heal_val = to_int(player_row_375[t5_heal_col])
                     
                     build_val = to_int(player_row_375[build_col])
                     dest_val = to_int(player_row_375[dest_col])
@@ -2597,7 +2598,8 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                     embed.add_field(
                         name="Utility (Server Rank)",
                         value=(
-                            f"❤️ **RSS Healing:** {heal_val:,} `(#{get_375_rank(heal_cols)})`\n"
+                            f"❤️ **T4 RSS Healing:** {t4_heal_val:,} `(#{get_375_rank(t4_heal_col)})`\n"
+                            f"❤️ **T5 RSS Healing:** {t5_heal_val:,} `(#{get_375_rank(t5_heal_col)})`\n"
                             f"🔨 **Build Time:** {build_val:,} `(#{get_375_rank(build_col)})`\n"
                             f"🔨 **Destruction:** {dest_val:,} `(#{get_375_rank(dest_col)})`"
                         ),
@@ -2609,7 +2611,6 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
                         value=(
                             f"🎯 **Enemy (Real) Merits:** {enemy_merits_lifetime:,} `(#{get_375_rank(enemy_merit_col)})`\n"
                             f"🤝 **Traded Merits:** {traded_merits_lifetime:,} `(#{get_375_rank([total_merit_col, enemy_merit_col], operation='subtract')})`\n"
-                            f"🛡️ **PvP Legitimacy:** `{pvp_ratio:.1f}%`"
                         ),
                         inline=False
                     )
