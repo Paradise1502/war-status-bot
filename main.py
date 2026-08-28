@@ -2624,6 +2624,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             embed.set_footer(
                 text=(
                     f"📅 Timespan: {previous.title} → {latest.title}\n"
+                    "Some stats can be different, because I pull data from my own scans and ingame tool (resets later).\n"
                     "To view stats from the previous season, add 'sos2' or 'sos6' at the end of the command.\n"
                     "Example: !progress 123456 sos6"
                 )
