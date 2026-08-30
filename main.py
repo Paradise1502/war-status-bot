@@ -1923,10 +1923,19 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
                 leader_text = "⚖️ **IT'S A PERFECT TIE!**"
                 color = discord.Color.gold()
 
+            # Calculate 10-block Tug-of-War Bar
+            total_points = p1_data["score"] + p2_data["score"]
+            if total_points > 0:
+                p1_blocks = round((p1_data["score"] / total_points) * 10)
+                p2_blocks = 10 - p1_blocks
+                tug_of_war = ("🟦" * p1_blocks) + ("🟥" * p2_blocks)
+            else:
+                tug_of_war = "⬛" * 10
+
             # 6. BUILD UI
             embed = discord.Embed(
                 title="⚔️ THE DUEL: xpp vs raz ⚔️",
-                description=f"*Rules: xpp (Mages 2x, Rest 1x) | raz (All 1x)*\n\n{leader_text}\n" + "▬" * 15,
+                description=f"*Rules: xpp (Mages 2x, Rest 1x) | raz (All 1x)*\n\n{leader_text}\n{tug_of_war}\n" + "▬" * 15,
                 color=color
             )
             
