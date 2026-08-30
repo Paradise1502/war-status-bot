@@ -1858,9 +1858,16 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
             
             id_col_375 = headers_375.index("Character ID")
             magic_col_375 = headers_375.index("Magic Only")
+
+            def to_int(v):
+                try:
+                    val = str(v).replace(",", "").strip()
+                    return int(val) if val not in ("-", "") else 0
+                except:
+                    return 0
             
             # Map Character ID -> Magic Merits
-            magic_map = {str(r[id_col_375]).strip(): int(str(r[magic_col_375]).replace(",", "").strip() or 0) for r in data_375[1:] if len(r) > magic_col_375}
+            magic_map = {str(r[id_col_375]).strip(): to_int(r[magic_col_375]) for r in data_375[1:] if len(r) > magic_col_375}
 
             # 3. CONTENDERS SETUP
             p1_id = "15500649" # xpp
@@ -1880,7 +1887,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
                     prev_row = prev_map.get(lid)
                     if not prev_row: continue
                     
-                    merit_gain = int(str(row[merits_idx]).replace(",", "").strip() or 0) - int(str(prev_row[merits_idx]).replace(",", "").strip() or 0)
+                    merit_gain = to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
                     magic_total = magic_map.get(lid, 0)
                     
                     # Asymmetric Scoring Logic
