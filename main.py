@@ -3137,12 +3137,11 @@ async def matchups2(ctx, season: str = "test"):
 @bot.command()
 async def matchups(ctx, season: str = DEFAULT_SEASON):
     async with ctx.typing():
-        
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
+            
     try:
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season, season)
@@ -3158,7 +3157,7 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
         data_prev   = previous.get_all_values()
         headers = data_latest[0]
 
-        # header lookups with safe fallback to known positions (0-based)
+        # Header lookups with safe fallback
         def find_idx(name, fallback):
             return headers.index(name) if name in headers else fallback
 
@@ -3171,8 +3170,6 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
                 return 0
 
         def fmt_gain(n): return f"+{n:,}" if n > 0 else f"{n:,}"
-        def format_title_with_dates(prev_name, latest_name):
-            return f"📊 War Matchups ({prev_name} → {latest_name})"
 
         def emoji_bracket(server):
             return {
@@ -3183,33 +3180,34 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
 
         SERVER_MAP = {
             "375": "NVR", "357": "YSS", "756": "SAB", "341": "NW:E",
-            "320": "EvG", "5": "OMG"        }
+            "320": "EvG", "5": "OMG"
+        }
 
-        # Matchups structured as tuples: (Team A tuple, Team B tuple)
+        # CRITICAL FIX: These must be formatted as lists inside the tuple, 
+        # otherwise Python treats ("375") as a raw string and iterates over characters ('3', '7', '5')
         matchups = [
-            (("375"), ("357")),          # 1v1
-            (("5"), ("320")),
-            (("756"), ("341")),# 1v1
+            (["375"], ["357"]),  
+            (["756"], ["341"]),
+            (["5"], ["320"])
         ]
 
-        # indices
+        # Indices
         id_idx     = find_idx("lord_id",        0)
         server_idx = find_idx("home_server",    5)
-        kills_idx  = find_idx("units_killed",   9)  # Column J is index 9
+        kills_idx  = find_idx("units_killed",   9) 
         merits_idx = find_idx("merits (only 50m+ power)", 11) 
         dead_idx   = find_idx("units_dead",     17)
         heal_idx   = find_idx("units_healed",   18)
 
-        # max_needed_idx ensures we only process rows that have enough columns
         max_needed_idx = max(heal_idx, kills_idx, merits_idx)
 
-        # prev rows by lord_id (keep last occurrence)
+        # Previous rows by lord_id
         prev_map = {
             row[id_idx]: row for row in data_prev[1:]
             if len(row) > max_needed_idx and row[id_idx]
         }
 
-        # aggregate
+        # Aggregate dictionaries
         stat_map = {s: {
             "kills": 0, "kills_gain": 0,
             "dead": 0,  "dead_gain": 0,
@@ -3218,28 +3216,25 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
         } for s in SERVER_MAP}
 
         for row in data_latest[1:]:
-            if len(row) <= max_needed_idx:
-                continue
+            if len(row) <= max_needed_idx: continue
 
             # MUST exist in both sheets
             lid = (row[id_idx] or "").strip()
             prev_row = prev_map.get(lid)
-            if not lid or prev_row is None:
-                continue
+            if not lid or prev_row is None: continue
 
-            # server (use latest, normalized to digits)
+            # Server (use latest, normalized to digits)
             sid_raw = (row[server_idx] or "").strip()
             sid = "".join(ch for ch in sid_raw if ch.isdigit())
-            if sid not in SERVER_MAP:
-                continue
+            if sid not in SERVER_MAP: continue
 
-            # current
+            # Current values
             kills  = to_int(row[kills_idx])
             dead   = to_int(row[dead_idx])
             heal   = to_int(row[heal_idx])
             merits = to_int(row[merits_idx])
 
-            # previous
+            # Previous values
             kills_prev  = to_int(prev_row[kills_idx])
             dead_prev   = to_int(prev_row[dead_idx])
             heal_prev   = to_int(prev_row[heal_idx])
@@ -3247,28 +3242,17 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
 
             s = stat_map[sid]
             
-            # totals (restricted to IDs present in both)
+            # Totals 
             s["kills"]  += kills
             s["dead"]   += dead
             s["healed"] += heal
             s["merits"] += merits
             
-            # deltas
+            # Deltas
             s["kills_gain"]  += (kills  - kills_prev)
             s["dead_gain"]   += (dead   - dead_prev)
             s["healed_gain"] += (heal   - heal_prev)
             s["merits_gain"] += (merits - merits_prev)
-
-        def format_side(name, stats):
-            return (
-                f"{name}\n"
-                f"\n"
-                f"▶ Combat Stats\n"
-                f"⚔️ Kills:   {stats['kills']:,} ({fmt_gain(stats['kills_gain'])})\n"
-                f"💀 Deads:   {stats['dead']:,} ({fmt_gain(stats['dead_gain'])})\n"
-                f"❤️ Heals:   {stats['healed']:,} ({fmt_gain(stats['healed_gain'])})\n"
-                f"🏅 Merits:  {stats['merits']:,} ({fmt_gain(stats['merits_gain'])})\n"
-            )
 
         def merge_stats(team_servers):
             merged = {
@@ -3282,33 +3266,36 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
                     merged[key] += stat_map[server][key]
             return merged
 
-        title = format_title_with_dates(previous.title, latest.title)
+        # Clean sub-field formatter
+        def format_side(stats):
+            return (
+                f"⚔️ **Kills:** {stats['kills']:,}\n└ Gain: `{fmt_gain(stats['kills_gain'])}`\n\n"
+                f"💀 **Deads:** {stats['dead']:,}\n└ Gain: `{fmt_gain(stats['dead_gain'])}`\n\n"
+                f"❤️ **Heals:** {stats['healed']:,}\n└ Gain: `{fmt_gain(stats['healed_gain'])}`\n\n"
+                f"🏅 **Merits:** {stats['merits']:,}\n└ Gain: `{fmt_gain(stats['merits_gain'])}`"
+            )
 
         for team_a, team_b in matchups:
-            # Combine names and emojis for the teams
-            name_a = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]}" for s in team_a])
-            name_b = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]}" for s in team_b])
+            name_a = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]} ({s})" for s in team_a])
+            name_b = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]} ({s})" for s in team_b])
             
-            # Merge stats for multi-server teams
             stats_a = merge_stats(team_a)
             stats_b = merge_stats(team_b)
 
-            block = (
-                f"{name_a} vs {name_b}\n\n"
-                f"{format_side(name_a, stats_a)}"
-                f"\n━━━━━━━━━━━━━━\n\n"
-                f"{format_side(name_b, stats_b)}"
-            )
-
-            # Raw names for the embed title
             title_a = " & ".join([SERVER_MAP[s] for s in team_a])
             title_b = " & ".join([SERVER_MAP[s] for s in team_b])
 
             embed = discord.Embed(
-                title=f"{title} — {title_a} vs {title_b}",
-                description=f"```{block}```",
-                color=0x00ffcc
+                title=f"⚔️ WAR: {title_a} vs {title_b}",
+                color=discord.Color.dark_red()
             )
+            
+            # Places the two alliances in perfect side-by-side columns
+            embed.add_field(name=name_a, value=format_side(stats_a), inline=True)
+            embed.add_field(name=name_b, value=format_side(stats_b), inline=True)
+            
+            embed.set_footer(text=f"Comparing: {previous.title} → {latest.title}")
+            
             await ctx.send(embed=embed)
 
     except Exception as e:
