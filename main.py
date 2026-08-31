@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, UTC, timezone
 import asyncio
 import unicodedata
 
-# Google Sheets Auth
+# Google Sheets 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
 creds_json = os.getenv("CREDENTIALS_JSON")
 creds_dict = json.loads(creds_json)
