@@ -708,8 +708,8 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         max_needed_idx = max(heal_idx, kills_idx, merits_idx, power_idx, dead_idx)
 
         prev_map = {
-            row[id_idx].strip(): row for row in data_prev[1:]
-            if len(row) > max_needed_idx and row[id_idx].strip()
+            str(row[id_idx]).strip(): row for row in data_prev[1:]
+            if len(row) > max_needed_idx and str(row[id_idx]).strip()
         }
 
         group_data = {
@@ -726,13 +726,19 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
             prev_row = prev_map.get(lid)
             if prev_row is None: continue
 
+            # Safely calculate gains with a floor of 0 to prevent sheet correction bugs
+            kills_gain  = max(0, to_int(row[kills_idx]) - to_int(prev_row[kills_idx]))
+            deads_gain  = max(0, to_int(row[dead_idx]) - to_int(prev_row[dead_idx]))
+            heals_gain  = max(0, to_int(row[heal_idx]) - to_int(prev_row[heal_idx]))
+            merits_gain = max(0, to_int(row[merits_idx]) - to_int(prev_row[merits_idx]))
+
             p_gain = {
                 "name": row[name_idx],
                 "power": to_int(row[power_idx]),
-                "kills": to_int(row[kills_idx]) - to_int(prev_row[kills_idx]),
-                "deads": to_int(row[dead_idx]) - to_int(prev_row[dead_idx]),
-                "heals": to_int(row[heal_idx]) - to_int(prev_row[heal_idx]),
-                "merits": to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
+                "kills": kills_gain,
+                "deads": deads_gain,
+                "heals": heals_gain,
+                "merits": merits_gain
             }
 
             g_stats = group_data[group]
@@ -781,7 +787,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
                 # Using proper medal ordering based on enumerate index
                 medal_icon = medals[i] if i < len(medals) else "▫️"
 
-                top_str += f"{medal_icon} **{display_name}** — `{fmt(p['merits'])}` Merits\n"
+                top_str += f"{medals[i]} **{display_name}**\n└ `{fmt(p['merits'])}` Merits\n"
 
             return f"{emoji} __**GROUP {name.upper()}**__", stats_block, top_str
 
