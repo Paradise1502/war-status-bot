@@ -2965,15 +2965,18 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             (["5"], ["320"])
         ]
 
+        MIN_POWER_FOR_DEADS = 50_000_000
+
         # Indices
         id_idx     = find_idx("lord_id",        0)
         server_idx = find_idx("home_server",    5)
         kills_idx  = find_idx("units_killed",   9) 
+        power_idx  = find_idx("highest_power",  12)
         merits_idx = find_idx("merits (only 50m+ power)", 11) 
         dead_idx   = find_idx("units_dead",     17)
         heal_idx   = find_idx("units_healed",   18)
 
-        max_needed_idx = max(heal_idx, kills_idx, merits_idx)
+        max_needed_idx = max(heal_idx, kills_idx, merits_idx, power_idx)
 
         # Previous rows by lord_id
         prev_map = {
@@ -3003,6 +3006,7 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             if sid not in SERVER_MAP: continue
 
             # Current values
+            power  = to_int(row[power_idx])
             kills  = to_int(row[kills_idx])
             dead   = to_int(row[dead_idx])
             heal   = to_int(row[heal_idx])
@@ -3018,13 +3022,16 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             
             # Totals 
             s["kills"]  += kills
-            s["dead"]   += dead
             s["healed"] += heal
             s["merits"] += merits
+
+            # Deads only count for accounts currently at/above the power threshold
+            if power >= MIN_POWER_FOR_DEADS:
+                s["dead"]      += dead
+                s["dead_gain"] += (dead - dead_prev)
             
             # Deltas
             s["kills_gain"]  += (kills  - kills_prev)
-            s["dead_gain"]   += (dead   - dead_prev)
             s["healed_gain"] += (heal   - heal_prev)
             s["merits_gain"] += (merits - merits_prev)
 
