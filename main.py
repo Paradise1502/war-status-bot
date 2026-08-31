@@ -76,12 +76,15 @@ async def fetch_sheets_background():
                 if len(scan_tabs) >= 2:
                     latest_data = await asyncio.to_thread(scan_tabs[-1].get_all_values)
                     prev_data = await asyncio.to_thread(scan_tabs[-2].get_all_values)
+                    oldest_data = await asyncio.to_thread(scan_tabs[0].get_all_values) # ADD THIS
                     
                     bot_cache["seasons"][season_key] = {
                         "latest": latest_data,
                         "prev": prev_data,
+                        "oldest": oldest_data, # ADD THIS
                         "latest_title": scan_tabs[-1].title,
                         "prev_title": scan_tabs[-2].title
+                        "oldest_title": scan_tabs[0].title # ADD THIS
                     }
                 # Brief pause to prevent Google from triggering a 503 rate limit
                 await asyncio.sleep(2) 
@@ -418,32 +421,30 @@ async def before_utc_update():
 @bot.command()
 async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
-        
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
+            
     try:
         season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Need at least two snapshots to calculate gain.")
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        # CHANGE: Compare very first sheet [0] with very last sheet [-1]
-        latest_sheet, oldest_sheet = tabs[-1], tabs[0]
-        data_latest = await asyncio.to_thread(latest_sheet.get_all_values)
-        data_oldest = oldest_sheet.get_all_values()
+        # Load from bot memory (Requires update to background task, see below)
+        data_latest  = bot_cache["seasons"][season]["latest"]
+        data_oldest  = bot_cache["seasons"][season]["oldest"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        oldest_title = bot_cache["seasons"][season]["oldest_title"]
         
         headers = data_latest[0]
         
-        # Helper: Get index by name to avoid hardcoding errors
         def get_idx(name, default):
             return headers.index(name) if name in headers else default
 
@@ -458,10 +459,8 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             try: return int(str(val).replace(',', '').replace('-', '').strip())
             except: return 0
 
-        # PERFORMANCE: Create a dictionary for the oldest data {lord_id: row_data}
         oldest_lookup = {row[id_idx].strip(): row for row in data_oldest[1:] if len(row) > mana_idx}
 
-        # Find specific player data
         row_latest = next((r for r in data_latest[1:] if len(r) > id_idx and r[id_idx].strip() == lord_id), None)
         row_oldest = oldest_lookup.get(lord_id)
 
@@ -469,42 +468,34 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             await ctx.send("❌ Lord ID not found in both the start and end of this season.")
             return
 
-        # Calculate gains for ALL S375 players to determine rank
         s375_gains = []
         for row in data_latest[1:]:
             l_id = row[id_idx].strip()
-            # Ensure they are S375 and exist in the oldest sheet
             if len(row) > server_idx and str(row[server_idx]).strip() == "375":
                 old_row = oldest_lookup.get(l_id)
                 if old_row:
                     gain = to_int(row[mana_idx]) - to_int(old_row[mana_idx])
                     s375_gains.append((l_id, gain))
 
-        # Sort for ranking
         s375_gains.sort(key=lambda x: x[1], reverse=True)
         rank = next((i+1 for i, (lid, _) in enumerate(s375_gains) if lid == lord_id), None)
 
-        # Player specific stats
         mana_gain = to_int(row_latest[mana_idx]) - to_int(row_oldest[mana_idx])
         name = row_latest[name_idx].strip()
         alliance = row_latest[alliance_idx].strip()
 
-# Calculate Value ($100 per 250M mana)
-        # We use round() to keep it a whole number
         mana_value = round((mana_gain / 250_000_000) * 100)
 
-        # Build Response
         embed = discord.Embed(
             title=f"🌿 Mana : {season.upper()}",
-            description=f"Total gain from **{oldest_sheet.title}** to **{latest_sheet.title}**",
+            description=f"Total gain from **{oldest_title}** to **{latest_title}**",
             color=discord.Color.blue()
         )
         embed.add_field(name="Lord", value=f"[{alliance}] {name}", inline=True)
         
-        # Combined field with your specific phrasing
         embed.add_field(
             name="💧 Mana gathered", 
-            value=f"Total: **{mana_gain:,}**\n*You gathered mana worth **{mana_value:,}$*** ", 
+            value=f"Total: **{mana_gain:,}**\n*You gathered mana worth **${mana_value:,}*** ", 
             inline=False
         )
         
@@ -1033,30 +1024,28 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
 @bot.command()
 async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
     async with ctx.typing():
-        
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     try:
         season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        # Load instantly from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        
         headers = data_latest[0]
 
         id_index = headers.index("lord_id")
@@ -1094,10 +1083,15 @@ async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
                 if power >= 25_000_000:
                     gains.append((name, gain))
 
+        if not gains:
+            await ctx.send("No eligible players found (≥25M power and present in both sheets).")
+            return
+
         gains.sort(key=lambda x: x[1], reverse=True)
         result = "\n".join([f"{i+1}. `{name}` — ❤️‍🩹 +{heal:,}" for i, (name, heal) in enumerate(gains[:top_n])])
 
-        await ctx.send(f"📊 **Top {top_n} Healers (Gain)** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n{result}")
+        # Updated to use cached title variables
+        await ctx.send(f"📊 **Top {top_n} Healers (Gain)** (≥25M Power)\n`{prev_title}` → `{latest_title}`:\n{result}")
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
@@ -1199,29 +1193,28 @@ async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 @bot.command()
 async def topkills(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
     async with ctx.typing():
-        
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     try:
         season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        # Load instantly from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        
         headers = data_latest[0]
 
         id_index = headers.index("lord_id")
@@ -1270,7 +1263,8 @@ async def topkills(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
             for i, (name, gain) in enumerate(gains[:top_n])
         ]
 
-        await ctx.send("**🏆 Top Kill Gains:**\n" + "\n".join(lines))
+        # Updated to include the comparison titles and top_n amount to match your other commands
+        await ctx.send(f"**🏆 Top {top_n} Kill Gains:** (≥25M Power)\n`{prev_title}` → `{latest_title}`:\n" + "\n".join(lines))
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
@@ -1281,7 +1275,7 @@ async def lowdeads(ctx, *args):
     Lowest dead gains between the last two tabs.
 
     Usage examples:
-      !lowdeads                         -> Bottom 10 overall (≥50M power)
+      !lowdeads                        -> Bottom 10 overall (≥50M power)
       !lowdeads 25                     -> Bottom 25 overall
       !lowdeads sos5                   -> Bottom 10 for season 'sos5'
       !lowdeads sos5 30                -> Bottom 30 for 'sos5'
@@ -1292,7 +1286,6 @@ async def lowdeads(ctx, *args):
     async with ctx.typing():
         
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
@@ -1309,7 +1302,7 @@ async def lowdeads(ctx, *args):
         if a.isdigit():
             top_n = max(1, min(100, int(a)))
             continue
-        if a in ("NVR", "NVR375", "NVR"):
+        if a in ("nvr", "nvr375"):
             filter_NVR = True
             continue
         if a in ("all", "*"):
@@ -1324,21 +1317,22 @@ async def lowdeads(ctx, *args):
         return
 
     try:
-        sheet_name = SEASON_SHEETS.get(season.lower())
-        if not sheet_name:
+        season = season.lower()
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev   = previous.get_all_values()
+        # Load instantly from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        
         if not data_latest or not data_prev:
             await ctx.send("❌ Sheet data is empty.")
             return
@@ -1382,7 +1376,7 @@ async def lowdeads(ctx, *args):
                 continue
 
             tag = (row[alliance_idx] or "").strip()
-            # ... (Inside your data_latest loop)
+            
             if filter_NVR:
                 # We only check the server ID, ignoring the alliance tag entirely
                 server_val = str(row[server_idx] or "").strip()
@@ -1402,11 +1396,12 @@ async def lowdeads(ctx, *args):
             display = f"[{tag}] {name}"
             rows.append((display, gain))
 
+        scope = "Server 375 (All Alliances)" if filter_NVR else "All Servers"
+
         if not rows:
-            sscope = "Server 375 (All Alliances)" if filter_NVR else "All Servers"
             await ctx.send(
                 f"**🔻 Lowest {top_n} Dead Gains — {scope} (≥50M Power)**\n"
-                f"`{previous.title}` → `{latest.title}`:\n_No eligible players found._"
+                f"`{prev_title}` → `{latest_title}`:\n_No eligible players found._"
             )
             return
 
@@ -1418,10 +1413,9 @@ async def lowdeads(ctx, *args):
         lines = [f"{i+1}. `{name}` — 💀 +{gain:,}" for i, (name, gain) in enumerate(bottom)]
 
         # Header + chunked send
-        scope = "NVR (S375)" if filter_NVR else "All"
         header = (
             f"**🔻 Lowest {top_n} Dead Gains — {scope} (≥50M Power)**\n"
-            f"`{previous.title}` → `{latest.title}`:\n"
+            f"`{prev_title}` → `{latest_title}`:\n"
         )
 
         chunk = header
@@ -1460,10 +1454,10 @@ async def lowmerits(ctx, *args):
     async with ctx.typing():
         
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
+            
     # Defaults
     top_n = 10
     season = DEFAULT_SEASON
@@ -1475,7 +1469,7 @@ async def lowmerits(ctx, *args):
         a = str(arg).strip().lower()
         if a.isdigit():
             top_n = max(1, min(100, int(a)))
-        elif a in ("NVR", "NVR375", "NVR"):
+        elif a in ("nvr", "nvr375"):
             filter_NVR = True
         elif a in ("all", "*"):
             filter_NVR = False
@@ -1486,20 +1480,22 @@ async def lowmerits(ctx, *args):
             return
 
     try:
-        sheet_name = SEASON_SHEETS.get(season.lower())
-        if not sheet_name:
+        season = season.lower()
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev   = previous.get_all_values()
+        # Load instantly from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        
         if not data_latest or not data_prev:
             await ctx.send("❌ Sheet data is empty.")
             return
@@ -1509,11 +1505,11 @@ async def lowmerits(ctx, *args):
 
         # Fixed positions you specified (1-based -> 0-based), with safe fallback to header if present
         id_index     = hmap.get("lord_id", 0)         # A by default
-        name_index   = 1                               # B
-        alliance_idx = 3                               # D
+        name_index   = 1                              # B
+        alliance_idx = 3                              # D
         server_idx   = hmap.get("home_server", 5)      # F
-        merits_idx   = 11                              # column 12 (1-based)
-        power_idx    = 12                              # column 13 (1-based)
+        merits_idx   = 11                             # column 12 (1-based)
+        power_idx    = 12                             # column 13 (1-based)
 
         # robust int parser: keep digits only (handles 21.734.811, 21,734,811, spaces, NBSP)
         def to_int(val):
@@ -1546,7 +1542,7 @@ async def lowmerits(ctx, *args):
                 continue
 
             tag = (row[alliance_idx] or "").strip()
-            # ... (Inside your data_latest loop)
+            
             if filter_NVR:
                 # We only check the server ID, ignoring the alliance tag entirely
                 server_val = str(row[server_idx] or "").strip()
@@ -1568,7 +1564,7 @@ async def lowmerits(ctx, *args):
 
         if not rows:
             scope = "Server 375 (All Alliances)" if filter_NVR else "All Servers"
-            await ctx.send(f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)!**\n`{previous.title}` → `{latest.title}`:\n_No eligible players found._")
+            await ctx.send(f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)!**\n`{prev_title}` → `{latest_title}`:\n_No eligible players found._")
             return
 
         # sort ascending by gain (lowest first), then name for stability
@@ -1578,7 +1574,7 @@ async def lowmerits(ctx, *args):
         lines = [f"{i+1}. `{name}` — 🧠 +{gain:,}" for i, (name, gain) in enumerate(bottom)]
 
         scope = "NVR (S375)" if filter_NVR else "All"
-        header = f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)**\n`{previous.title}` → `{latest.title}`:\n"
+        header = f"**🔻 Lowest {top_n} Merits Gained — {scope} (≥50M Power)**\n`{prev_title}` → `{latest_title}`:\n"
 
         chunk = header
         chunks = []
@@ -1616,21 +1612,21 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
 
     async with ctx.typing():
         try:
-            # 1. FETCH SEASON DATA (For Merits Gains)
             season = season.lower()
-            sheet_name = SEASON_SHEETS.get(season, season)
-            
-            tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-            scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
-            
-            if len(scan_tabs) < 2:
-                await ctx.send("❌ Not enough scan sheets to calculate gains.")
+            if season not in SEASON_SHEETS:
+                await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
                 return
 
-            latest = scan_tabs[-1]
-            previous = scan_tabs[-2]
-            data_latest = latest.get_all_values()
-            data_prev   = previous.get_all_values()
+            # 1. CACHE CHECK: Ensure background task has synced both sheets
+            if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
+                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+                return
+
+            # 2. LOAD DATA DIRECTLY FROM CACHE
+            data_latest = bot_cache["seasons"][season]["latest"]
+            data_prev   = bot_cache["seasons"][season]["prev"]
+            latest_title = bot_cache["seasons"][season]["latest_title"]
+            prev_title   = bot_cache["seasons"][season]["prev_title"]
             headers = data_latest[0]
 
             id_idx = headers.index("lord_id") if "lord_id" in headers else 0
@@ -1639,9 +1635,8 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
 
             prev_map = {row[id_idx].strip(): row for row in data_prev[1:] if len(row) > merits_idx}
 
-            # 2. FETCH SERVER 375 DATA (For Magic)
-            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
-            data_375 = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
+            # 3. LOAD SERVER 375 DATA FROM CACHE (For Magic)
+            data_375 = bot_cache["375_data"]
             headers_375 = data_375[0]
             
             id_col_375 = headers_375.index("Character ID")
@@ -1657,7 +1652,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
             # Map Character ID -> Magic Merits
             magic_map = {str(r[id_col_375]).strip(): to_int(r[magic_col_375]) for r in data_375[1:] if len(r) > magic_col_375}
 
-            # 3. CONTENDERS SETUP
+            # 4. CONTENDERS SETUP
             p1_id = "15500649" # xpp
             p2_id = "5751068"  # raz
             
@@ -1668,7 +1663,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
             
             results = {}
 
-            # 4. CALCULATE SCORES
+            # 5. CALCULATE SCORES
             for row in data_latest[1:]:
                 lid = str(row[id_idx]).strip()
                 if lid in contenders:
@@ -1697,7 +1692,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
                 await ctx.send("❌ Could not find both contenders in the current scan data.")
                 return
 
-            # 5. DETERMINE LEADER
+            # 6. DETERMINE LEADER
             p1_data = results[p1_id]
             p2_data = results[p2_id]
             
@@ -1720,7 +1715,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
             else:
                 tug_of_war = "⬛" * 10
 
-            # 6. BUILD UI
+            # 7. BUILD UI
             embed = discord.Embed(
                 title="⚔️ THE DUEL: xpp vs raz ⚔️",
                 description=f"*Rules: xpp (Mages 2x, Rest 1x) | raz (All 1x)*\n\n{leader_text}\n{tug_of_war}\n" + "▬" * 15,
@@ -1753,7 +1748,8 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
                 inline=True
             )
             
-            embed.set_footer(text=f"Comparing: {previous.title} → {latest.title}")
+            # Using the cached titles for the footer
+            embed.set_footer(text=f"Comparing: {prev_title} → {latest_title}")
             await ctx.send(embed=embed)
 
         except Exception as e:
@@ -1769,21 +1765,21 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
 
     async with ctx.typing():
         try:
-            # 1. FETCH SEASON DATA (For Merits Gains)
             season = season.lower()
-            sheet_name = SEASON_SHEETS.get(season, season)
-            
-            tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-            scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
-            
-            if len(scan_tabs) < 2:
-                await ctx.send("❌ Not enough scan sheets to calculate gains.")
+            if season not in SEASON_SHEETS:
+                await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
                 return
 
-            latest = scan_tabs[-1]
-            previous = scan_tabs[-2]
-            data_latest = latest.get_all_values()
-            data_prev   = previous.get_all_values()
+            # 1. CACHE CHECK: Ensure background task has synced both sheets
+            if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
+                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+                return
+
+            # 2. LOAD DATA DIRECTLY FROM CACHE
+            data_latest = bot_cache["seasons"][season]["latest"]
+            data_prev   = bot_cache["seasons"][season]["prev"]
+            latest_title = bot_cache["seasons"][season]["latest_title"]
+            prev_title   = bot_cache["seasons"][season]["prev_title"]
             headers = data_latest[0]
 
             id_idx = headers.index("lord_id") if "lord_id" in headers else 0
@@ -1792,9 +1788,8 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
 
             prev_map = {row[id_idx].strip(): row for row in data_prev[1:] if len(row) > merits_idx}
 
-            # 2. FETCH SERVER 375 DATA (For Infantry)
-            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
-            data_375 = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
+            # 3. LOAD SERVER 375 DATA FROM CACHE (For Infantry)
+            data_375 = bot_cache["375_data"]
             headers_375 = data_375[0]
             
             id_col_375 = headers_375.index("Character ID")
@@ -1802,7 +1797,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
             
             inf_map = {str(r[id_col_375]).strip(): int(str(r[inf_col_375]).replace(",", "").strip() or 0) for r in data_375[1:] if len(r) > inf_col_375}
 
-            # 3. CONTENDERS SETUP
+            # 4. CONTENDERS SETUP
             contenders = {
                 "1240639": {"display": "Tinzy", "emoji": "🔵"},
                 "12451416": {"display": "BaLaKaS", "emoji": "🔴"}
@@ -1810,7 +1805,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
             
             results = {}
 
-            # 4. CALCULATE SCORES
+            # 5. CALCULATE SCORES
             for row in data_latest[1:]:
                 lid = str(row[id_idx]).strip()
                 if lid in contenders:
@@ -1834,7 +1829,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
                 await ctx.send("❌ Could not find both contenders in the current scan data.")
                 return
 
-            # 5. DETERMINE LEADER
+            # 6. DETERMINE LEADER
             p1_id = "1240639"
             p2_id = "12451416"
             p1_data = results[p1_id]
@@ -1859,7 +1854,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
             else:
                 tug_of_war = "⬛" * 10 # Empty bar if both are at 0
 
-            # 6. BUILD UI
+            # 7. BUILD UI
             embed = discord.Embed(
                 title="⚔️ THE MAGE DUEL ⚔️",
                 description=f"*Rules: All Merits (1x) | Infantry Merits (2x)*\n\n{leader_text}\n{tug_of_war}\n" + "━" * 15,
@@ -1891,7 +1886,8 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
                 inline=True
             )
             
-            embed.set_footer(text=f"Comparing: {previous.title} → {latest.title}")
+            # Use cached titles
+            embed.set_footer(text=f"Comparing: {prev_title} → {latest_title}")
             await ctx.send(embed=embed)
 
         except Exception as e:
@@ -2004,7 +2000,6 @@ async def topdeads(ctx, *args):
     async with ctx.typing():
         
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
@@ -2015,45 +2010,40 @@ async def topdeads(ctx, *args):
     filter_NVR = False  # toggle for [NVR*] + server 375
 
     # --- Parse args in any order ---
-    # digits -> top_n
-    # season key -> season
-    # 'NVR' -> filter to NVR on server 375
-    # 'all' or '*' -> remove NVR filter explicitly
     for arg in args:
         a = str(arg).strip().lower()
         if a.isdigit():
             top_n = max(1, min(100, int(a)))  # clamp a bit
             continue
-        if a in ("NVR", "NVR375", "nvr"):
+        if a in ("nvr", "nvr375"):
             filter_NVR = True
             continue
         if a in ("all", "*"):
             filter_NVR = False
             continue
-        # season?
         if a in SEASON_SHEETS:
             season = a
             continue
-        # Unknown token -> treat as invalid season token for clarity
         await ctx.send(f"❌ Invalid argument '{arg}'. Seasons: {', '.join(SEASON_SHEETS.keys())} | Filters: 'NVR', 'all'.")
         return
 
     try:
-        sheet_name = SEASON_SHEETS.get(season.lower())
-        if not sheet_name:
+        season = season.lower()
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        # Load instantly from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        
         if not data_latest or not data_prev:
             await ctx.send("❌ Sheet data is empty.")
             return
@@ -2097,13 +2087,12 @@ async def topdeads(ctx, *args):
                 continue
 
             alliance = (row[alliance_index] or "").strip()
-           # ... (Inside your data_latest loop)
+            
             if filter_NVR:
                 # We only check the server ID, ignoring the alliance tag entirely
                 server_val = str(row[server_idx] or "").strip()
                 
                 # If the server isn't 375, skip this player
-                # Note: We use "375" because sheets often store numbers as strings
                 if server_val != "375":
                     continue
                     
@@ -2120,7 +2109,7 @@ async def topdeads(ctx, *args):
 
         if not results:
             scope = "Server 375 (All Alliances)" if filter_NVR else "All Servers"
-            await ctx.send(f"**🏆 Top {top_n} Dead Units Gained — {scope}**\n`{previous.title}` → `{latest.title}`:\n_No eligible players found (≥25M power and present in both sheets)._")
+            await ctx.send(f"**🏆 Top {top_n} Dead Units Gained — {scope}**\n`{prev_title}` → `{latest_title}`:\n_No eligible players found (≥25M power and present in both sheets)._")
             return
 
         # Sort and slice
@@ -2132,7 +2121,7 @@ async def topdeads(ctx, *args):
 
         # Header + chunked send (<=2000 chars)
         scope = "NVR (S375)" if filter_NVR else "All"
-        header = f"**🏆 Top {top_n} Dead Units Gained — {scope}**\n`{previous.title}` → `{latest.title}`:\n"
+        header = f"**🏆 Top {top_n} Dead Units Gained — {scope}**\n`{prev_title}` → `{latest_title}`:\n"
 
         chunk = header
         chunks = []
@@ -2926,18 +2915,22 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             
     try:
         season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season, season)
-
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        
+        if season not in SEASON_SHEETS:
+            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev   = previous.get_all_values()
-        headers = data_latest[0]
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+            return
+
+        # Load instantly from bot memory
+        data_latest  = bot_cache["seasons"][season]["latest"]
+        data_prev    = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        headers      = data_latest[0]
 
         # Header lookups with safe fallback
         def find_idx(name, fallback):
@@ -3076,7 +3069,8 @@ async def matchups(ctx, season: str = DEFAULT_SEASON):
             embed.add_field(name=name_a, value=format_side(stats_a), inline=True)
             embed.add_field(name=name_b, value=format_side(stats_b), inline=True)
             
-            embed.set_footer(text=f"Comparing: {previous.title} → {latest.title}")
+            # Replaced google object calls with cached titles
+            embed.set_footer(text=f"Comparing: {prev_title} → {latest_title}")
             
             await ctx.send(embed=embed)
 
