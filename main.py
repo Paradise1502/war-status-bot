@@ -21,7 +21,7 @@ EVENT_SHEET_NAME = "Event Schedule"      # The spreadsheet name
 EVENT_TAB_NAME = "events"               # The tab name
 ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement channel
 
-# Season sheet mapping
+# Season sheet
 SEASON_SHEETS = {
     "sos2_2": "Call of Dragons - SoS2",
     "sos5": "Call of Dragons - SoS5",
