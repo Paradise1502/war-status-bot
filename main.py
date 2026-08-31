@@ -968,9 +968,9 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
             def build_team_desc(team_players):
                 desc = ""
                 for i, p in enumerate(team_players[:10], 1):
-                    # Truncate long names so they don't break the column layout
                     raw_name = p['name']
-                    display_name = raw_name[:10] + ".." if len(raw_name) > 10 else raw_name
+                    # Truncate at 12 chars to keep it clean and prevent column breaking
+                    display_name = raw_name[:12] + ".." if len(raw_name) > 12 else raw_name
                     
                     if i == 1: rank_icon = "🥇"
                     elif i == 2: rank_icon = "🥈"
@@ -979,13 +979,13 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
             
                     score_val = p['score']
                     
-                    # For Top 3 with points, pack everything into one clean, readable line
                     if i <= 3 and score_val > 0:
+                        # Dropped the heavy inline code block around the sub-stats and separated with |
                         desc += f"{rank_icon} **{display_name}** — `{fmt(score_val)}`\n"
-                        desc += f" `🧠{fmt(p['merits'])} ⚔️{fmt(p['infantry'])} 💀{fmt(p['deads'])}`\n"
+                        desc += f"└ 🧠 {fmt(p['merits'])} | ⚔️ {fmt(p['infantry'])} | 💀 {fmt(p['deads'])}\n"
                     else:
-                        # For 4-10 or anyone with 0 points, just show name and score cleanly
-                        desc += f"{rank_icon} {display_name} — `{fmt(score_val)}`\n"
+                        # Bolding the names for 4-10 so they match the top 3 stylistically
+                        desc += f"{rank_icon} **{display_name}** — `{fmt(score_val)}`\n"
                         
                 return desc
 
