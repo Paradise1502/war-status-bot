@@ -696,7 +696,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
                 return int(v) if v not in ("", "-") else 0
             except: return 0
 
-        # Indices
+        # Indices (Using robust header lookups matching your working commands)
         id_idx     = find_idx("lord_id", 0)
         name_idx   = find_idx("name", 1)
         power_idx  = find_idx("highest_power", 2)
@@ -749,8 +749,6 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
             merits = stats["merits"]
             efficiency = (merits / power * 100) if power > 0 else 0
             
-            # CRITICAL FIX: The spaces after the colons have been reduced. 
-            # If you add too many spaces here, Discord will push the right column down again.
             def fmt(num):
                 if num >= 1_000_000_000: return f"{num / 1_000_000_000:.2f}B"
                 elif num >= 1_000_000: return f"{num / 1_000_000:.2f}M"
@@ -773,11 +771,17 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
             medals = ["🥇", "🥈", "🥉"]
             top_str = ""
             for i, p in enumerate(top_players):
-                # Force long names to be shorter to protect the layout width
-                display_name = p['name'][:13] + ".." if len(p['name']) > 13 else p['name']
+                raw_name = p['name']
+                display_name = raw_name[:12] + ".." if len(raw_name) > 12 else raw_name
                 
-                # Removed the word " merits" at the end to save even more space!
-                top_str += f"{medals[i]} **{display_name}**\n└ `{fmt(p['merits'])}` Merits\n"
+                if i == 1: rank_icon = "🥈"
+                elif i == 2: rank_icon = "🥉"
+                else: rank_icon = "🥇" # Fix index mapping for medals loop
+                
+                # Using proper medal ordering based on enumerate index
+                medal_icon = medals[i] if i < len(medals) else "▫️"
+
+                top_str += f"{medal_icon} **{display_name}** — `{fmt(p['merits'])}` Merits\n"
 
             return f"{emoji} __**GROUP {name.upper()}**__", stats_block, top_str
 
@@ -785,7 +789,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         embed = discord.Embed(
             title="📊 Group Stats - Sun vs Moon",
             description=f"**Comparing:** `{prev_title}` ➔ `{latest_title}`\n" + "▬" * 15,
-            color=0x2f3136 # Dark "Discord" theme color
+            color=0x2f3136
         )
 
         # Sun Group Fields
@@ -793,7 +797,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         embed.add_field(name=title_s, value=stats_s, inline=True)
         embed.add_field(name="⭐ TOP PERFORMERS", value=top_s, inline=True)
         
-        # Spacer Field (Forces the next group to the bottom)
+        # Spacer Field
         embed.add_field(name="\u200b", value="▬" * 30, inline=False)
 
         # Moon Group Fields
@@ -802,8 +806,6 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         embed.add_field(name="⭐ TOP PERFORMERS", value=top_m, inline=True)
 
         embed.set_footer(text="If you read this, sun sucks.")
-        
-        # Ensure your datetime import matches this format
         embed.timestamp = datetime.now(UTC) 
 
         await ctx.send(embed=embed)
