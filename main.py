@@ -823,12 +823,12 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
 async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
-        
+
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
-            
+
         TEAM_ROSTER = {
             "1038031": "Sun", "1209648": "Moon", "2554608": "Moon", "1268188": "Sun",
             "2283588": "Moon", "3668102": "Sun", "11403527": "Sun", "14685384": "Moon",
@@ -872,82 +872,77 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
             "14249731": "Sun", "15988260": "Sun", "16024377": "Moon", "5751068": "Moon",
             "15500649": "Sun", "20781093": "Moon", "15976283": "Moon"
         }
-        
+
         try:
             season = season.lower()
-            
-            # CACHE CHECK LOGIC
-            if season not in bot_cache["seasons"] or bot_cache["375_data"] is None:
+
+            if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
                 await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
                 return
 
-            # Load Season data from bot memory
             data_latest = bot_cache["seasons"][season]["latest"]
             data_prev   = bot_cache["seasons"][season]["prev"]
             latest_title = bot_cache["seasons"][season]["latest_title"]
             prev_title   = bot_cache["seasons"][season]["prev_title"]
             headers = data_latest[0]
 
-            def find_idx(name, fallback):
-                if name in headers: return headers.index(name)
+            def find_idx(name):
                 for i, h in enumerate(headers):
-                    if name.lower() in h.lower(): return i
-                return fallback
+                    if name.lower() in h.lower():
+                        return i
+                raise ValueError(f"Required column matching '{name}' not found.")
 
             def to_int(val):
                 try:
                     v = str(val).replace(',', '').replace(' ', '').strip()
                     return int(v) if v not in ("", "-") else 0
-                except: return 0
+                except:
+                    return 0
 
-            id_idx     = find_idx("lord_id", 0)
-            name_idx   = find_idx("name", 1)
-            merits_idx = find_idx("merits", 11) 
-            dead_idx   = find_idx("units_dead", 17)
+            id_idx     = find_idx("lord_id")
+            name_idx   = find_idx("name")
+            merits_idx = find_idx("merits")
+            dead_idx   = find_idx("units_dead")
             max_needed_idx = max(id_idx, name_idx, merits_idx, dead_idx)
 
             prev_map = {
-                row[id_idx].strip(): row for row in data_prev[1:]
-                if len(row) > max_needed_idx and row[id_idx].strip()
+                str(row[id_idx]).strip(): row for row in data_prev[1:]
+                if len(row) > max_needed_idx and str(row[id_idx]).strip()
             }
 
-            # Load Server 375 data from bot memory
             data_375 = bot_cache["375_data"]
             headers_375 = data_375[0]
-            
+
             id_col_375 = headers_375.index("Character ID")
             inf_col_375 = headers_375.index("Infantry Only")
-            
-            # Create a dictionary mapping Lord ID to their Infantry Merits
+
             inf_map = {}
             for r in data_375[1:]:
                 if len(r) > max(id_col_375, inf_col_375):
                     inf_map[str(r[id_col_375]).strip()] = to_int(r[inf_col_375])
 
-            # CALCULATE SCORES
             sun_players = []
             moon_players = []
 
             for row in data_latest[1:]:
-                if len(row) <= max_needed_idx: continue
-                
-                lid = (row[id_idx] or "").strip()
+                if len(row) <= max_needed_idx:
+                    continue
+
+                lid = str(row[id_idx] or "").strip()
                 group = TEAM_ROSTER.get(lid)
-                if not group: continue
+                if not group:
+                    continue
 
                 prev_row = prev_map.get(lid)
-                if prev_row is None: continue
+                if prev_row is None:
+                    continue
 
-                # Gains from Season Sheet
-                merits_gain = to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
-                deads_gain  = to_int(row[dead_idx]) - to_int(prev_row[dead_idx])
-                
-                # Static Total from 375 Sheet
+                merits_gain = max(0, to_int(row[merits_idx]) - to_int(prev_row[merits_idx]))
+                deads_gain  = max(0, to_int(row[dead_idx]) - to_int(prev_row[dead_idx]))
                 inf_val = inf_map.get(lid, 0)
-                
-                # Scoring Formula: Merits (1x) + Infantry (2x) + Deads (5x)
+
                 score = (merits_gain * 1) + (inf_val * 2) + (deads_gain * 5)
-                
+
                 p_data = {
                     "name": row[name_idx],
                     "score": score,
@@ -955,76 +950,78 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
                     "infantry": inf_val,
                     "deads": deads_gain
                 }
-                
+
                 if group == "Sun":
                     sun_players.append(p_data)
                 elif group == "Moon":
                     moon_players.append(p_data)
 
-            # Sort both teams highest score to lowest
             sun_players.sort(key=lambda x: x["score"], reverse=True)
             moon_players.sort(key=lambda x: x["score"], reverse=True)
 
-            # Helper to format big numbers cleanly
             def fmt(num):
                 if num >= 1_000_000:
                     return f"{num/1_000_000:.2f}M"
                 elif num >= 1_000:
                     return f"{num/1_000:.1f}K"
                 return str(num)
-            
-            def build_team_desc(team_players):
-                desc = ""
-                for i, p in enumerate(team_players[:10], 1):
-                    raw_name = p['name']
-                    # Truncate at 12 chars to keep it clean and prevent column breaking
-                    display_name = raw_name[:12] + ".." if len(raw_name) > 12 else raw_name
-                    
-                    if i == 1: rank_icon = "🥇"
-                    elif i == 2: rank_icon = "🥈"
-                    elif i == 3: rank_icon = "🥉"
-                    else: rank_icon = f"**{i}.**"
-            
-                    score_val = p['score']
-                    
-                    if i <= 3 and score_val > 0:
-                        # Dropped the heavy inline code block around the sub-stats and separated with |
-                        desc += f"{rank_icon} **{display_name}** — `{fmt(score_val)}`\n"
-                        desc += f"└ 🧠 {fmt(p['merits'])} | ⚔️ {fmt(p['infantry'])} | 💀 {fmt(p['deads'])}\n"
-                    else:
-                        # Bolding the names for 4-10 so they match the top 3 stylistically
-                        desc += f"{rank_icon} **{display_name}** — `{fmt(score_val)}`\n"
-                        
-                return desc
 
-            # Calculate total team scores
+            RANK_ICONS = {1: "🥇", 2: "🥈", 3: "🥉"}
+
+            def build_team_description(team_players):
+                """Plain markdown list instead of a code block — code blocks render
+                emoji at a different width than text, which is what was causing the
+                jagged/misaligned columns in the old output."""
+                if not team_players:
+                    return "*No qualifying players this period.*"
+                lines = []
+                for i, p in enumerate(team_players[:10], 1):
+                    icon = RANK_ICONS.get(i, f"`#{i}`")
+                    name = str(p['name'])[:18]
+                    lines.append(f"{icon} **{name}** — `{fmt(p['score'])} pts`")
+                    lines.append(f"> 🧠 {fmt(p['merits'])}  ⚔️ {fmt(p['infantry'])}  💀 {fmt(p['deads'])}")
+                return "\n".join(lines)
+
             sun_total = sum(p['score'] for p in sun_players)
             moon_total = sum(p['score'] for p in moon_players)
-            
-            sun_text = build_team_desc(sun_players) 
-            moon_text = build_team_desc(moon_players)
 
-            # Create the Embed
-            embed = discord.Embed(
-                title="🏆 Group Leaderboard - Sun vs Moon",
-                description=f"**Comparing:** `{prev_title}` ➔ `{latest_title}`\n"
-                            f"*Scoring: Merits (1x) | Infantry (2x) | Deads (5x)*\n" + "▬" * 15,
-                color=0x2f3136
+            if sun_total > moon_total:
+                lead_text = f"🌞 Sun leads by **{fmt(sun_total - moon_total)}**"
+            elif moon_total > sun_total:
+                lead_text = f"🌙 Moon leads by **{fmt(moon_total - sun_total)}**"
+            else:
+                lead_text = "⚖️ Dead even"
+
+            # --- Header embed: comparison window, scoring key, overall lead ---
+            header_embed = discord.Embed(
+                title="🏆 Group Leaderboard — Sun vs Moon",
+                description=(
+                    f"**{prev_title}**  ➜  **{latest_title}**\n"
+                    f"Scoring: 🧠 Merits ×1 · ⚔️ Infantry ×2 · 💀 Deads ×5\n\n"
+                    f"{lead_text}"
+                ),
+                color=0x2F3136
             )
-            
-            embed.add_field(
-                name=f"🌞 TEAM SUN — {fmt(sun_total)} pts", 
-                value=sun_text, 
-                inline=True
+            header_embed.set_footer(
+                text=f"Top 10 shown · {len(sun_players)} Sun · {len(moon_players)} Moon tracked"
             )
-            embed.add_field(
-                name=f"🌙 TEAM MOON — {fmt(moon_total)} pts", 
-                value=moon_text, 
-                inline=True
+            header_embed.timestamp = datetime.now(UTC)
+
+            # --- One colored embed per team instead of two fields crammed into one ---
+            sun_embed = discord.Embed(
+                title=f"🌞 Team Sun — {fmt(sun_total)} pts",
+                description=build_team_description(sun_players),
+                color=0xF5A623  # gold
             )
-            
-            embed.timestamp = datetime.now(UTC) 
-            await ctx.send(embed=embed)
+
+            moon_embed = discord.Embed(
+                title=f"🌙 Team Moon — {fmt(moon_total)} pts",
+                description=build_team_description(moon_players),
+                color=0x5865F2  # indigo
+            )
+
+            # NOTE: sending multiple embeds in one message requires discord.py >= 2.0
+            await ctx.send(embeds=[header_embed, sun_embed, moon_embed])
 
         except Exception as e:
             await ctx.send(f"❌ **Error:** {e}")
