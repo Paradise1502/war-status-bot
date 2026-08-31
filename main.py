@@ -23,14 +23,8 @@ ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement ch
 
 # Season sheet
 SEASON_SHEETS = {
-    "sos2_2": "Call of Dragons - SoS2",
-    "sos5": "Call of Dragons - SoS5",
-    "sos6": "Call of Dragons - SoS6",
-    "sos2_3": "Call of Dragons - SoS2_2",
     "sos3": "NxW - SoS3",
     "sos4": "NxW - SoS4",
-    "z2": "NxW - SoS4 - Z2",
-    "fz": "NxW - FZ",
     "farms": "NVR Farms",
     "sos7": "EvG - SoS7",
     "sos2": "NVR - SoS2",
