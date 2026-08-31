@@ -28,6 +28,7 @@ SEASON_SHEETS = {
     "farms": "NVR Farms",
     "sos7": "EvG - SoS7",
     "sos2": "NVR - SoS2",
+    "statue": "NVR - SoS2 Statue",
 }
 
 SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
