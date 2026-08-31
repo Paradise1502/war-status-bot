@@ -40,6 +40,12 @@ SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
 
 DEFAULT_SEASON = "sos2"
 
+# Global memory bank for background tasks
+bot_cache = {
+    "375_data": None,
+    "seasons": {} 
+}
+
 # Now your bot setup
 intents = discord.Intents.default()
 intents.guilds = True
@@ -51,6 +57,40 @@ intents.message_content = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command('help')  # Add it right here!
+
+@tasks.loop(minutes=10)
+async def fetch_sheets_background():
+    try:
+        print("🔄 [Background Task] Downloading fresh Google Sheets data...")
+        
+        # 1. Fetch the Server 375 Sheet
+        sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
+        bot_cache["375_data"] = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
+        
+        # 2. Fetch all Seasonal Sheets
+        for season_key, sheet_name in SEASON_SHEETS.items():
+            try:
+                tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+                scan_tabs = [t for t in tabs if t.title.lower() != "roster"]
+                
+                if len(scan_tabs) >= 2:
+                    latest_data = await asyncio.to_thread(scan_tabs[-1].get_all_values)
+                    prev_data = await asyncio.to_thread(scan_tabs[-2].get_all_values)
+                    
+                    bot_cache["seasons"][season_key] = {
+                        "latest": latest_data,
+                        "prev": prev_data,
+                        "latest_title": scan_tabs[-1].title,
+                        "prev_title": scan_tabs[-2].title
+                    }
+                # Brief pause to prevent Google from triggering a 503 rate limit
+                await asyncio.sleep(2) 
+            except Exception as e:
+                print(f"⚠️ Failed to cache season '{season_key}': {e}")
+                
+        print("✅ [Background Task] All data cached successfully!")
+    except Exception as e:
+        print(f"❌ [Background Task] Critical Error: {e}")
 
 # Global flag
 VACATION_MODE = False
@@ -481,9 +521,7 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 @bot.command()
 async def topmana(ctx, *args):
     async with ctx.typing():
-        
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
@@ -501,21 +539,22 @@ async def topmana(ctx, *args):
 
     try:
         season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
+        
+        # Validate season existence
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # NEW LOGIC: Check Cache instead of pulling from Google Sheets
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
+        # Load from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
         headers = data_latest[0]
 
         id_index = headers.index("lord_id")
@@ -566,7 +605,8 @@ async def topmana(ctx, *args):
         lines = [f"{i+1}. `{name}` — 💧 +{mana:,}" for i, (name, mana) in enumerate(top_rows)]
 
         # Chunked sending (<=2000 chars per message)
-        header = f"📊 **Top {top_n} Mana Gains** (≥25M Power)\n`{previous.title}` → `{latest.title}`:\n"
+        # Replaced the google .title calls with our cached title strings
+        header = f"📊 **Top {top_n} Mana Gains** (≥25M Power)\n`{prev_title}` → `{latest_title}`:\n"
         chunk = header
         for line in lines:
             if len(chunk) + len(line) + 1 > 2000:
@@ -585,197 +625,72 @@ async def topmana(ctx, *args):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
-
 @bot.command()
 async def groupstats(ctx, season: str = DEFAULT_SEASON):
     allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
     
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
     TEAM_ROSTER = {
-        "1038031": "Sun",
-        "1209648": "Moon",
-        "2554608": "Moon",
-        "1268188": "Sun",
-        "2283588": "Moon",
-        "3668102": "Sun",
-        "11403527": "Sun",
-        "14685384": "Moon",
-        "3238703": "Moon",
-        "1652362": "Sun",
-        "11288601": "Sun",
-        "2771301": "Moon",
-        "2069785": "Moon",
-        "11537218": "Sun",
-        "11399110": "Sun",
-        "2360876": "Moon",
-        "8981467": "Moon",
-        "4562030": "Sun",
-        "1185328": "Sun",
-        "4019235": "Moon",
-        "15384392": "Moon",
-        "14920281": "Sun",
-        "7504081": "Sun",
-        "2176073": "Moon",
-        "2411806": "Moon",
-        "4982945": "Sun",
-        "11371644": "Sun",
-        "5605513": "Moon",
-        "3569766": "Moon",
-        "3452794": "Sun",
-        "1301820": "Sun",
-        "1178290": "Moon",
-        "3600529": "Moon",
-        "4781116": "Sun",
-        "3730372": "Moon",
-        "1355903": "Moon",
-        "17409364": "Moon",
-        "12907861": "Sun",
-        "8617664": "Sun",
-        "6409636": "Moon",
-        "11372964": "Moon",
-        "14893533": "Sun",
-        "4112915": "Sun",
-        "14721147": "Moon",
-        "16633476": "Moon",
-        "3383792": "Sun",
-        "3521913": "Sun",
-        "14721627": "Moon",
-        "1890674": "Moon",
-        "1191528": "Sun",
-        "11589778": "Sun",
-        "15529642": "Moon",
-        "12121490": "Moon",
-        "14625955": "Sun",
-        "1903216": "Sun",
-        "1421566": "Moon",
-        "1379913": "Moon",
-        "2217685": "Sun",
-        "1442822": "Sun",
-        "11769711": "Moon",
-        "16322115": "Moon",
-        "15719441": "Sun",
-        "11312335": "Sun",
-        "93496": "Moon",
-        "16007668": "Moon",
-        "1327811": "Sun",
-        "4942439": "Sun",
-        "11487055": "Moon",
-        "11659353": "Moon",
-        "3005418": "Sun",
-        "8365897": "Sun",
-        "3154267": "Moon",
-        "3884083": "Moon",
-        "12913373": "Sun",
-        "8167052": "Sun",
-        "1358230": "Moon",
-        "15168167": "Moon",
-        "8344083": "Sun",
-        "12867862": "Sun",
-        "5710153": "Moon",
-        "1475373": "Sun",
-        "1896011": "Sun",
-        "3665158": "Sun",
-        "8498158": "Moon",
-        "1480794": "Moon",
-        "7871135": "Sun",
-        "14855893": "Sun",
-        "12239902": "Moon",
-        "921581": "Moon",
-        "10026132": "Sun",
-        "12391559": "Sun",
-        "11018782": "Moon",
-        "11409242": "Moon",
-        "12861502": "Sun",
-        "3911741": "Sun",
-        "8654500": "Moon",
-        "15406991": "Sun",
-        "1201472": "Sun",
-        "2102190": "Moon",
-        "2355170": "Moon",
-        "12426797": "Sun",
-        "12049853": "Sun",
-        "15203473": "Moon",
-        "2899559": "Moon",
-        "1159399": "Sun",
-        "12049278": "Sun",
-        "7514081": "Moon",
-        "1955276": "Moon",
-        "11599446": "Sun",
-        "14892554": "Sun",
-        "11516385": "Moon",
-        "16497032": "Moon",
-        "15996144": "Sun",
-        "12054525": "Sun",
-        "7979635": "Moon",
-        "7298996": "Moon",
-        "1727336": "Sun",
-        "11648388": "Sun",
-        "11529501": "Moon",
-        "3937721": "Moon",
-        "6554196": "Sun",
-        "19300504": "Sun",
-        "12993192": "Moon",
-        "1240639": "Moon",
-        "12600393": "Sun",
-        "3324298": "Sun",
-        "3763091": "Moon",
-        "15985931": "Moon",
-        "1930701": "Sun",
-        "3446240": "Sun",
-        "9561066": "Moon",
-        "12581309": "Moon",
-        "15140100": "Sun",
-        "9556439": "Sun",
-        "1191427": "Moon",
-        "3571729": "Moon",
-        "11939697": "Sun",
-        "11042149": "Sun",
-        "9076185": "Moon",
-        "12672252": "Moon",
-        "11306195": "Sun",
-        "12451416": "Sun",
-        "11597010": "Moon",
-        "3550420": "Moon",
-        "15238376": "Sun",
-        "11434627": "Sun",
-        "1434504": "Moon",
-        "537109": "Moon",
-        "3453241": "Sun",
-        "12909862": "Sun",
-        "11042696": "Moon",
-        "11491223": "Moon",
-        "18032877": "Sun",
-        "13255722": "Sun",
-        "16053174": "Moon",
-        "20773329": "Moon",
-        "14249731": "Sun",
-        "15988260": "Sun",
-        "16024377": "Moon",
-        "5751068": "Moon",
-        "15500649": "Sun",
-        "20781093": "Moon",
-        "15976283": "Moon"
+        "1038031": "Sun", "1209648": "Moon", "2554608": "Moon", "1268188": "Sun",
+        "2283588": "Moon", "3668102": "Sun", "11403527": "Sun", "14685384": "Moon",
+        "3238703": "Moon", "1652362": "Sun", "11288601": "Sun", "2771301": "Moon",
+        "2069785": "Moon", "11537218": "Sun", "11399110": "Sun", "2360876": "Moon",
+        "8981467": "Moon", "4562030": "Sun", "1185328": "Sun", "4019235": "Moon",
+        "15384392": "Moon", "14920281": "Sun", "7504081": "Sun", "2176073": "Moon",
+        "2411806": "Moon", "4982945": "Sun", "11371644": "Sun", "5605513": "Moon",
+        "3569766": "Moon", "3452794": "Sun", "1301820": "Sun", "1178290": "Moon",
+        "3600529": "Moon", "4781116": "Sun", "3730372": "Moon", "1355903": "Moon",
+        "17409364": "Moon", "12907861": "Sun", "8617664": "Sun", "6409636": "Moon",
+        "11372964": "Moon", "14893533": "Sun", "4112915": "Sun", "14721147": "Moon",
+        "16633476": "Moon", "3383792": "Sun", "3521913": "Sun", "14721627": "Moon",
+        "1890674": "Moon", "1191528": "Sun", "11589778": "Sun", "15529642": "Moon",
+        "12121490": "Moon", "14625955": "Sun", "1903216": "Sun", "1421566": "Moon",
+        "1379913": "Moon", "2217685": "Sun", "1442822": "Sun", "11769711": "Moon",
+        "16322115": "Moon", "15719441": "Sun", "11312335": "Sun", "93496": "Moon",
+        "16007668": "Moon", "1327811": "Sun", "4942439": "Sun", "11487055": "Moon",
+        "11659353": "Moon", "3005418": "Sun", "8365897": "Sun", "3154267": "Moon",
+        "3884083": "Moon", "12913373": "Sun", "8167052": "Sun", "1358230": "Moon",
+        "15168167": "Moon", "8344083": "Sun", "12867862": "Sun", "5710153": "Moon",
+        "1475373": "Sun", "1896011": "Sun", "3665158": "Sun", "8498158": "Moon",
+        "1480794": "Moon", "7871135": "Sun", "14855893": "Sun", "12239902": "Moon",
+        "921581": "Moon", "10026132": "Sun", "12391559": "Sun", "11018782": "Moon",
+        "11409242": "Moon", "12861502": "Sun", "3911741": "Sun", "8654500": "Moon",
+        "15406991": "Sun", "1201472": "Sun", "2102190": "Moon", "2355170": "Moon",
+        "12426797": "Sun", "12049853": "Sun", "15203473": "Moon", "2899559": "Moon",
+        "1159399": "Sun", "12049278": "Sun", "7514081": "Moon", "1955276": "Moon",
+        "11599446": "Sun", "14892554": "Sun", "11516385": "Moon", "16497032": "Moon",
+        "15996144": "Sun", "12054525": "Sun", "7979635": "Moon", "7298996": "Moon",
+        "1727336": "Sun", "11648388": "Sun", "11529501": "Moon", "3937721": "Moon",
+        "6554196": "Sun", "19300504": "Sun", "12993192": "Moon", "1240639": "Moon",
+        "12600393": "Sun", "3324298": "Sun", "3763091": "Moon", "15985931": "Moon",
+        "1930701": "Sun", "3446240": "Sun", "9561066": "Moon", "12581309": "Moon",
+        "15140100": "Sun", "9556439": "Sun", "1191427": "Moon", "3571729": "Moon",
+        "11939697": "Sun", "11042149": "Sun", "9076185": "Moon", "12672252": "Moon",
+        "11306195": "Sun", "12451416": "Sun", "11597010": "Moon", "3550420": "Moon",
+        "15238376": "Sun", "11434627": "Sun", "1434504": "Moon", "537109": "Moon",
+        "3453241": "Sun", "12909862": "Sun", "11042696": "Moon", "11491223": "Moon",
+        "18032877": "Sun", "13255722": "Sun", "16053174": "Moon", "20773329": "Moon",
+        "14249731": "Sun", "15988260": "Sun", "16024377": "Moon", "5751068": "Moon",
+        "15500649": "Sun", "20781093": "Moon", "15976283": "Moon"
     }
     
     try:
         season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season, season)
-        tabs = client.open(sheet_name).worksheets()
-        scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
         
-        if len(scan_tabs) < 2:
-            await ctx.send("❌ Not enough scan sheets to compare.")
+        # Check if synced in cache
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = scan_tabs[-1]
-        previous = scan_tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev   = previous.get_all_values()
+        # Load from bot memory instantly
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
         headers = data_latest[0]
 
         def find_idx(name, fallback):
@@ -878,7 +793,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         # Create Single Embed
         embed = discord.Embed(
             title="📊 Group Stats - Sun vs Moon",
-            description=f"**Comparing:** `{previous.title}` ➔ `{latest.title}`\n" + "▬" * 15,
+            description=f"**Comparing:** `{prev_title}` ➔ `{latest_title}`\n" + "▬" * 15,
             color=0x2f3136 # Dark "Discord" theme color
         )
 
@@ -904,344 +819,217 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
 
     except Exception as e:
         await ctx.send(f"❌ **Error:** {e}")
-
+        
 @bot.command(aliases=['grouplb', 'gl'])
 async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
-    allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
-    
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-        await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-        return
+    async with ctx.typing():
+        allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
         
-    TEAM_ROSTER = {
-        "1038031": "Sun",
-        "1209648": "Moon",
-        "2554608": "Moon",
-        "1268188": "Sun",
-        "2283588": "Moon",
-        "3668102": "Sun",
-        "11403527": "Sun",
-        "14685384": "Moon",
-        "3238703": "Moon",
-        "1652362": "Sun",
-        "11288601": "Sun",
-        "2771301": "Moon",
-        "2069785": "Moon",
-        "11537218": "Sun",
-        "11399110": "Sun",
-        "2360876": "Moon",
-        "8981467": "Moon",
-        "4562030": "Sun",
-        "1185328": "Sun",
-        "4019235": "Moon",
-        "15384392": "Moon",
-        "14920281": "Sun",
-        "7504081": "Sun",
-        "2176073": "Moon",
-        "2411806": "Moon",
-        "4982945": "Sun",
-        "11371644": "Sun",
-        "5605513": "Moon",
-        "3569766": "Moon",
-        "3452794": "Sun",
-        "1301820": "Sun",
-        "1178290": "Moon",
-        "3600529": "Moon",
-        "4781116": "Sun",
-        "3730372": "Moon",
-        "1355903": "Moon",
-        "17409364": "Moon",
-        "12907861": "Sun",
-        "8617664": "Sun",
-        "6409636": "Moon",
-        "11372964": "Moon",
-        "14893533": "Sun",
-        "4112915": "Sun",
-        "14721147": "Moon",
-        "16633476": "Moon",
-        "3383792": "Sun",
-        "3521913": "Sun",
-        "14721627": "Moon",
-        "1890674": "Moon",
-        "1191528": "Sun",
-        "11589778": "Sun",
-        "15529642": "Moon",
-        "12121490": "Moon",
-        "14625955": "Sun",
-        "1903216": "Sun",
-        "1421566": "Moon",
-        "1379913": "Moon",
-        "2217685": "Sun",
-        "1442822": "Sun",
-        "11769711": "Moon",
-        "16322115": "Moon",
-        "15719441": "Sun",
-        "11312335": "Sun",
-        "93496": "Moon",
-        "16007668": "Moon",
-        "1327811": "Sun",
-        "4942439": "Sun",
-        "11487055": "Moon",
-        "11659353": "Moon",
-        "3005418": "Sun",
-        "8365897": "Sun",
-        "3154267": "Moon",
-        "3884083": "Moon",
-        "12913373": "Sun",
-        "8167052": "Sun",
-        "1358230": "Moon",
-        "15168167": "Moon",
-        "8344083": "Sun",
-        "12867862": "Sun",
-        "5710153": "Moon",
-        "1475373": "Sun",
-        "1896011": "Sun",
-        "3665158": "Sun",
-        "8498158": "Moon",
-        "1480794": "Moon",
-        "7871135": "Sun",
-        "14855893": "Sun",
-        "12239902": "Moon",
-        "921581": "Moon",
-        "10026132": "Sun",
-        "12391559": "Sun",
-        "11018782": "Moon",
-        "11409242": "Moon",
-        "12861502": "Sun",
-        "3911741": "Sun",
-        "8654500": "Moon",
-        "15406991": "Sun",
-        "1201472": "Sun",
-        "2102190": "Moon",
-        "2355170": "Moon",
-        "12426797": "Sun",
-        "12049853": "Sun",
-        "15203473": "Moon",
-        "2899559": "Moon",
-        "1159399": "Sun",
-        "12049278": "Sun",
-        "7514081": "Moon",
-        "1955276": "Moon",
-        "11599446": "Sun",
-        "14892554": "Sun",
-        "11516385": "Moon",
-        "16497032": "Moon",
-        "15996144": "Sun",
-        "12054525": "Sun",
-        "7979635": "Moon",
-        "7298996": "Moon",
-        "1727336": "Sun",
-        "11648388": "Sun",
-        "11529501": "Moon",
-        "3937721": "Moon",
-        "6554196": "Sun",
-        "19300504": "Sun",
-        "12993192": "Moon",
-        "1240639": "Moon",
-        "12600393": "Sun",
-        "3324298": "Sun",
-        "3763091": "Moon",
-        "15985931": "Moon",
-        "1930701": "Sun",
-        "3446240": "Sun",
-        "9561066": "Moon",
-        "12581309": "Moon",
-        "15140100": "Sun",
-        "9556439": "Sun",
-        "1191427": "Moon",
-        "3571729": "Moon",
-        "11939697": "Sun",
-        "11042149": "Sun",
-        "9076185": "Moon",
-        "12672252": "Moon",
-        "11306195": "Sun",
-        "12451416": "Sun",
-        "11597010": "Moon",
-        "3550420": "Moon",
-        "15238376": "Sun",
-        "11434627": "Sun",
-        "1434504": "Moon",
-        "537109": "Moon",
-        "3453241": "Sun",
-        "12909862": "Sun",
-        "11042696": "Moon",
-        "11491223": "Moon",
-        "18032877": "Sun",
-        "13255722": "Sun",
-        "16053174": "Moon",
-        "20773329": "Moon",
-        "14249731": "Sun",
-        "15988260": "Sun",
-        "16024377": "Moon",
-        "5751068": "Moon",
-        "15500649": "Sun",
-        "20781093": "Moon",
-        "15976283": "Moon"
-    }
-    
-    try:
-        # 1. FETCH SEASON DATA (For Merits & Deads Gains)
-        season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season, season)
-        
-        # We need asyncio.to_thread if you are using it elsewhere to prevent blocking
-        tabs = client.open(sheet_name).worksheets()
-        scan_tabs = [tab for tab in tabs if tab.title.lower() != "roster"]
-        
-        if len(scan_tabs) < 2:
-            await ctx.send("❌ Not enough scan sheets to calculate leaderboard gains.")
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
-
-        latest = scan_tabs[-1]
-        previous = scan_tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev   = previous.get_all_values()
-        headers = data_latest[0]
-
-        def find_idx(name, fallback):
-            if name in headers: return headers.index(name)
-            for i, h in enumerate(headers):
-                if name.lower() in h.lower(): return i
-            return fallback
-
-        def to_int(val):
-            try:
-                v = str(val).replace(',', '').replace(' ', '').strip()
-                return int(v) if v not in ("", "-") else 0
-            except: return 0
-
-        id_idx     = find_idx("lord_id", 0)
-        name_idx   = find_idx("name", 1)
-        merits_idx = find_idx("merits", 11) 
-        dead_idx   = find_idx("units_dead", 17)
-        max_needed_idx = max(id_idx, name_idx, merits_idx, dead_idx)
-
-        prev_map = {
-            row[id_idx].strip(): row for row in data_prev[1:]
-            if len(row) > max_needed_idx and row[id_idx].strip()
+            
+        TEAM_ROSTER = {
+            "1038031": "Sun", "1209648": "Moon", "2554608": "Moon", "1268188": "Sun",
+            "2283588": "Moon", "3668102": "Sun", "11403527": "Sun", "14685384": "Moon",
+            "3238703": "Moon", "1652362": "Sun", "11288601": "Sun", "2771301": "Moon",
+            "2069785": "Moon", "11537218": "Sun", "11399110": "Sun", "2360876": "Moon",
+            "8981467": "Moon", "4562030": "Sun", "1185328": "Sun", "4019235": "Moon",
+            "15384392": "Moon", "14920281": "Sun", "7504081": "Sun", "2176073": "Moon",
+            "2411806": "Moon", "4982945": "Sun", "11371644": "Sun", "5605513": "Moon",
+            "3569766": "Moon", "3452794": "Sun", "1301820": "Sun", "1178290": "Moon",
+            "3600529": "Moon", "4781116": "Sun", "3730372": "Moon", "1355903": "Moon",
+            "17409364": "Moon", "12907861": "Sun", "8617664": "Sun", "6409636": "Moon",
+            "11372964": "Moon", "14893533": "Sun", "4112915": "Sun", "14721147": "Moon",
+            "16633476": "Moon", "3383792": "Sun", "3521913": "Sun", "14721627": "Moon",
+            "1890674": "Moon", "1191528": "Sun", "11589778": "Sun", "15529642": "Moon",
+            "12121490": "Moon", "14625955": "Sun", "1903216": "Sun", "1421566": "Moon",
+            "1379913": "Moon", "2217685": "Sun", "1442822": "Sun", "11769711": "Moon",
+            "16322115": "Moon", "15719441": "Sun", "11312335": "Sun", "93496": "Moon",
+            "16007668": "Moon", "1327811": "Sun", "4942439": "Sun", "11487055": "Moon",
+            "11659353": "Moon", "3005418": "Sun", "8365897": "Sun", "3154267": "Moon",
+            "3884083": "Moon", "12913373": "Sun", "8167052": "Sun", "1358230": "Moon",
+            "15168167": "Moon", "8344083": "Sun", "12867862": "Sun", "5710153": "Moon",
+            "1475373": "Sun", "1896011": "Sun", "3665158": "Sun", "8498158": "Moon",
+            "1480794": "Moon", "7871135": "Sun", "14855893": "Sun", "12239902": "Moon",
+            "921581": "Moon", "10026132": "Sun", "12391559": "Sun", "11018782": "Moon",
+            "11409242": "Moon", "12861502": "Sun", "3911741": "Sun", "8654500": "Moon",
+            "15406991": "Sun", "1201472": "Sun", "2102190": "Moon", "2355170": "Moon",
+            "12426797": "Sun", "12049853": "Sun", "15203473": "Moon", "2899559": "Moon",
+            "1159399": "Sun", "12049278": "Sun", "7514081": "Moon", "1955276": "Moon",
+            "11599446": "Sun", "14892554": "Sun", "11516385": "Moon", "16497032": "Moon",
+            "15996144": "Sun", "12054525": "Sun", "7979635": "Moon", "7298996": "Moon",
+            "1727336": "Sun", "11648388": "Sun", "11529501": "Moon", "3937721": "Moon",
+            "6554196": "Sun", "19300504": "Sun", "12993192": "Moon", "1240639": "Moon",
+            "12600393": "Sun", "3324298": "Sun", "3763091": "Moon", "15985931": "Moon",
+            "1930701": "Sun", "3446240": "Sun", "9561066": "Moon", "12581309": "Moon",
+            "15140100": "Sun", "9556439": "Sun", "1191427": "Moon", "3571729": "Moon",
+            "11939697": "Sun", "11042149": "Sun", "9076185": "Moon", "12672252": "Moon",
+            "11306195": "Sun", "12451416": "Sun", "11597010": "Moon", "3550420": "Moon",
+            "15238376": "Sun", "11434627": "Sun", "1434504": "Moon", "537109": "Moon",
+            "3453241": "Sun", "12909862": "Sun", "11042696": "Moon", "11491223": "Moon",
+            "18032877": "Sun", "13255722": "Sun", "16053174": "Moon", "20773329": "Moon",
+            "14249731": "Sun", "15988260": "Sun", "16024377": "Moon", "5751068": "Moon",
+            "15500649": "Sun", "20781093": "Moon", "15976283": "Moon"
         }
-
-        # 2. FETCH SERVER 375 DATA (For Infantry Merits)
-        sheet_375 = client.open(SERVER_375_SHEET)
-        data_375 = sheet_375.sheet1.get_all_values()
-        headers_375 = data_375[0]
         
-        id_col_375 = headers_375.index("Character ID")
-        inf_col_375 = headers_375.index("Infantry Only")
-        
-        # Create a dictionary mapping Lord ID to their Infantry Merits
-        inf_map = {}
-        for r in data_375[1:]:
-            if len(r) > max(id_col_375, inf_col_375):
-                inf_map[str(r[id_col_375]).strip()] = to_int(r[inf_col_375])
-
-        # 3. CALCULATE SCORES
-        sun_players = []
-        moon_players = []
-
-        for row in data_latest[1:]:
-            if len(row) <= max_needed_idx: continue
+        try:
+            season = season.lower()
             
-            lid = (row[id_idx] or "").strip()
-            group = TEAM_ROSTER.get(lid)
-            if not group: continue
+            # CACHE CHECK LOGIC
+            if season not in bot_cache["seasons"] or bot_cache["375_data"] is None:
+                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+                return
 
-            prev_row = prev_map.get(lid)
-            if prev_row is None: continue
+            # Load Season data from bot memory
+            data_latest = bot_cache["seasons"][season]["latest"]
+            data_prev   = bot_cache["seasons"][season]["prev"]
+            latest_title = bot_cache["seasons"][season]["latest_title"]
+            prev_title   = bot_cache["seasons"][season]["prev_title"]
+            headers = data_latest[0]
 
-            # Gains from Season Sheet
-            merits_gain = to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
-            deads_gain  = to_int(row[dead_idx]) - to_int(prev_row[dead_idx])
-            
-            # Static Total from 375 Sheet
-            inf_val = inf_map.get(lid, 0)
-            
-            # Scoring Formula: Merits (1x) + Infantry (2x) + Deads (5x)
-            score = (merits_gain * 1) + (inf_val * 2) + (deads_gain * 5)
-            
-            p_data = {
-                "name": row[name_idx],
-                "score": score,
-                "merits": merits_gain,
-                "infantry": inf_val,
-                "deads": deads_gain
+            def find_idx(name, fallback):
+                if name in headers: return headers.index(name)
+                for i, h in enumerate(headers):
+                    if name.lower() in h.lower(): return i
+                return fallback
+
+            def to_int(val):
+                try:
+                    v = str(val).replace(',', '').replace(' ', '').strip()
+                    return int(v) if v not in ("", "-") else 0
+                except: return 0
+
+            id_idx     = find_idx("lord_id", 0)
+            name_idx   = find_idx("name", 1)
+            merits_idx = find_idx("merits", 11) 
+            dead_idx   = find_idx("units_dead", 17)
+            max_needed_idx = max(id_idx, name_idx, merits_idx, dead_idx)
+
+            prev_map = {
+                row[id_idx].strip(): row for row in data_prev[1:]
+                if len(row) > max_needed_idx and row[id_idx].strip()
             }
+
+            # Load Server 375 data from bot memory
+            data_375 = bot_cache["375_data"]
+            headers_375 = data_375[0]
             
-            if group == "Sun":
-                sun_players.append(p_data)
-            elif group == "Moon":
-                moon_players.append(p_data)
+            id_col_375 = headers_375.index("Character ID")
+            inf_col_375 = headers_375.index("Infantry Only")
+            
+            # Create a dictionary mapping Lord ID to their Infantry Merits
+            inf_map = {}
+            for r in data_375[1:]:
+                if len(r) > max(id_col_375, inf_col_375):
+                    inf_map[str(r[id_col_375]).strip()] = to_int(r[inf_col_375])
 
-        # Sort both teams highest score to lowest
-        sun_players.sort(key=lambda x: x["score"], reverse=True)
-        moon_players.sort(key=lambda x: x["score"], reverse=True)
+            # CALCULATE SCORES
+            sun_players = []
+            moon_players = []
 
-                # Helper to format big numbers cleanly (if you don't already have one)
-        def fmt(num):
-            if num >= 1_000_000:
-                return f"{num/1_000_000:.2f}M"
-            elif num >= 1_000:
-                return f"{num/1_000:.1f}K"
-            return str(num)
-        
-        def build_team_desc(team_players):
-            desc = ""
-            for i, p in enumerate(team_players[:10], 1):
-                # Truncate long names so they don't break the column layout
-                raw_name = p['name']
-                display_name = raw_name[:10] + ".." if len(raw_name) > 10 else raw_name
+            for row in data_latest[1:]:
+                if len(row) <= max_needed_idx: continue
                 
-                if i == 1: rank_icon = "🥇"
-                elif i == 2: rank_icon = "🥈"
-                elif i == 3: rank_icon = "🥉"
-                else: rank_icon = f"**{i}.**"
-        
-                score_val = p['score']
+                lid = (row[id_idx] or "").strip()
+                group = TEAM_ROSTER.get(lid)
+                if not group: continue
+
+                prev_row = prev_map.get(lid)
+                if prev_row is None: continue
+
+                # Gains from Season Sheet
+                merits_gain = to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
+                deads_gain  = to_int(row[dead_idx]) - to_int(prev_row[dead_idx])
                 
-                # For Top 3 with points, pack everything into one clean, readable line
-                if i <= 3 and score_val > 0:
-                    desc += f"{rank_icon} **{display_name}** — `{fmt(score_val)}`\n"
-                    desc += f" `🧠{fmt(p['merits'])} ⚔️{fmt(p['infantry'])} 💀{fmt(p['deads'])}`\n"
-                else:
-                    # For 4-10 or anyone with 0 points, just show name and score cleanly
-                    desc += f"{rank_icon} {display_name} — `{fmt(score_val)}`\n"
+                # Static Total from 375 Sheet
+                inf_val = inf_map.get(lid, 0)
+                
+                # Scoring Formula: Merits (1x) + Infantry (2x) + Deads (5x)
+                score = (merits_gain * 1) + (inf_val * 2) + (deads_gain * 5)
+                
+                p_data = {
+                    "name": row[name_idx],
+                    "score": score,
+                    "merits": merits_gain,
+                    "infantry": inf_val,
+                    "deads": deads_gain
+                }
+                
+                if group == "Sun":
+                    sun_players.append(p_data)
+                elif group == "Moon":
+                    moon_players.append(p_data)
+
+            # Sort both teams highest score to lowest
+            sun_players.sort(key=lambda x: x["score"], reverse=True)
+            moon_players.sort(key=lambda x: x["score"], reverse=True)
+
+            # Helper to format big numbers cleanly
+            def fmt(num):
+                if num >= 1_000_000:
+                    return f"{num/1_000_000:.2f}M"
+                elif num >= 1_000:
+                    return f"{num/1_000:.1f}K"
+                return str(num)
+            
+            def build_team_desc(team_players):
+                desc = ""
+                for i, p in enumerate(team_players[:10], 1):
+                    # Truncate long names so they don't break the column layout
+                    raw_name = p['name']
+                    display_name = raw_name[:10] + ".." if len(raw_name) > 10 else raw_name
                     
-            return desc
+                    if i == 1: rank_icon = "🥇"
+                    elif i == 2: rank_icon = "🥈"
+                    elif i == 3: rank_icon = "🥉"
+                    else: rank_icon = f"**{i}.**"
+            
+                    score_val = p['score']
+                    
+                    # For Top 3 with points, pack everything into one clean, readable line
+                    if i <= 3 and score_val > 0:
+                        desc += f"{rank_icon} **{display_name}** — `{fmt(score_val)}`\n"
+                        desc += f" `🧠{fmt(p['merits'])} ⚔️{fmt(p['infantry'])} 💀{fmt(p['deads'])}`\n"
+                    else:
+                        # For 4-10 or anyone with 0 points, just show name and score cleanly
+                        desc += f"{rank_icon} {display_name} — `{fmt(score_val)}`\n"
+                        
+                return desc
 
-        # Calculate total team scores
-        sun_total = sum(p['score'] for p in sun_players)
-        moon_total = sum(p['score'] for p in moon_players)
-        
-        # Change these variables to match what you named them above!
-        sun_text = build_team_desc(sun_players) 
-        moon_text = build_team_desc(moon_players)
+            # Calculate total team scores
+            sun_total = sum(p['score'] for p in sun_players)
+            moon_total = sum(p['score'] for p in moon_players)
+            
+            sun_text = build_team_desc(sun_players) 
+            moon_text = build_team_desc(moon_players)
 
-        # Create the Embed
-        embed = discord.Embed(
-            title="🏆 Group Leaderboard - Sun vs Moon",
-            description=f"**Comparing:** `{previous.title}` ➔ `{latest.title}`\n"
-                        f"*Scoring: Merits (1x) | Infantry (2x) | Deads (5x)*\n" + "▬" * 15,
-            color=0x2f3136
-        )
-        
-        embed.add_field(
-            name=f"🌞 TEAM SUN — {fmt(sun_total)} pts", 
-            value=sun_text, 
-            inline=True
-        )
-        embed.add_field(
-            name=f"🌙 TEAM MOON — {fmt(moon_total)} pts", 
-            value=moon_text, 
-            inline=True
-        )
-        
-        embed.timestamp = datetime.now(UTC) 
-        await ctx.send(embed=embed)
+            # Create the Embed
+            embed = discord.Embed(
+                title="🏆 Group Leaderboard - Sun vs Moon",
+                description=f"**Comparing:** `{prev_title}` ➔ `{latest_title}`\n"
+                            f"*Scoring: Merits (1x) | Infantry (2x) | Deads (5x)*\n" + "▬" * 15,
+                color=0x2f3136
+            )
+            
+            embed.add_field(
+                name=f"🌞 TEAM SUN — {fmt(sun_total)} pts", 
+                value=sun_text, 
+                inline=True
+            )
+            embed.add_field(
+                name=f"🌙 TEAM MOON — {fmt(moon_total)} pts", 
+                value=moon_text, 
+                inline=True
+            )
+            
+            embed.timestamp = datetime.now(UTC) 
+            await ctx.send(embed=embed)
 
-    except Exception as e:
-        await ctx.send(f"❌ **Error:** {e}")
-
+        except Exception as e:
+            await ctx.send(f"❌ **Error:** {e}")
+            
 @bot.command()
 async def topheal(ctx, top_n: int = 10, season: str = DEFAULT_SEASON):
     async with ctx.typing():
@@ -2459,10 +2247,12 @@ async def generate_375_leaderboard(ctx, stat_names, embed_title, is_top=True, li
             return
 
         try:
-            # 1. Fetch Data
-            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
-            ws_375 = sheet_375.sheet1
-            data_375 = await asyncio.to_thread(ws_375.get_all_values)
+            # 1. Fetch Data directly from Cache
+            if bot_cache.get("375_data") is None:
+                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+                return
+                
+            data_375 = bot_cache["375_data"]
 
             headers = data_375[0]
             name_col = headers.index("Character Name")
@@ -2597,29 +2387,29 @@ async def lowdest(ctx, amount: int = 10):
 async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
     async with ctx.typing():
         if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
             channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
+            
     try:
         season = season.lower()
         is_default_season = (season == DEFAULT_SEASON)
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
+        
+        if season not in SEASON_SHEETS:
             await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
+        # 1. CACHE CHECK: Ensure background task has synced both sheets
+        if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
+        # 2. LOAD DATA DIRECTLY FROM CACHE
+        data_latest  = bot_cache["seasons"][season]["latest"]
+        data_prev    = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        headers      = data_latest[0]
 
         def col_idx(col): return headers.index(col)
 
@@ -2673,7 +2463,7 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
         name = row_latest[name_idx]
         alliance = row_latest[alliance_idx]
-        player_server = str(row_latest[home_server_idx]).strip() # Define player server for global use
+        player_server = str(row_latest[home_server_idx]).strip()
         power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
         power_latest = to_int(row_latest[power_idx])
         merit_latest = to_int(row_latest[merit_idx])
@@ -2692,7 +2482,6 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         mana_gathered = to_int(row_latest[mana_gathered_idx]) - to_int(row_prev[mana_gathered_idx])
         total_gathered = gold_gathered + wood_gathered + ore_gathered + mana_gathered
 
-        # Create lookup from previous sheet
         prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
 
         def get_merit_ratio_rank():
@@ -2717,7 +2506,6 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         
         rank_merit_ratio = get_merit_ratio_rank()
 
-        # New helper to rank total cumulative stats (instead of gains)
         def get_total_rank(col_index):
             totals = []
             for row in data_latest[1:]:
@@ -2803,16 +2591,13 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
         embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
         embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
-       
-       # -------------------------------------------------------------
-        # NEW SECTION: Server 375 Exclusive Stats Check (Google Sheets)
+        
+        # -------------------------------------------------------------
+        # SERVER 375 EXCLUSIVE STATS CHECK (READ FROM CACHE)
         # -------------------------------------------------------------
         if player_server == "375":
             try:
-                sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
-                ws_375 = sheet_375.sheet1
-                data_375 = await asyncio.to_thread(ws_375.get_all_values)
-                
+                data_375 = bot_cache["375_data"]
                 headers_375 = data_375[0]
                 
                 id_col = headers_375.index("Character ID")
@@ -2873,7 +2658,6 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
                     pvp_ratio = (enemy_merits_lifetime / total_merits_lifetime * 100) if total_merits_lifetime > 0 else 0
                     
-                    # Extract T4 and T5 separately instead of adding them
                     t4_heal_val = to_int(player_row_375[t4_heal_col])
                     t5_heal_val = to_int(player_row_375[t5_heal_col])
                     
@@ -2913,25 +2697,23 @@ async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
             
             except Exception as ex:
                 print(f"Failed to load Server 375 stats for {lord_id}: {ex}")
-        # -------------------------------------------------------------
-        # -------------------------------------------------------------
 
+        # Footers using cached sheet titles
         if is_default_season:
             embed.set_footer(
                 text=(
-                    f"📅 Timespan: {previous.title} → {latest.title}\n"
+                    f"📅 Timespan: {prev_title} → {latest_title}\n"
                     "⚠️ Stats may vary slightly from in-game counters due to scan timing.\n"
                     "🔍 View past seasons by appending a season code (e.g., !progress 123456 sos6)."
                 )
             )
         else:
-            embed.set_footer(text=f"📅 Timespan: {previous.title} → {latest.title}")
+            embed.set_footer(text=f"📅 Timespan: {prev_title} → {latest_title}")
 
         await ctx.send(embed=embed)
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
-
 
 from discord.ext import commands
 import discord
@@ -3325,6 +3107,8 @@ async def on_ready():
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
     print(f"✅ Bot is online as {bot.user}")
+    if not fetch_sheets_background.is_running():
+        fetch_sheets_background.start()
 
     # Start the UTC channel updater loop
     if not update_utc_channels.is_running():
