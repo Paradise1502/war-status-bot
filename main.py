@@ -83,7 +83,7 @@ async def fetch_sheets_background():
                         "prev": prev_data,
                         "oldest": oldest_data, # ADD THIS
                         "latest_title": scan_tabs[-1].title,
-                        "prev_title": scan_tabs[-2].title
+                        "prev_title": scan_tabs[-2].title,
                         "oldest_title": scan_tabs[0].title # ADD THIS
                     }
                 # Brief pause to prevent Google from triggering a 503 rate limit
