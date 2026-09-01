@@ -3107,6 +3107,7 @@ def role_check():
 async def on_ready():
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
+    await bot.load_extension("activity_checks")
     print(f"✅ Bot is online as {bot.user}")
     if not fetch_sheets_background.is_running():
         fetch_sheets_background.start()
