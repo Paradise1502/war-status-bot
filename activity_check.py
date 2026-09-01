@@ -23,10 +23,10 @@ from discord.ext import commands
 DB_PATH = "activity_checks.db"
 
 # Where the live dashboard message gets posted (same log channel you already use)
-DASHBOARD_CHANNEL_ID = 1527938722987900978
+DASHBOARD_CHANNEL_ID = 1544402126539591753
 
 # Roles you are allowed to send activity checks to (same OPSEC guard as your broadcasts)
-ALLOWED_ROLES = ["Test", "Main RoW Team"]
+ALLOWED_ROLES = ["Test", "NVR Member"]
 
 # Add the per-user OPSEC fingerprint to activity check DMs too?
 # Set to False if you don't care about leak-tracing these messages.
