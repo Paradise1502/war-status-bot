@@ -1755,6 +1755,102 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
         except Exception as e:
             await ctx.send(f"❌ **Error generating duel:** {e}")
 
+@bot.command(aliases=['toptraders', 'toptraded', 'traders'])
+async def toptraders(ctx, top_n: int = 10):
+    """Shows the top players by traded merits (Total - Enemy) on Server 375."""
+    async with ctx.typing():
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+            return
+
+    try:
+        top_n = max(1, min(100, top_n))
+
+        # CACHE CHECK
+        if bot_cache.get("375_data") is None:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+            return
+
+        data_375 = bot_cache["375_data"]
+        headers = data_375[0]
+
+        # Robust header lookup
+        def find_idx(name):
+            for i, h in enumerate(headers):
+                if name.lower() in h.lower():
+                    return i
+            raise ValueError(f"Required column matching '{name}' not found.")
+
+        name_idx = find_idx("character name")
+        power_idx = find_idx("historical highest power")
+        total_merit_idx = find_idx("total merits")
+        enemy_merit_idx = find_idx("enemy merits")
+
+        def to_int(val):
+            try:
+                return int(str(val).replace(",", "").replace("-", "").strip())
+            except:
+                return 0
+
+        results = []
+        for row in data_375[1:]:
+            if len(row) <= max(name_idx, power_idx, total_merit_idx, enemy_merit_idx):
+                continue
+            
+            power = to_int(row[power_idx])
+            if power < 50_000_000:
+                continue
+            
+            total_merits = to_int(row[total_merit_idx])
+            enemy_merits = to_int(row[enemy_merit_idx])
+            
+            # Traded merits = Total - Real (Enemy)
+            traded = max(0, total_merits - enemy_merits)
+            
+            if traded > 0:
+                results.append((row[name_idx].strip(), traded, total_merits))
+
+        if not results:
+            await ctx.send("❌ No eligible players found.")
+            return
+
+        # Sort by traded merits descending
+        results.sort(key=lambda x: x[1], reverse=True)
+        top_rows = results[:top_n]
+
+        # Build lines with a percentage indicator
+        lines = []
+        for i, (name, traded, total) in enumerate(top_rows):
+            pct = (traded / total * 100) if total > 0 else 0
+            lines.append(f"{i+1}. `{name}` — 🤝 **{traded:,}** `({pct:.1f}% traded)`")
+
+        # Header and chunking
+        header = f"**🤝 Top {top_n} Merit Traders — Server 375 (≥50M Power)**\n*Formula: Total Merits - Enemy Merits*\n\n"
+        
+        chunk = header
+        chunks = []
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = ""
+            chunk += line + "\n"
+        if chunk.strip():
+            chunks.append(chunk.rstrip())
+
+        for ch in chunks:
+            try:
+                await ctx.send(ch)
+            except discord.HTTPException as e:
+                if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+                    await ctx.send("⚠️ Character limit reached. Try a smaller N.")
+                    return
+                await ctx.send(f"❌ Discord error: {e}")
+                return
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
 @bot.command(aliases=['mage1v1', 'duel', 'challenge'])
 async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
     """Custom 1v1 Challenge: Tinzy vs Balakas"""
