@@ -20,7 +20,8 @@ from discord.ext import commands
 # CONFIG
 # ---------------------------------------------------------------------------
 
-DB_PATH = "activity_checks.db"
+import os
+DB_PATH = os.getenv("ACTIVITY_DB_PATH", "/data/activity_checks.db")
 
 # Where the live dashboard message gets posted (same log channel you already use)
 DASHBOARD_CHANNEL_ID = 1544402126539591753
