@@ -1755,7 +1755,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
         except Exception as e:
             await ctx.send(f"❌ **Error generating duel:** {e}")
 
-@bot.command(aliases=['toptraders', 'toptraded', 'traders'])
+@bot.command(aliases=['toptraded', 'traders'])
 async def toptraders(ctx, top_n: int = 10):
     """Shows the top players by traded merits (Total - Enemy) on Server 375."""
     async with ctx.typing():
