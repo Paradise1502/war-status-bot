@@ -65,7 +65,7 @@ async def fetch_sheets_background():
         # 2. Fetch all Seasonal Sheets
         for season_key, sheet_name in SEASON_SHEETS.items():
             try:
-                tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+                tabs = await asyncio.to_thread(lambda: client.open(sheet_name).worksheets())
                 scan_tabs = [t for t in tabs if t.title.lower() != "roster"]
                 
                 if len(scan_tabs) >= 2:
