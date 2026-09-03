@@ -4,6 +4,8 @@ from string import ascii_uppercase
 import os
 import json
 import discord
+import db
+import re
 from discord.ext import commands
 from discord.ext import tasks
 from datetime import datetime, timedelta, UTC, timezone
@@ -116,6 +118,23 @@ WAR_CHANNEL_REACTIONS = {
     "🧑‍🌾": "🧑‍🌾｜𝐆𝐎-𝐅𝐀𝐑𝐌",
     "⚠️": "⚠️｜𝐁𝐔𝐈𝐋𝐃-𝐁𝐔𝐅𝐅",
 }
+
+SCAN_INGEST_CHANNEL_ID = 1236059889411952690   # where !ingest is allowed
+SCAN_ADMIN_ROLE_ID     = 1528211607556198482   # role permitted to ingest
+ 
+ 
+def scan_admin():
+    """Only allow ingest/delete from an admin role in the designated channel."""
+    async def predicate(ctx):
+        if ctx.channel.id != SCAN_INGEST_CHANNEL_ID:
+            await ctx.send(f"❌ Use this in <#{SCAN_INGEST_CHANNEL_ID}>.")
+            return False
+        if not any(r.id == SCAN_ADMIN_ROLE_ID for r in getattr(ctx.author, "roles", [])):
+            await ctx.send("❌ You don't have permission to manage scans.")
+            return False
+        return True
+    return commands.check(predicate)
+
 
 @bot.event
 async def on_raw_reaction_add(payload):
@@ -231,6 +250,361 @@ async def send_section_cards(ctx, title: str, emoji: str, color: int, items: lis
             )
         await ctx.send(embed=embed)
         page += 1
+
+
+@bot.command(name="ingest")
+@scan_admin()
+async def ingest_scan_cmd(ctx, season: str = DEFAULT_SEASON, scan_date: str = None):
+    """
+    Upload a daily scan CSV.
+ 
+        !ingest                     -> default season, date from filename or today
+        !ingest sos2                -> explicit season
+        !ingest sos2 2026-09-01     -> explicit season and date (backfilling)
+ 
+    Re-running for the same date replaces that day — safe to redo a bad upload.
+    """
+    async with ctx.typing():
+        season = season.lower()
+        if season not in SEASON_SHEETS:
+            await ctx.send(f"❌ Unknown season. Options: {', '.join(SEASON_SHEETS.keys())}")
+            return
+ 
+        if not ctx.message.attachments:
+            await ctx.send("❌ Attach the scan CSV to the same message as the command.")
+            return
+ 
+        attachment = ctx.message.attachments[0]
+        if not attachment.filename.lower().endswith((".csv", ".txt", ".tsv")):
+            await ctx.send(f"❌ `{attachment.filename}` doesn't look like a CSV.")
+            return
+ 
+        # Work out which day this scan represents
+        if scan_date:
+            try:
+                target = datetime.strptime(scan_date, "%Y-%m-%d").date()
+            except ValueError:
+                await ctx.send("❌ Date must be `YYYY-MM-DD`.")
+                return
+            date_source = "you specified it"
+        else:
+            target = db.date_from_filename(attachment.filename)
+            if target:
+                date_source = "read from the filename"
+            else:
+                target = datetime.now(UTC).date()
+                date_source = "today's UTC date — no date in the filename"
+ 
+        try:
+            raw = await attachment.read()
+            headers, rows = db.parse_scan_csv(raw)
+            result = await db.ingest_scan(
+                season=season,
+                scan_date=target,
+                headers=headers,
+                rows=rows,
+                source_file=attachment.filename,
+                ingested_by=str(ctx.author),
+            )
+        except Exception as e:
+            await ctx.send(f"❌ **Ingest failed:** {e}")
+            return
+ 
+        embed = discord.Embed(
+            title="✅ Scan ingested",
+            description=f"**{season.upper()}** — `{target}`\n*Date {date_source}.*",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Rows", value=f"{result['rows']:,}", inline=True)
+        embed.add_field(name="Columns", value=str(result["columns"]), inline=True)
+        embed.add_field(name="File", value=f"`{attachment.filename}`", inline=True)
+ 
+        notes = []
+        if result["replaced"] is not None:
+            notes.append(f"↻ Replaced an existing scan for this date ({result['replaced']:,} rows).")
+        if result["duplicate_ids"]:
+            notes.append(f"⚠️ {result['duplicate_ids']} duplicate lord_id(s) — kept the last occurrence.")
+        if result["skipped_no_id"]:
+            notes.append(f"⚠️ Skipped {result['skipped_no_id']} row(s) with no lord_id.")
+        if notes:
+            embed.add_field(name="Notes", value="\n".join(notes), inline=False)
+ 
+        embed.set_footer(text="Cache refreshes within 10 minutes, or run !resync now.")
+        await ctx.send(embed=embed)
+ 
+        # Refresh immediately so the new scan is live right away
+        await refresh_season_cache()
+ 
+ 
+# -----------------------------------------------------------------------------
+# 3. ADMIN UTILITIES
+# -----------------------------------------------------------------------------
+ 
+@bot.command(name="scans")
+async def list_scans_cmd(ctx, season: str = DEFAULT_SEASON, limit: int = 15):
+    """Show which scan dates are stored for a season."""
+    async with ctx.typing():
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+            await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+            return
+ 
+        season = season.lower()
+        rows = await db.list_scan_dates(season, limit=min(max(limit, 1), 50))
+        if not rows:
+            await ctx.send(f"📭 No scans stored for **{season.upper()}** yet.")
+            return
+ 
+        lines = [
+            f"`{r['scan_date']}` — {r['row_count']:,} rows"
+            for r in rows
+        ]
+        embed = discord.Embed(
+            title=f"🗂️ Stored scans — {season.upper()}",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        embed.set_footer(text=f"Showing the {len(rows)} most recent.")
+        await ctx.send(embed=embed)
+ 
+ 
+@bot.command(name="unscan")
+@scan_admin()
+async def delete_scan_cmd(ctx, season: str, scan_date: str):
+    """Delete one stored scan: !unscan sos2 2026-09-01"""
+    try:
+        target = datetime.strptime(scan_date, "%Y-%m-%d").date()
+    except ValueError:
+        await ctx.send("❌ Date must be `YYYY-MM-DD`.")
+        return
+ 
+    await db.delete_scan(season.lower(), target)
+    await ctx.send(f"🗑️ Deleted scan `{target}` for **{season.upper()}**.")
+    await refresh_season_cache()
+ 
+ 
+@bot.command(name="resync")
+@scan_admin()
+async def resync_cmd(ctx):
+    """Force an immediate cache refresh."""
+    async with ctx.typing():
+        await refresh_season_cache()
+        await ctx.send("✅ Cache refreshed from the database.")
+
+async def _load_season_from_sheets(season_key):
+    """The old behaviour — used as a fallback until the DB has data."""
+    sheet_name = SEASON_SHEETS[season_key]
+    tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+    scan_tabs = [t for t in tabs if t.title.lower() != "roster"]
+    if len(scan_tabs) < 2:
+        return None
+
+    latest_data = await asyncio.to_thread(scan_tabs[-1].get_all_values)
+    prev_data   = await asyncio.to_thread(scan_tabs[-2].get_all_values)
+    oldest_data = await asyncio.to_thread(scan_tabs[0].get_all_values)
+
+    return {
+        "latest":       latest_data,
+        "prev":         prev_data,
+        "oldest":       oldest_data,
+        "latest_title": scan_tabs[-1].title,
+        "prev_title":   scan_tabs[-2].title,
+        "oldest_title": scan_tabs[0].title,
+        "source":       "sheets",
+    }
+
+
+async def _load_season_from_db(season_key):
+    dates = await db.get_latest_dates(season_key, n=2)
+    if len(dates) < 2:
+        return None  # not enough history yet
+
+    latest_date, prev_date = dates[0], dates[1]
+    oldest_date = await db.get_oldest_date(season_key)
+
+    latest_data = await db.get_scan(season_key, latest_date)
+    prev_data   = await db.get_scan(season_key, prev_date)
+    oldest_data = (
+        latest_data if oldest_date == latest_date
+        else await db.get_scan(season_key, oldest_date)
+    )
+
+    return {
+        "latest":       latest_data,
+        "prev":         prev_data,
+        "oldest":       oldest_data,
+        "latest_title": latest_date.isoformat(),
+        "prev_title":   prev_date.isoformat(),
+        "oldest_title": oldest_date.isoformat(),
+        "source":       "database",
+    }
+
+
+async def refresh_season_cache():
+    """
+    Prefer the database. Fall back to Google Sheets for any season that isn't
+    in the database yet, so the bot never ends up with an empty cache.
+    """
+    for season_key in SEASON_SHEETS:
+        try:
+            data = await _load_season_from_db(season_key)
+            if data is None:
+                data = await _load_season_from_sheets(season_key)
+                await asyncio.sleep(2)  # be polite to the Sheets API
+            if data:
+                bot_cache["seasons"][season_key] = data
+        except Exception as e:
+            print(f"⚠️ Failed to cache season '{season_key}': {e}")
+
+# -----------------------------------------------------------------------------
+# BACKFILL — import existing Google Sheets tabs into the database
+# -----------------------------------------------------------------------------
+
+def _parse_tab_date(title: str):
+    """
+    Turn a tab title into a date. Handles 2026-08-31, 2026_08_31, 20260831,
+    31-08-2026, 08/31/2026. Returns None if it doesn't look like a date.
+    """
+    t = title.strip()
+
+    m = re.search(r"(20\d{2})[-_./]?(\d{1,2})[-_./]?(\d{1,2})", t)
+    if m:
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            pass
+
+    m = re.search(r"(\d{1,2})[-_./](\d{1,2})[-_./](20\d{2})", t)
+    if m:
+        for day, month in ((m.group(1), m.group(2)), (m.group(2), m.group(1))):
+            try:
+                return date(int(m.group(3)), int(month), int(day))
+            except ValueError:
+                continue
+
+    return None
+
+
+@bot.command(name="backfill")
+@scan_admin()
+async def backfill_cmd(ctx, season: str, confirm: str = None):
+    """
+    Import a season's existing Google Sheets tabs into the database.
+
+        !backfill sos2            -> dry run, shows what it WOULD import
+        !backfill sos2 confirm    -> actually imports
+
+    Safe to run more than once: re-importing a date just replaces it.
+    """
+    season = season.lower()
+    if season not in SEASON_SHEETS:
+        await ctx.send(f"❌ Unknown season. Options: {', '.join(SEASON_SHEETS.keys())}")
+        return
+
+    committing = (confirm == "confirm")
+    sheet_name = SEASON_SHEETS[season]
+
+    status = await ctx.send(
+        f"{'📥 Importing' if committing else '🔍 Dry run for'} **{season.upper()}** "
+        f"(`{sheet_name}`)... reading tab list."
+    )
+
+    try:
+        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+    except Exception as e:
+        await status.edit(content=f"❌ Could not open `{sheet_name}`: {e}")
+        return
+
+    planned = []   # (tab, date)
+    skipped = []   # tab titles with no parseable date
+
+    for tab in tabs:
+        if tab.title.strip().lower() == "roster":
+            continue
+        d = _parse_tab_date(tab.title)
+        if d is None:
+            skipped.append(tab.title)
+        else:
+            planned.append((tab, d))
+
+    if not planned:
+        msg = (
+            f"❌ None of the tabs in `{sheet_name}` have a date in their title, "
+            f"so nothing can be imported.\n"
+            f"Tab names found: {', '.join(t.title for t in tabs[:10])}"
+        )
+        await status.edit(content=msg)
+        return
+
+    # ---- Dry run: report and stop ----
+    if not committing:
+        lines = [f"`{t.title}` → **{d}**" for t, d in planned[:25]]
+        embed = discord.Embed(
+            title=f"🔍 Backfill dry run — {season.upper()}",
+            description="\n".join(lines),
+            color=discord.Color.blurple(),
+        )
+        if len(planned) > 25:
+            embed.description += f"\n*...and {len(planned) - 25} more.*"
+        if skipped:
+            embed.add_field(
+                name="⏭️ Skipped (no date in title)",
+                value=", ".join(f"`{s}`" for s in skipped[:10]),
+                inline=False,
+            )
+        embed.set_footer(
+            text=f"{len(planned)} tab(s) would be imported. "
+                 f"Check the dates are right, then run: !backfill {season} confirm"
+        )
+        await status.edit(content=None, embed=embed)
+        return
+
+    # ---- Real import ----
+    imported = 0
+    total_rows = 0
+    failures = []
+
+    for i, (tab, d) in enumerate(planned, 1):
+        try:
+            await status.edit(
+                content=f"📥 Importing **{season.upper()}** — "
+                        f"tab {i}/{len(planned)} (`{tab.title}`)..."
+            )
+            values = await asyncio.to_thread(tab.get_all_values)
+            if len(values) < 2:
+                failures.append(f"`{tab.title}`: empty")
+                continue
+
+            headers = [str(h).strip() for h in values[0]]
+            result = await db.ingest_scan(
+                season=season,
+                scan_date=d,
+                headers=headers,
+                rows=values[1:],
+                source_file=f"backfill:{sheet_name}/{tab.title}",
+                ingested_by=str(ctx.author),
+            )
+            imported += 1
+            total_rows += result["rows"]
+            await asyncio.sleep(2)   # Sheets API rate limit
+        except Exception as e:
+            failures.append(f"`{tab.title}`: {e}")
+
+    embed = discord.Embed(
+        title=f"✅ Backfill complete — {season.upper()}",
+        color=discord.Color.green() if not failures else discord.Color.orange(),
+    )
+    embed.add_field(name="Tabs imported", value=f"{imported} / {len(planned)}", inline=True)
+    embed.add_field(name="Total rows", value=f"{total_rows:,}", inline=True)
+    if failures:
+        embed.add_field(
+            name="⚠️ Problems",
+            value="\n".join(failures[:5]),
+            inline=False,
+        )
+    await status.edit(content=None, embed=embed)
+
+    await refresh_season_cache()
         
 @bot.command()
 async def totaldeads(ctx, *args):
@@ -1445,6 +1819,164 @@ async def lowdeads(ctx, *args):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
+async def topmerits(ctx, *args):
+    """
+    Highest merit gains between the last two tabs (IDs must be in both).
+    Uses merits in column 12 and power in column 13 (1-based).
+    Supports NVR (S375) filter. Requires power >= 50M.
+    """
+    async with ctx.typing():
+
+        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
+            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+            return
+
+    # Defaults
+    top_n = 10
+    season = DEFAULT_SEASON
+    filter_NVR = False
+    MIN_POWER = 50_000_000
+
+    # Parse args
+    for arg in args:
+        a = str(arg).strip().lower()
+        if a.isdigit():
+            top_n = max(1, min(100, int(a)))
+        elif a in ("nvr", "nvr375"):
+            filter_NVR = True
+        elif a in ("all", "*"):
+            filter_NVR = False
+        elif a in SEASON_SHEETS:
+            season = a
+        else:
+            await ctx.send(f"❌ Invalid argument '{arg}'. Seasons: {', '.join(SEASON_SHEETS.keys())} | Filters: 'NVR', 'all'.")
+            return
+
+    try:
+        season = season.lower()
+        if season not in SEASON_SHEETS:
+            await ctx.send(f"❌ Invalid season. Available: {', '.join(SEASON_SHEETS.keys())}")
+            return
+
+        # CACHE CHECK
+        if season not in bot_cache["seasons"]:
+            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+            return
+
+        # Load instantly from bot memory
+        data_latest = bot_cache["seasons"][season]["latest"]
+        data_prev   = bot_cache["seasons"][season]["prev"]
+        latest_title = bot_cache["seasons"][season]["latest_title"]
+        prev_title   = bot_cache["seasons"][season]["prev_title"]
+
+        if not data_latest or not data_prev:
+            await ctx.send("❌ Sheet data is empty.")
+            return
+
+        headers = data_latest[0]
+        hmap = {h.strip().lower(): i for i, h in enumerate(headers)}
+
+        # Fixed positions (1-based -> 0-based), with safe fallback to header if present
+        id_index     = hmap.get("lord_id", 0)         # A by default
+        name_index   = 1                              # B
+        alliance_idx = 3                              # D
+        server_idx   = hmap.get("home_server", 5)     # F
+        merits_idx   = 11                             # column 12 (1-based)
+        power_idx    = 12                             # column 13 (1-based)
+
+        # robust int parser: keep digits only (handles 21.734.811, 21,734,811, spaces, NBSP)
+        def to_int(val):
+            s = str(val).replace("\u00A0", "").strip()
+            digits = "".join(ch for ch in s if ch.isdigit())
+            try:
+                return int(digits) if digits else 0
+            except:
+                return 0
+
+        # prev map (id -> merits then)
+        prev_map = {}
+        for row in data_prev[1:]:
+            if len(row) > max(merits_idx, id_index):
+                rid = (row[id_index] or "").strip()
+                if rid:
+                    prev_map[rid] = to_int(row[merits_idx])
+
+        # gather (IDs in both, >=50M, optional NVR S375)
+        rows = []
+        for row in data_latest[1:]:
+            if len(row) <= max(merits_idx, power_idx, alliance_idx, server_idx, id_index):
+                continue
+            rid = (row[id_index] or "").strip()
+            if not rid or rid not in prev_map:
+                continue
+
+            power = to_int(row[power_idx])
+            if power < MIN_POWER:
+                continue
+
+            tag = (row[alliance_idx] or "").strip()
+
+            if filter_NVR:
+                # We only check the server ID, ignoring the alliance tag entirely
+                server_val = str(row[server_idx] or "").strip()
+
+                # If the server isn't 375, skip this player
+                # Note: We use "375" because sheets often store numbers as strings
+                if server_val != "375":
+                    continue
+
+            m_then = prev_map.get(rid, 0)
+            m_now  = to_int(row[merits_idx])
+            gain = m_now - m_then
+            if gain < 0:
+                gain = 0  # clamp corrections
+
+            name = (row[name_index] or "?").strip()
+            display = f"[{tag}] {name}".strip()
+            rows.append((display, gain))
+
+        if not rows:
+            scope = "Server 375 (All Alliances)" if filter_NVR else "All Servers"
+            await ctx.send(f"**🔺 Top {top_n} Merits Gained — {scope} (≥50M Power)!**\n`{prev_title}` → `{latest_title}`:\n_No eligible players found._")
+            return
+
+        # sort descending by gain (highest first), then name for stability
+        rows.sort(key=lambda x: (-x[1], x[0]))
+        top = rows[:top_n]
+
+        lines = [f"{i+1}. `{name}` — 🧠 +{gain:,}" for i, (name, gain) in enumerate(top)]
+
+        scope = "NVR (S375)" if filter_NVR else "All"
+        header = f"**🔺 Top {top_n} Merits Gained — {scope} (≥50M Power)**\n`{prev_title}` → `{latest_title}`:\n"
+
+        chunk = header
+        chunks = []
+        for line in lines:
+            if len(chunk) + len(line) + 1 > 2000:
+                chunks.append(chunk.rstrip())
+                chunk = "(cont.)\n"
+            chunk += line + "\n"
+        if chunk.strip():
+            chunks.append(chunk.rstrip())
+
+        for ch in chunks:
+            try:
+                await ctx.send(ch)
+            except discord.HTTPException as e:
+                if getattr(e, "code", None) == 50035 or getattr(e, "status", None) == 400:
+                    await ctx.send("⚠️ Character limit reached — result was too long (2000 chars). Try a smaller N.")
+                    return
+                if getattr(e, "status", None) == 429:
+                    await ctx.send("⏳ Rate limited. Try again in a moment.")
+                    return
+                await ctx.send(f"❌ Discord error: {e}")
+                return
+
+    except Exception as e:
+        await ctx.send(f"❌ Error: {e}")
+
+@bot.command()
 async def lowmerits(ctx, *args):
     """
     Lowest merit gains between the last two tabs (IDs must be in both).
@@ -1601,6 +2133,8 @@ async def lowmerits(ctx, *args):
 
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
+
+
 
 @bot.command(aliases=['xppvsraz', 'duel2'])
 async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
@@ -3201,6 +3735,7 @@ def role_check():
 
 @bot.event
 async def on_ready():
+    await db.init_db() 
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
     await bot.load_extension("activity_checks")
