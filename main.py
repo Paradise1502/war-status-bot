@@ -676,66 +676,56 @@ def parse_window(token):
  
     return None
  
- 
-async def get_window_data(season, window=None):
+async def get_window_data(season, window=None, include_excluded=False):
     """
-    Return {latest, prev, latest_title, prev_title} for a comparison window.
- 
-    window=None      -> season-to-date (uses the cache, instant)
-    window="7d"      -> latest scan vs the nearest scan 7 days earlier
-    window="1d"      -> latest scan vs the previous day's scan
-    window=a date    -> latest scan vs that specific date
- 
-    Returns None if there isn't enough data to build the window.
+    Returns {latest, prev, latest_title, prev_title, label} for a window,
+    with excluded IDs removed.
     """
     parsed = parse_window(window) if window else None
  
-    # Season-to-date: just use the cache, no queries needed
     if parsed is None or parsed[0] == "season":
         cached = bot_cache["seasons"].get(season)
         if not cached:
             return None
-        return {
-            "latest":       cached["latest"],
-            "prev":         cached["prev"],
-            "latest_title": cached["latest_title"],
-            "prev_title":   cached["prev_title"],
-            "label":        "Season to date",
-        }
- 
-    dates = await db.get_latest_dates(season, n=1)
-    if not dates:
-        return None
-    latest_date = dates[0]
- 
-    if parsed[0] == "days":
-        target = latest_date - timedelta(days=parsed[1])
-        label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+        latest, prev = cached["latest"], cached["prev"]
+        latest_title, prev_title = cached["latest_title"], cached["prev_title"]
+        label = "Season to date"
     else:
-        target = parsed[1]
-        label = f"Since {target}"
+        dates = await db.get_latest_dates(season, n=1)
+        if not dates:
+            return None
+        latest_date = dates[0]
  
-    prev_date = await db.nearest_date_on_or_before(season, target)
+        if parsed[0] == "days":
+            target = latest_date - timedelta(days=parsed[1])
+            label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+        else:
+            target = parsed[1]
+            label = f"Since {target}"
  
-    # Nothing that far back — fall back to the earliest scan we have
-    if prev_date is None:
-        prev_date = await db.get_oldest_date(season)
-        label += " (limited by available history)"
+        prev_date = await db.nearest_date_on_or_before(season, target)
+        if prev_date is None:
+            prev_date = await db.get_oldest_date(season)
+            label += " (limited by available history)"
+        if prev_date is None or prev_date == latest_date:
+            return None
  
-    if prev_date is None or prev_date == latest_date:
-        return None
+        latest = await db.get_scan(season, latest_date)
+        prev   = await db.get_scan(season, prev_date)
+        if not latest or not prev:
+            return None
+        latest_title, prev_title = latest_date.isoformat(), prev_date.isoformat()
  
-    latest_data = await db.get_scan(season, latest_date)
-    prev_data   = await db.get_scan(season, prev_date)
-    if not latest_data or not prev_data:
-        return None
+    if not include_excluded:
+        latest = strip_excluded(latest, "lord_id")
+        prev   = strip_excluded(prev, "lord_id")
  
     return {
-        "latest":       latest_data,
-        "prev":         prev_data,
-        "latest_title": latest_date.isoformat(),
-        "prev_title":   prev_date.isoformat(),
-        "label":        label,
+        "latest": latest,
+        "prev": prev,
+        "latest_title": latest_title,
+        "prev_title": prev_title,
+        "label": label,
     }
  
  
@@ -764,6 +754,37 @@ def split_args(args, valid_seasons):
             leftovers.append(a)
  
     return season, window, leftovers
+
+EXCLUDED_IDS = set()
+ 
+ 
+async def refresh_exclusions():
+    global EXCLUDED_IDS
+    try:
+        EXCLUDED_IDS = await db.load_exclusions()
+    except Exception as e:
+        print(f"⚠️ Could not load exclusions: {e}")
+ 
+ 
+def strip_excluded(table, id_col="lord_id"):
+    """
+    Remove excluded players from a [headers, row, ...] table.
+    Returns the table unchanged if there's nothing to strip.
+    """
+    if not table or not EXCLUDED_IDS:
+        return table
+ 
+    headers = table[0]
+    lower = [str(h).strip().lower() for h in headers]
+    try:
+        idx = lower.index(id_col.strip().lower())
+    except ValueError:
+        return table
+ 
+    return [headers] + [
+        r for r in table[1:]
+        if idx >= len(r) or str(r[idx]).strip() not in EXCLUDED_IDS
+    ]
 
 # =============================================================================
 # SERVER 375 EXPORT → DATABASE  (replaces sheet375_ingest.py entirely)
@@ -819,6 +840,7 @@ async def load_375_cache():
 async def fetch_sheets_background():
     try:
         print("🔄 [Background Task] Refreshing caches...")
+        await refresh_exclusions()
         await load_375_cache()
         await refresh_season_cache()
         print("✅ [Background Task] Caches refreshed.")
@@ -1051,40 +1073,41 @@ async def ingest_merits_cmd(ctx, *args):
 # 2. WINDOW RESOLUTION for merits datasets
 # -----------------------------------------------------------------------------
 
-async def get_merits_window(server, window=None):
-    """
-    Returns (table, label) for a server's merits data over a window.
-    table is [headers, row, ...] with gains already applied.
-    """
+async def get_merits_window(server, window=None, include_excluded=False):
+    """Returns (table, label) for a server's merits data over a window."""
     dataset = merits_dataset(server)
     dates = await db.get_latest_dates(dataset, n=1)
     if not dates:
         return None, f"No merits export stored for {lb.server_label(server)}."
     end_date = dates[0]
-
+ 
     parsed = lb.parse_window(window) if window else None
-
+ 
     if parsed is None or parsed[0] == "season":
         data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
-        return data, f"Season to date · through {end_date}"
-
-    if parsed[0] == "days":
-        target = end_date - timedelta(days=parsed[1])
-        label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+        label = f"Season to date · through {end_date}"
     else:
-        target = parsed[1]
-        label = f"Since {target}"
-
-    base_date = await db.nearest_date_on_or_before(dataset, target)
-    if base_date is None or base_date == end_date:
-        data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
-        return data, f"Season to date · not enough history for that window"
-
-    data = await db.materialize_period(
-        dataset, ID_COLUMN_MERITS, base_date=base_date, end_date=end_date
-    )
-    return data, f"{label} · {base_date} → {end_date}"
-
+        if parsed[0] == "days":
+            target = end_date - timedelta(days=parsed[1])
+            label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+        else:
+            target = parsed[1]
+            label = f"Since {target}"
+ 
+        base_date = await db.nearest_date_on_or_before(dataset, target)
+        if base_date is None or base_date == end_date:
+            data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
+            label = "Season to date · not enough history for that window"
+        else:
+            data = await db.materialize_period(
+                dataset, ID_COLUMN_MERITS, base_date=base_date, end_date=end_date
+            )
+            label = f"{label} · {base_date} → {end_date}"
+ 
+    if data and not include_excluded:
+        data = strip_excluded(data, ID_COLUMN_MERITS)
+ 
+    return data, label
 
 # -----------------------------------------------------------------------------
 # 3. SCAN LEADERBOARDS — one engine, thin wrappers
@@ -1162,6 +1185,7 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             unit=unit,
             show_detail=detail,
         )
+
 
 
 # --- Scan command wrappers ---------------------------------------------------
@@ -1448,6 +1472,92 @@ async def toptraders(ctx, *args):
             entries=entries,
             show_detail=detail,
         )
+
+@bot.command(name="exclude")
+@scan_admin()
+async def exclude_cmd(ctx, lord_id: str, *, reason: str = None):
+    """
+    Permanently exclude an account from all stats.
+ 
+        !exclude 12345678
+        !exclude 12345678 dead account, no activity since July
+    """
+    lid = lord_id.strip()
+    if not lid.isdigit():
+        await ctx.send("❌ That doesn't look like a Lord ID.")
+        return
+ 
+    # Try to find their name so the confirmation is readable
+    name = None
+    cached = bot_cache["seasons"].get(DEFAULT_SEASON)
+    if cached:
+        headers = cached["latest"][0]
+        lower = [str(h).strip().lower() for h in headers]
+        if "lord_id" in lower and "name" in lower:
+            i_id, i_name = lower.index("lord_id"), lower.index("name")
+            for r in cached["latest"][1:]:
+                if i_id < len(r) and str(r[i_id]).strip() == lid:
+                    name = str(r[i_name]).strip() if i_name < len(r) else None
+                    break
+ 
+    await db.add_exclusion(lid, reason, str(ctx.author))
+    await refresh_exclusions()
+ 
+    embed = discord.Embed(
+        title="🚫 Account excluded",
+        description=f"**{name or 'Unknown'}** — `{lid}`",
+        color=discord.Color.orange(),
+    )
+    if reason:
+        embed.add_field(name="Reason", value=reason, inline=False)
+    embed.set_footer(
+        text=f"{len(EXCLUDED_IDS)} account(s) excluded · undo with !unexclude {lid}"
+    )
+    await ctx.send(embed=embed)
+ 
+ 
+@bot.command(name="unexclude", aliases=["include"])
+@scan_admin()
+async def unexclude_cmd(ctx, lord_id: str):
+    """Put an account back into the stats."""
+    lid = lord_id.strip()
+    removed = await db.remove_exclusion(lid)
+    await refresh_exclusions()
+ 
+    if removed:
+        await ctx.send(f"✅ `{lid}` is counted again. "
+                       f"({len(EXCLUDED_IDS)} still excluded.)")
+    else:
+        await ctx.send(f"ℹ️ `{lid}` wasn't on the exclusion list.")
+ 
+ 
+@bot.command(name="excluded", aliases=["exclusions"])
+async def excluded_cmd(ctx):
+    """Show the exclusion list."""
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+ 
+    rows = await db.list_exclusions()
+    if not rows:
+        await ctx.send("✅ No accounts are excluded.")
+        return
+ 
+    lines = []
+    for r in rows:
+        reason = f" — *{r['reason']}*" if r["reason"] else ""
+        lines.append(f"`{r['lord_id']}`{reason}")
+ 
+    embed = discord.Embed(
+        title=f"🚫 Excluded accounts ({len(rows)})",
+        description="\n".join(lines[:40]),
+        color=discord.Color.orange(),
+    )
+    if len(rows) > 40:
+        embed.description += f"\n*...and {len(rows) - 40} more.*"
+    embed.set_footer(text="These are removed from every leaderboard and total.")
+    await ctx.send(embed=embed)
 
 @bot.command()
 async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
@@ -3487,6 +3597,8 @@ def role_check():
 async def on_ready():
     await db.init_db() 
     await db.upgrade_schema()
+    await db.ensure_exclusions_table()
+    await refresh_exclusions()
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
     await bot.load_extension("activity_checks")
