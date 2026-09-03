@@ -1115,7 +1115,8 @@ async def get_merits_window(server, window=None, include_excluded=False):
 
 async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
                                top=True, min_power=25_000_000,
-                               detail=None, default_server=lb.DEFAULT_SERVER):
+                               detail=None, extra_cols=None,
+                               default_server=lb.DEFAULT_SERVER):
     """
     Generic scan-based leaderboard.
 
@@ -1152,10 +1153,11 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             entries, total = lb.rank_table(
                 gains,
                 value,
-                server=["server"],
+                server=opts["server"],
                 min_power=min_power,
                 top=top,
-                limit=["limit"],
+                limit=opts["limit"],
+                extra_cols=extra_cols,
             )
         except ValueError as e:
             await ctx.send(f"❌ {e}")
@@ -1163,14 +1165,14 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
 
         if not entries:
             await ctx.send(
-                f"📭 No players matched — {lb.server_label(['server'])}, "
+                f"📭 No players matched — {lb.server_label(opts['server'])}, "
                 f"≥{lb.fmt(min_power)} power."
             )
             return
 
         direction = "Top" if top else "Lowest"
         subtitle = (
-            f"**{lb.server_label(['server'])}** · {win['label']}\n"
+            f"**{lb.server_label(opts['server'])}** · {win['label']}\n"
             f"*≥{lb.fmt(min_power)} power · {total:,} players eligible*"
         )
         footer = f"{win['prev_title']} → {win['latest_title']}"
@@ -1180,12 +1182,11 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             title=f"{emoji} {direction} {len(entries)} — {title}",
             subtitle=subtitle,
             footer=footer,
-            color=lb.server_color(["server"]),
+            color=lb.server_color(opts["server"]),
             entries=entries,
             unit=unit,
             show_detail=detail,
         )
-
 
 
 # --- Scan command wrappers ---------------------------------------------------
