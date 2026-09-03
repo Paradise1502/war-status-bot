@@ -1128,7 +1128,7 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
         return
 
     async with ctx.typing():
-        opts, unknown = lb.parse_args(
+        , unknown = lb.parse_args(
             args, SEASON_SHEETS, DEFAULT_SEASON, default_server=default_server
         )
         if unknown:
@@ -1139,10 +1139,10 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             )
             return
 
-        win = await get_window_data(opts["season"], opts["window"])
+        win = await get_window_data(["season"], ["window"])
         if win is None:
             await ctx.send(
-                f"❌ Not enough scan history. Check `!scans {opts['season']}`."
+                f"❌ Not enough scan history. Check `!scans {['season']}`."
             )
             return
 
@@ -1152,10 +1152,10 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             entries, total = lb.rank_table(
                 gains,
                 value,
-                server=opts["server"],
+                server=["server"],
                 min_power=min_power,
                 top=top,
-                limit=opts["limit"],
+                limit=["limit"],
             )
         except ValueError as e:
             await ctx.send(f"❌ {e}")
@@ -1163,14 +1163,14 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
 
         if not entries:
             await ctx.send(
-                f"📭 No players matched — {lb.server_label(opts['server'])}, "
+                f"📭 No players matched — {lb.server_label(['server'])}, "
                 f"≥{lb.fmt(min_power)} power."
             )
             return
 
         direction = "Top" if top else "Lowest"
         subtitle = (
-            f"**{lb.server_label(opts['server'])}** · {win['label']}\n"
+            f"**{lb.server_label(['server'])}** · {win['label']}\n"
             f"*≥{lb.fmt(min_power)} power · {total:,} players eligible*"
         )
         footer = f"{win['prev_title']} → {win['latest_title']}"
@@ -1180,7 +1180,7 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             title=f"{emoji} {direction} {len(entries)} — {title}",
             subtitle=subtitle,
             footer=footer,
-            color=lb.server_color(opts["server"]),
+            color=lb.server_color(["server"]),
             entries=entries,
             unit=unit,
             show_detail=detail,
@@ -1266,13 +1266,13 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
         return
 
     async with ctx.typing():
-        opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON)
+        , unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON)
         if unknown:
             await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
             return
 
-        server = opts["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
-        data, label = await get_merits_window(server, opts["window"])
+        server = ["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
+        data, label = await get_merits_window(server, ["window"])
         if data is None:
             await ctx.send(f"❌ {label}")
             return
@@ -3420,7 +3420,7 @@ def side_detail(servers):
 
 @bot.command()
 async def matchups(ctx, *args):
-    """War comparison between paired servers."""
+    """War comparison. Defaults to our own pairing; `all` shows every one."""
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
         mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
         await ctx.send(f"❌ Commands are only allowed in {mentions}.")
@@ -3445,12 +3445,19 @@ async def matchups(ctx, *args):
                 )
                 return
 
-            if opts["server"]:
-                target = str(opts["server"])
+                        # "all" shows every pairing; otherwise show one — the named server's,
+            # or our own by default.
+            show_all = any(
+                str(a).strip().lower() in ("all", "*", "everyone") for a in args
+            )
+
+            if not show_all:
+                target = str(opts["server"] or cfg["home"])
                 pairings = [p for p in pairings if target in p[0] + p[1]]
                 if not pairings:
                     await ctx.send(
-                        f"❌ {lb.server_label(target)} isn't in any pairing this season."
+                        f"❌ {lb.server_label(target)} isn't in any pairing this "
+                        f"season. Try `!matchups all`."
                     )
                     return
 
