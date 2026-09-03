@@ -211,17 +211,24 @@ def date_from_filename(filename: str):
 # ---------------------------------------------------------------------------
 
 async def ingest_scan(season, scan_date, headers, rows,
-                      source_file=None, ingested_by=None):
+                      source_file=None, ingested_by=None, id_column=None):
     """
     Store one day's scan. Idempotent: re-ingesting the same (season, date)
     replaces that day cleanly, so a bad upload is fixable by just doing it again.
 
     Returns a dict summarising what happened.
     """
-    id_idx = find_header(headers, "lord_id", "id", contains="lord_id")
+        if id_column:
+        lowered = [h.strip().lower() for h in headers]
+        target = id_column.strip().lower()
+        id_idx = lowered.index(target) if target in lowered else None
+    else:
+        id_idx = find_header(headers, "lord_id", "id", contains="lord_id")
+
     if id_idx is None:
         raise ValueError(
-            f"No 'lord_id' column found. Headers were: {', '.join(headers[:12])}"
+            f"No '{id_column or 'lord_id'}' column found. "
+            f"Headers were: {', '.join(headers[:12])}"
         )
 
     name_idx   = find_header(headers, "name", contains="name")
