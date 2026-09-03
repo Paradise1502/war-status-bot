@@ -2871,8 +2871,27 @@ async def progress(ctx, lord_id: str, *args):
                 vals.sort(key=lambda x: x[1], reverse=True)
                 return next((i for i, (rid, _) in enumerate(vals, 1) if rid == target), None)
 
+            def rank_ratio():
+                """Merits per unit of power, ranked within the player's server."""
+                if merit_idx is None or power_idx is None:
+                    return None
+                vals = []
+                for r in data_latest[1:]:
+                    if server_idx is None or server_idx >= len(r):
+                        continue
+                    rs = "".join(ch for ch in str(r[server_idx]) if ch.isdigit())
+                    if rs != player_server:
+                        continue
+                    p = val(r, power_idx)
+                    if p <= 0:
+                        continue
+                    vals.append((str(r[id_idx]).strip(), val(r, merit_idx) / p * 100))
+                vals.sort(key=lambda x: x[1], reverse=True)
+                return next((i for i, (rid, _) in enumerate(vals, 1) if rid == target), None)
+
             r_power  = rank_total(power_idx)
             r_merits = rank_total(merit_idx)
+            r_ratio  = rank_ratio() 
             r_kills  = rank_gain(kills_idx)
             r_dead   = rank_gain(dead_idx)
             r_heal   = rank_gain(healed_idx)
@@ -2899,7 +2918,7 @@ async def progress(ctx, lord_id: str, *args):
                 inline=False,
             )
             embed.add_field(name="🧠 Total Merits", value=f"{merits_now:,}{rk(r_merits)}", inline=True)
-            embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%", inline=True)
+            embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%{rk(r_ratio)}", inline=True)
             embed.add_field(name="💧 Mana", value=f"+{mana_gain:,}{rk(r_mana)}", inline=True)
             embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}{rk(r_kills)}", inline=True)
             embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}{rk(r_dead)}", inline=True)
@@ -3210,8 +3229,8 @@ MIN_POWER = 50_000_000
 
 # Mana cost of healing, at max healing-cost reduction.
 # 1M T5 troops ≈ 66M mana · 1M T4 troops ≈ 16M mana
-MANA_PER_T5 = 66.0     # mana per single T5 unit healed
-MANA_PER_T4 = 16.0     # mana per single T4 unit healed
+MANA_PER_T5 = 60.0     # mana per single T5 unit healed
+MANA_PER_T4 = 15.0     # mana per single T4 unit healed
 
 
 def healing_mana_cost(t5, t4):
