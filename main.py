@@ -55,43 +55,6 @@ intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
 bot.remove_command('help')  # Add it right here!
 
-@tasks.loop(minutes=10)
-async def fetch_sheets_background():
-    try:
-        print("🔄 [Background Task] Downloading fresh Google Sheets data...")
-        
-        # 1. Fetch the Server 375 Sheet
-        sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
-        bot_cache["375_data"] = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
-        
-        # 2. Fetch all Seasonal Sheets
-        for season_key, sheet_name in SEASON_SHEETS.items():
-            try:
-                tabs = await asyncio.to_thread(lambda: client.open(sheet_name).worksheets())
-                scan_tabs = [t for t in tabs if t.title.lower() != "roster"]
-                
-                if len(scan_tabs) >= 2:
-                    latest_data = await asyncio.to_thread(scan_tabs[-1].get_all_values)
-                    prev_data = await asyncio.to_thread(scan_tabs[-2].get_all_values)
-                    oldest_data = await asyncio.to_thread(scan_tabs[0].get_all_values) # ADD THIS
-                    
-                    bot_cache["seasons"][season_key] = {
-                        "latest": latest_data,
-                        "prev": prev_data,
-                        "oldest": oldest_data, # ADD THIS
-                        "latest_title": scan_tabs[-1].title,
-                        "prev_title": scan_tabs[-2].title,
-                        "oldest_title": scan_tabs[0].title # ADD THIS
-                    }
-                # Brief pause to prevent Google from triggering a 503 rate limit
-                await asyncio.sleep(2) 
-            except Exception as e:
-                print(f"⚠️ Failed to cache season '{season_key}': {e}")
-                
-        print("✅ [Background Task] All data cached successfully!")
-    except Exception as e:
-        print(f"❌ [Background Task] Critical Error: {e}")
-
 # Global flag
 VACATION_MODE = False
 VACATION_MSG = "🗣️ not updated 🗣️ old data 🗣️ update update"
@@ -455,6 +418,21 @@ async def refresh_season_cache():
                 bot_cache["seasons"][season_key] = data
         except Exception as e:
             print(f"⚠️ Failed to cache season '{season_key}': {e}")
+
+@tasks.loop(minutes=10)
+async def fetch_sheets_background():
+    try:
+        print("🔄 [Background Task] Refreshing caches...")
+        try:
+            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
+            bot_cache["375_data"] = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
+        except Exception as e:
+            print(f"⚠️ Failed to refresh Server 375 sheet: {e}")
+
+        await refresh_season_cache()
+        print("✅ [Background Task] Caches refreshed.")
+    except Exception as e:
+        print(f"❌ [Background Task] Critical Error: {e}")
 
 # -----------------------------------------------------------------------------
 # BACKFILL — import existing Google Sheets tabs into the database
