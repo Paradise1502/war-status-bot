@@ -64,12 +64,17 @@ CREATE INDEX IF NOT EXISTS scans_server_idx
 
 
 async def _init_connection(conn):
-    """Make asyncpg hand us dicts for JSONB instead of raw strings."""
+    """
+    JSONB codec in binary format. Binary is required because ingest uses
+    COPY (copy_records_to_table), which cannot use text-format encoders.
+    The leading \x01 byte is Postgres's jsonb format version marker.
+    """
     await conn.set_type_codec(
         "jsonb",
-        encoder=json.dumps,
-        decoder=json.loads,
+        encoder=lambda value: b"\x01" + json.dumps(value).encode("utf-8"),
+        decoder=lambda value: json.loads(value[1:].decode("utf-8")),
         schema="pg_catalog",
+        format="binary",
     )
 
 
