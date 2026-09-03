@@ -1273,8 +1273,8 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
             await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
             return
 
-        server = ["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
-        data, label = await get_merits_window(server, ["window"])
+        server = opts["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
+        data, label = await get_merits_window(server, opts["window"])
         if data is None:
             await ctx.send(f"❌ {label}")
             return
