@@ -666,3 +666,56 @@ async def materialize_period(season, id_column, base_date=None, end_date=None,
         out.append(new_row)
 
     return out
+
+
+EXCLUSIONS_SCHEMA = """
+CREATE TABLE IF NOT EXISTS excluded_ids (
+    lord_id   TEXT PRIMARY KEY,
+    reason    TEXT,
+    added_by  TEXT,
+    added_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+ 
+ 
+async def ensure_exclusions_table():
+    async with pool().acquire() as conn:
+        await conn.execute(EXCLUSIONS_SCHEMA)
+ 
+ 
+async def add_exclusion(lord_id, reason=None, added_by=None):
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO excluded_ids (lord_id, reason, added_by)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (lord_id) DO UPDATE SET
+                reason   = EXCLUDED.reason,
+                added_by = EXCLUDED.added_by,
+                added_at = now()
+            """,
+            str(lord_id).strip(), reason, added_by,
+        )
+ 
+ 
+async def remove_exclusion(lord_id):
+    async with pool().acquire() as conn:
+        result = await conn.execute(
+            "DELETE FROM excluded_ids WHERE lord_id = $1", str(lord_id).strip()
+        )
+    return result.endswith("1")
+ 
+ 
+async def list_exclusions():
+    async with pool().acquire() as conn:
+        return await conn.fetch(
+            "SELECT lord_id, reason, added_by, added_at FROM excluded_ids "
+            "ORDER BY added_at DESC"
+        )
+ 
+ 
+async def load_exclusions():
+    """Returns a set of excluded lord_ids."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch("SELECT lord_id FROM excluded_ids")
+    return {r["lord_id"] for r in rows}
