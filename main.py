@@ -709,97 +709,7 @@ ID_COLUMN_375 = "Character ID"
  
 # The date your season started. Every export should use this as its start date
 # so the files stay cumulative and comparable. Ingest warns if one doesn't.
-SEASON_START_375 = date(2026, 8, 28)
- 
- 
-# -----------------------------------------------------------------------------
-# 2. INGEST
-# -----------------------------------------------------------------------------
- 
-@bot.command(name="ingest375", aliases=["i375"])
-@scan_admin()
-async def ingest375_cmd(ctx, *args):
-    """
-    Upload the daily Server 375 export (.xlsx or .csv).
- 
-        !ingest375                              dates read from the filename
-        !ingest375 2026-09-03                   explicit end date
-        !ingest375 2026-08-28 2026-09-03        explicit start and end
- 
-    Re-uploading the same end date replaces it.
-    """
-    async with ctx.typing():
-        if not ctx.message.attachments:
-            await ctx.send("❌ Attach the export file to the same message.")
-            return
- 
-        attachment = ctx.message.attachments[0]
- 
-        # Work out the period
-        file_start, file_end = db.date_range_from_filename(attachment.filename)
-        explicit = []
-        for a in args:
-            try:
-                explicit.append(datetime.strptime(a.strip(), "%Y-%m-%d").date())
-            except ValueError:
-                await ctx.send(f"❌ `{a}` isn't a valid `YYYY-MM-DD` date.")
-                return
- 
-        if len(explicit) >= 2:
-            period_start, period_end = explicit[0], explicit[1]
-        elif len(explicit) == 1:
-            period_start, period_end = (file_start or SEASON_START_375), explicit[0]
-        else:
-            period_start = file_start or SEASON_START_375
-            period_end = file_end or datetime.now(UTC).date()
- 
-        if period_end < period_start:
-            await ctx.send("❌ The end date is before the start date.")
-            return
- 
-        try:
-            raw = await attachment.read()
-            headers, rows = db.parse_scan_file(raw, attachment.filename)
-            result = await db.ingest_period(
-                season=DATASET_375,
-                period_start=period_start,
-                period_end=period_end,
-                headers=headers,
-                rows=rows,
-                id_column=ID_COLUMN_375,
-                source_file=attachment.filename,
-                ingested_by=str(ctx.author),
-            )
-        except Exception as e:
-            await ctx.send(f"❌ **Ingest failed:** {e}")
-            return
- 
-        embed = discord.Embed(
-            title="✅ Server 375 export stored",
-            description=f"**{period_start}** → **{period_end}**",
-            color=discord.Color.green(),
-        )
-        embed.add_field(name="Players", value=f"{result['rows']:,}", inline=True)
-        embed.add_field(name="Columns", value=str(result["columns"]), inline=True)
-        embed.add_field(name="File", value=f"`{attachment.filename}`", inline=False)
- 
-        warnings = []
-        if result["replaced"] is not None:
-            warnings.append(f"↻ Replaced the existing export for {period_end}.")
-        if period_start != SEASON_START_375:
-            warnings.append(
-                f"⚠️ Start date is **{period_start}**, expected "
-                f"**{SEASON_START_375}**. Windows only work if every export "
-                f"uses the same start date — re-export if this was a mistake."
-            )
-        if result["duplicate_ids"]:
-            warnings.append(f"⚠️ {result['duplicate_ids']} duplicate Character ID(s).")
-        if warnings:
-            embed.add_field(name="Notes", value="\n".join(warnings), inline=False)
- 
-        await ctx.send(embed=embed)
-        await load_375_cache()
- 
+SEASON_START = date(2026, 8, 28)
  
 # -----------------------------------------------------------------------------
 # 3. CACHE
@@ -934,6 +844,534 @@ async def update_utc_channels():
 @update_utc_channels.before_loop
 async def before_utc_update():
     await bot.wait_until_ready()
+
+# =============================================================================
+# REBUILT LEADERBOARDS + MULTI-SERVER MERITS SHEETS
+# =============================================================================
+# Paste into main.py. Requires lb.py alongside main.py.
+#
+#     import lb
+#
+# This REPLACES these commands — delete the old versions:
+#     topdeads, lowdeads, totaldeads, topmerits, lowmerits, topkills,
+#     topheal, topmana, topinf, lowinf, topcav, lowcav, toparcher,
+#     lowarcher, topmage, lowmage, toprssheal, lowrssheal, topbuild,
+#     lowbuild, topdest, lowdest, generate_375_leaderboard
+#
+# Also replaces the ingest375 command with a server-aware version.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. MERITS SHEETS — one dataset per server
+# -----------------------------------------------------------------------------
+# The in-game tool exports a cumulative merits breakdown per server. Store each
+# server under its own dataset key so you can pull 375 and 357 independently.
+# -----------------------------------------------------------------------------
+
+ID_COLUMN_MERITS = "Character ID"
+SEASON_START = date(2026, 8, 28)
+
+
+def merits_dataset(server):
+    """
+    Dataset key for a server's merits export, e.g. 375 -> 's375'.
+    Keeps the 's' prefix so the 375 data you already ingested still matches.
+    """
+    return f"s{server}"
+
+
+@bot.command(name="ingestmerits", aliases=["im", "ingest375"])
+@scan_admin()
+async def ingest_merits_cmd(ctx, *args):
+    """
+    Upload a server's merits export (.xlsx or .csv).
+
+        !ingestmerits                     375, dates from the filename
+        !ingestmerits 357                 for server 357
+        !ingestmerits 357 2026-09-03      explicit end date
+        !ingestmerits 357 2026-08-28 2026-09-03
+
+    Always export with the season start as the start date, so the files stay
+    cumulative and windows work.
+    """
+    async with ctx.typing():
+        if not ctx.message.attachments:
+            await ctx.send("❌ Attach the export file to the same message.")
+            return
+
+        attachment = ctx.message.attachments[0]
+
+        server = lb.DEFAULT_SERVER
+        dates_given = []
+        for a in args:
+            srv = lb.parse_server(a)
+            if srv and srv != "all":
+                server = srv
+                continue
+            try:
+                dates_given.append(datetime.strptime(a.strip(), "%Y-%m-%d").date())
+            except ValueError:
+                await ctx.send(f"❌ Didn't understand `{a}`.")
+                return
+
+        file_start, file_end = db.date_range_from_filename(attachment.filename)
+        if len(dates_given) >= 2:
+            period_start, period_end = dates_given[0], dates_given[1]
+        elif len(dates_given) == 1:
+            period_start, period_end = (file_start or SEASON_START), dates_given[0]
+        else:
+            period_start = file_start or SEASON_START
+            period_end = file_end or datetime.now(UTC).date()
+
+        if period_end < period_start:
+            await ctx.send("❌ The end date is before the start date.")
+            return
+
+        try:
+            raw = await attachment.read()
+            headers, rows = db.parse_scan_file(raw, attachment.filename)
+            result = await db.ingest_period(
+                season=merits_dataset(server),
+                period_start=period_start,
+                period_end=period_end,
+                headers=headers,
+                rows=rows,
+                id_column=ID_COLUMN_MERITS,
+                source_file=attachment.filename,
+                ingested_by=str(ctx.author),
+            )
+        except Exception as e:
+            await ctx.send(f"❌ **Ingest failed:** {e}")
+            return
+
+        embed = discord.Embed(
+            title=f"✅ Merits export stored — {lb.server_label(server)}",
+            description=f"**{period_start}** → **{period_end}**",
+            color=lb.server_color(server),
+        )
+        embed.add_field(name="Players", value=f"{result['rows']:,}", inline=True)
+        embed.add_field(name="Columns", value=str(result["columns"]), inline=True)
+
+        warnings = []
+        if result["replaced"] is not None:
+            warnings.append(f"↻ Replaced the existing export for {period_end}.")
+        if period_start != SEASON_START:
+            warnings.append(
+                f"⚠️ Start date is **{period_start}**, expected **{SEASON_START}**. "
+                f"Windows need every export to share a start date."
+            )
+        if warnings:
+            embed.add_field(name="Notes", value="\n".join(warnings), inline=False)
+
+        embed.set_footer(text=f"Dataset: {merits_dataset(server)} · !scans {merits_dataset(server)}")
+        await ctx.send(embed=embed)
+
+        if server == lb.DEFAULT_SERVER:
+            await load_375_cache()
+
+
+# -----------------------------------------------------------------------------
+# 2. WINDOW RESOLUTION for merits datasets
+# -----------------------------------------------------------------------------
+
+async def get_merits_window(server, window=None):
+    """
+    Returns (table, label) for a server's merits data over a window.
+    table is [headers, row, ...] with gains already applied.
+    """
+    dataset = merits_dataset(server)
+    dates = await db.get_latest_dates(dataset, n=1)
+    if not dates:
+        return None, f"No merits export stored for {lb.server_label(server)}."
+    end_date = dates[0]
+
+    parsed = lb.parse_window(window) if window else None
+
+    if parsed is None or parsed[0] == "season":
+        data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
+        return data, f"Season to date · through {end_date}"
+
+    if parsed[0] == "days":
+        target = end_date - timedelta(days=parsed[1])
+        label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+    else:
+        target = parsed[1]
+        label = f"Since {target}"
+
+    base_date = await db.nearest_date_on_or_before(dataset, target)
+    if base_date is None or base_date == end_date:
+        data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
+        return data, f"Season to date · not enough history for that window"
+
+    data = await db.materialize_period(
+        dataset, ID_COLUMN_MERITS, base_date=base_date, end_date=end_date
+    )
+    return data, f"{label} · {base_date} → {end_date}"
+
+
+# -----------------------------------------------------------------------------
+# 3. SCAN LEADERBOARDS — one engine, thin wrappers
+# -----------------------------------------------------------------------------
+
+async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
+                               top=True, min_power=25_000_000,
+                               detail=None, default_server=lb.DEFAULT_SERVER):
+    """
+    Generic scan-based leaderboard.
+
+    value: column name, list of columns (summed), or callable(get) -> int
+    detail: optional fn(entry) -> str, rendered under each line
+    """
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    async with ctx.typing():
+        opts, unknown = lb.parse_args(
+            args, SEASON_SHEETS, DEFAULT_SEASON, default_server=default_server
+        )
+        if unknown:
+            await ctx.send(
+                f"❌ Didn't understand `{unknown[0]}`.\n"
+                f"Servers: {', '.join(lb.SERVER_NAMES)} or `all` · "
+                f"Windows: `7d`, `2w`, `season` · Seasons: {', '.join(SEASON_SHEETS)}"
+            )
+            return
+
+        win = await get_window_data(opts["season"], opts["window"])
+        if win is None:
+            await ctx.send(
+                f"❌ Not enough scan history. Check `!scans {opts['season']}`."
+            )
+            return
+
+        gains = lb.materialize_gains(win["latest"], win["prev"], id_col="lord_id")
+
+        try:
+            entries, total = lb.rank_table(
+                gains,
+                value,
+                server=opts["server"],
+                min_power=min_power,
+                top=top,
+                limit=opts["limit"],
+            )
+        except ValueError as e:
+            await ctx.send(f"❌ {e}")
+            return
+
+        if not entries:
+            await ctx.send(
+                f"📭 No players matched — {lb.server_label(opts['server'])}, "
+                f"≥{lb.fmt(min_power)} power."
+            )
+            return
+
+        direction = "Top" if top else "Lowest"
+        subtitle = (
+            f"**{lb.server_label(opts['server'])}** · {win['label']}\n"
+            f"*≥{lb.fmt(min_power)} power · {total:,} players eligible*"
+        )
+        footer = f"{win['prev_title']} → {win['latest_title']}"
+
+        await lb.send_leaderboard(
+            ctx,
+            title=f"{emoji} {direction} {len(entries)} — {title}",
+            subtitle=subtitle,
+            footer=footer,
+            color=lb.server_color(opts["server"]),
+            entries=entries,
+            unit=unit,
+            show_detail=detail,
+        )
+
+
+# --- Scan command wrappers ---------------------------------------------------
+
+@bot.command(aliases=["td"])
+async def topdeads(ctx, *args):
+    """!topdeads [server] [count] [window] — e.g. !topdeads 357 50 7d"""
+    await run_scan_leaderboard(ctx, args, title="Dead Units", emoji="💀",
+                               value="units_dead", top=True)
+
+
+@bot.command(aliases=["ld"])
+async def lowdeads(ctx, *args):
+    await run_scan_leaderboard(ctx, args, title="Dead Units", emoji="🔻",
+                               value="units_dead", top=False,
+                               min_power=50_000_000)
+
+
+@bot.command(aliases=["tm"])
+async def topmerits(ctx, *args):
+    """!topmerits [server] [count] [window] — e.g. !topmerits 357 50"""
+    await run_scan_leaderboard(ctx, args, title="Merits", emoji="🧠",
+                               value="merits", top=True)
+
+
+@bot.command(aliases=["lm"])
+async def lowmerits(ctx, *args):
+    await run_scan_leaderboard(ctx, args, title="Merits", emoji="🔻",
+                               value="merits", top=False,
+                               min_power=50_000_000)
+
+
+@bot.command(aliases=["tk"])
+async def topkills(ctx, *args):
+    await run_scan_leaderboard(ctx, args, title="Kills", emoji="⚔️",
+                               value="units_killed", top=True)
+
+
+@bot.command(aliases=["th"])
+async def topheal(ctx, *args):
+    await run_scan_leaderboard(ctx, args, title="Units Healed", emoji="❤️",
+                               value="units_healed", top=True)
+
+
+@bot.command(aliases=["tmana"])
+async def topmana(ctx, *args):
+    await run_scan_leaderboard(ctx, args, title="Mana Gathered", emoji="💧",
+                               value="mana", top=True)
+
+
+@bot.command()
+async def topt5(ctx, *args):
+    await run_scan_leaderboard(ctx, args, title="T5 Kills", emoji="🟥",
+                               value="killcount_t5", top=True)
+
+
+@bot.command()
+async def topefficiency(ctx, *args):
+    """Merits per million power — who punches above their weight."""
+    def ratio(get):
+        power = get("highest_power")
+        return round(get("merits") / (power / 1_000_000)) if power else 0
+
+    await run_scan_leaderboard(ctx, args, title="Merits per 1M Power",
+                               emoji="📊", value=ratio, top=True,
+                               min_power=50_000_000)
+
+
+# -----------------------------------------------------------------------------
+# 4. MERITS-SHEET LEADERBOARDS
+# -----------------------------------------------------------------------------
+
+async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
+                                 top=True, min_power=50_000_000, detail=None):
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    async with ctx.typing():
+        opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON)
+        if unknown:
+            await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
+            return
+
+        server = opts["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
+        data, label = await get_merits_window(server, opts["window"])
+        if data is None:
+            await ctx.send(f"❌ {label}")
+            return
+
+        try:
+            entries, total = lb.rank_table(
+                data,
+                value,
+                id_col="Character ID",
+                name_col="Character Name",
+                power_col="Historical Highest Power",
+                server_col=None,
+                min_power=min_power,
+                top=top,
+                limit=opts["limit"],
+            )
+        except ValueError as e:
+            await ctx.send(f"❌ {e}")
+            return
+
+        if not entries:
+            await ctx.send("📭 No players matched those filters.")
+            return
+
+        direction = "Top" if top else "Lowest"
+        subtitle = (
+            f"**{lb.server_label(server)}** · {label}\n"
+            f"*≥{lb.fmt(min_power)} power · {total:,} players eligible*"
+        )
+
+        await lb.send_leaderboard(
+            ctx,
+            title=f"{emoji} {direction} {len(entries)} — {title}",
+            subtitle=subtitle,
+            footer=f"Merits export · {merits_dataset(server)}",
+            color=lb.server_color(server),
+            entries=entries,
+            unit=unit,
+            show_detail=detail,
+        )
+
+
+# --- Merits command wrappers -------------------------------------------------
+
+@bot.command(aliases=["topinfantry"])
+async def topinf(ctx, *args):
+    """!topinf [server] [count] [window] — e.g. !topinf 357 25 7d"""
+    await run_merits_leaderboard(ctx, args, title="Infantry Merits",
+                                 emoji="⚔️", value="Infantry Only")
+
+
+@bot.command(aliases=["lowinfantry"])
+async def lowinf(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Infantry Merits",
+                                 emoji="⚔️", value="Infantry Only", top=False)
+
+
+@bot.command(aliases=["topcavalry"])
+async def topcav(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Cavalry Merits",
+                                 emoji="🐎", value="Cavalry Only")
+
+
+@bot.command(aliases=["lowcavalry"])
+async def lowcav(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Cavalry Merits",
+                                 emoji="🐎", value="Cavalry Only", top=False)
+
+
+@bot.command(aliases=["topmarksman", "toparchers"])
+async def toparcher(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Archer Merits",
+                                 emoji="🏹", value="Marksman Only")
+
+
+@bot.command(aliases=["lowmarksman", "lowarchers"])
+async def lowarcher(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Archer Merits",
+                                 emoji="🏹", value="Marksman Only", top=False)
+
+
+@bot.command(aliases=["topmagic", "topmages"])
+async def topmage(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Magic Merits",
+                                 emoji="🪄", value="Magic Only")
+
+
+@bot.command(aliases=["lowmagic", "lowmages"])
+async def lowmage(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Magic Merits",
+                                 emoji="🪄", value="Magic Only", top=False)
+
+
+@bot.command(aliases=["toprsshealing", "toprssheals"])
+async def toprssheal(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="RSS Healing", emoji="❤️",
+                                 value=["T4 Healed", "T5 Healed"])
+
+
+@bot.command(aliases=["lowrsshealing", "lowrssheals"])
+async def lowrssheal(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="RSS Healing", emoji="❤️",
+                                 value=["T4 Healed", "T5 Healed"], top=False)
+
+
+@bot.command(aliases=["topbuildtime"])
+async def topbuild(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Build Time", emoji="🔨",
+                                 value="Build Time")
+
+
+@bot.command(aliases=["lowbuildtime"])
+async def lowbuild(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Build Time", emoji="🔨",
+                                 value="Build Time", top=False)
+
+
+@bot.command(aliases=["topdestruction", "topdestruct"])
+async def topdest(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Destruction", emoji="🧨",
+                                 value="Destruction Time")
+
+
+@bot.command(aliases=["lowdestruction", "lowdestruct"])
+async def lowdest(ctx, *args):
+    await run_merits_leaderboard(ctx, args, title="Destruction", emoji="🧨",
+                                 value="Destruction Time", top=False)
+
+
+@bot.command(aliases=["topenemy", "toprealmerits"])
+async def topreal(ctx, *args):
+    """Merits earned against actual enemies."""
+    await run_merits_leaderboard(ctx, args, title="Enemy (Real) Merits",
+                                 emoji="🎯", value="Enemy Merits")
+
+
+@bot.command(aliases=["toptraded", "traders"])
+async def toptraders(ctx, *args):
+    """
+    Total Merits minus Enemy Merits — merits NOT earned against enemies.
+
+        !toptraders            375
+        !toptraders 357 25     server 357, top 25
+        !toptraders 357 7d     last 7 days
+    """
+    def traded(get):
+        return max(0, get("Total Merits") - get("Enemy Merits"))
+
+    def detail(e):
+        pct = (e["value"] / e["total"] * 100) if e.get("total") else 0
+        return (f"   └ Total `{lb.fmt(e.get('total', 0))}` · "
+                f"Enemy `{lb.fmt(e.get('enemy', 0))}` · **{pct:.0f}% traded**")
+
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    async with ctx.typing():
+        opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON)
+        if unknown:
+            await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
+            return
+
+        server = opts["server"] or lb.DEFAULT_SERVER
+        data, label = await get_merits_window(server, opts["window"])
+        if data is None:
+            await ctx.send(f"❌ {label}")
+            return
+
+        entries, total = lb.rank_table(
+            data, traded,
+            id_col="Character ID",
+            name_col="Character Name",
+            power_col="Historical Highest Power",
+            server_col=None,
+            min_power=50_000_000,
+            top=True,
+            limit=opts["limit"],
+            drop_zero=True,
+            extra_cols={"total": "Total Merits", "enemy": "Enemy Merits"},
+        )
+
+        if not entries:
+            await ctx.send("📭 No players matched those filters.")
+            return
+
+        await lb.send_leaderboard(
+            ctx,
+            title=f"🤝 Top {len(entries)} — Traded Merits",
+            subtitle=(
+                f"**{lb.server_label(server)}** · {label}\n"
+                f"*Total merits minus enemy merits · {total:,} eligible*"
+            ),
+            footer=f"Merits export · {merits_dataset(server)}",
+            color=lb.server_color(server),
+            entries=entries,
+            show_detail=detail,
+        )
 
 @bot.command()
 async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
