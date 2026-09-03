@@ -1259,7 +1259,8 @@ async def topefficiency(ctx, *args):
 # -----------------------------------------------------------------------------
 
 async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
-                                 top=True, min_power=50_000_000, detail=None):
+                                 top=True, min_power=50_000_000, detail=None,
+                                 extra_cols=None):
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
         mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
         await ctx.send(f"❌ Commands are only allowed in {mentions}.")
