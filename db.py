@@ -433,3 +433,220 @@ async def dead_gains(season, from_date, to_date, min_power=0, server=None, limit
             """,
             season, from_date, to_date, min_power, server, limit,
         )
+
+# =============================================================================
+# db.py ADDITIONS — paste at the end of db.py
+# =============================================================================
+# The 375 export is a CUMULATIVE range (season start -> today), not a snapshot.
+# So we record both ends of the period, and gains for a window are computed by
+# subtracting an earlier file from the latest one.
+#
+# Also adds XLSX parsing, since the in-game tool exports .xlsx not .csv.
+#
+# Requires: openpyxl  (add to requirements.txt)
+# =============================================================================
+
+import openpyxl
+
+
+# -----------------------------------------------------------------------------
+# Schema upgrade — safe to run repeatedly
+# -----------------------------------------------------------------------------
+
+PERIOD_SCHEMA = """
+ALTER TABLE scan_meta ADD COLUMN IF NOT EXISTS period_start DATE;
+ALTER TABLE scan_meta ADD COLUMN IF NOT EXISTS period_end   DATE;
+UPDATE scan_meta
+   SET period_start = COALESCE(period_start, scan_date),
+       period_end   = COALESCE(period_end,   scan_date);
+"""
+
+
+async def upgrade_schema():
+    """Call once on startup, after init_db()."""
+    async with pool().acquire() as conn:
+        await conn.execute(PERIOD_SCHEMA)
+
+
+# -----------------------------------------------------------------------------
+# XLSX parsing
+# -----------------------------------------------------------------------------
+
+def parse_scan_xlsx(raw: bytes, sheet_name=None):
+    """
+    Parse raw .xlsx bytes into (headers, rows), all values as strings —
+    matching parse_scan_csv so downstream handling is identical.
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(raw), read_only=True, data_only=True)
+    ws = wb[sheet_name] if sheet_name else wb.worksheets[0]
+
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        raise ValueError("The spreadsheet is empty.")
+
+    headers = [str(h).strip() if h is not None else "" for h in header_row]
+    if not any(headers):
+        raise ValueError("The first row has no usable column headers.")
+
+    rows = []
+    for r in rows_iter:
+        if not any(c is not None and str(c).strip() for c in r):
+            continue
+        rows.append([str(c).strip() if c is not None else "" for c in r])
+
+    wb.close()
+    return headers, rows
+
+
+def parse_scan_file(raw: bytes, filename: str):
+    """Dispatch to the right parser based on file extension."""
+    lower = (filename or "").lower()
+    if lower.endswith((".xlsx", ".xlsm")):
+        return parse_scan_xlsx(raw)
+    return parse_scan_csv(raw)
+
+
+def date_range_from_filename(filename: str):
+    """
+    Pull a start and end date out of a filename like
+    '375_2026-08-28_2026-09-02.xlsx'. Returns (start, end), either may be None.
+    """
+    if not filename:
+        return None, None
+    found = re.findall(r"(20\d{2})[-_](\d{2})[-_](\d{2})", filename)
+    parsed = []
+    for y, m, d in found:
+        try:
+            parsed.append(date(int(y), int(m), int(d)))
+        except ValueError:
+            continue
+    if len(parsed) >= 2:
+        return parsed[0], parsed[1]
+    if len(parsed) == 1:
+        return None, parsed[0]
+    return None, None
+
+
+# -----------------------------------------------------------------------------
+# Period-aware ingest
+# -----------------------------------------------------------------------------
+
+async def ingest_period(season, period_start, period_end, headers, rows,
+                        id_column, source_file=None, ingested_by=None):
+    """
+    Store a cumulative period export. Keyed on period_end (stored as scan_date),
+    so one file per day slots in naturally.
+    """
+    result = await ingest_scan(
+        season=season,
+        scan_date=period_end,
+        headers=headers,
+        rows=rows,
+        source_file=source_file,
+        ingested_by=ingested_by,
+        id_column=id_column,
+    )
+
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            UPDATE scan_meta SET period_start = $3, period_end = $2
+            WHERE season = $1 AND scan_date = $2
+            """,
+            season, period_end, period_start,
+        )
+
+    result["period_start"] = period_start
+    result["period_end"] = period_end
+    return result
+
+
+async def get_period_starts(season):
+    """Distinct period_start values seen for a dataset — used to spot mistakes."""
+    async with pool().acquire() as conn:
+        rows = await conn.fetch(
+            """
+            SELECT DISTINCT period_start FROM scan_meta
+            WHERE season = $1 AND period_start IS NOT NULL
+            """,
+            season,
+        )
+    return [r["period_start"] for r in rows]
+
+
+# -----------------------------------------------------------------------------
+# Materialising a window
+# -----------------------------------------------------------------------------
+# Columns that are absolute values rather than accumulating gains — these are
+# never subtracted when computing a window.
+# -----------------------------------------------------------------------------
+
+ABSOLUTE_COLUMNS_375 = {
+    "rank",
+    "character id",
+    "character name",
+    "current power",
+    "historical highest power",
+}
+
+
+async def materialize_period(season, id_column, base_date=None, end_date=None,
+                             absolute_columns=None):
+    """
+    Return [headers, row, row, ...] for a dataset — the same shape gspread
+    produces, so existing command code works unchanged.
+
+    base_date=None  -> the raw latest file (i.e. season-to-date totals)
+    base_date=<d>   -> latest MINUS the file from <d>, giving gains for the window
+
+    Players present in the latest file but not the base are returned as-is
+    (they joined mid-window, so their gains are their whole total).
+    """
+    absolute = absolute_columns if absolute_columns is not None else ABSOLUTE_COLUMNS_375
+
+    if end_date is None:
+        dates = await get_latest_dates(season, n=1)
+        if not dates:
+            return None
+        end_date = dates[0]
+
+    latest = await get_scan(season, end_date)
+    if latest is None:
+        return None
+    if base_date is None or base_date == end_date:
+        return latest
+
+    base = await get_scan(season, base_date)
+    if base is None:
+        return latest
+
+    headers = latest[0]
+    lower = [h.strip().lower() for h in headers]
+
+    try:
+        id_idx = lower.index(id_column.strip().lower())
+    except ValueError:
+        return latest
+
+    base_map = {str(r[id_idx]).strip(): r for r in base[1:]}
+
+    out = [headers]
+    for row in latest[1:]:
+        rid = str(row[id_idx]).strip()
+        prev = base_map.get(rid)
+        if prev is None:
+            out.append(list(row))
+            continue
+
+        new_row = []
+        for i, val in enumerate(row):
+            if lower[i] in absolute:
+                new_row.append(val)
+                continue
+            gain = to_int(val) - to_int(prev[i] if i < len(prev) else 0)
+            new_row.append(str(max(0, gain)))
+        out.append(new_row)
+
+    return out
