@@ -1139,10 +1139,10 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
             )
             return
 
-        win = await get_window_data(["season"], ["window"])
+        win = await get_window_data(opts["season"], opts["window"])
         if win is None:
             await ctx.send(
-                f"❌ Not enough scan history. Check `!scans {['season']}`."
+                f"❌ Not enough scan history. Check `!scans {opts['season']}`."
             )
             return
 
@@ -1290,6 +1290,7 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
                 min_power=min_power,
                 top=top,
                 limit=opts["limit"],
+                extra_cols=extra_cols,
             )
         except ValueError as e:
             await ctx.send(f"❌ {e}")
