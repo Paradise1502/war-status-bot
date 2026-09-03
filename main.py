@@ -1128,7 +1128,7 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
         return
 
     async with ctx.typing():
-        , unknown = lb.parse_args(
+        opts, unknown = lb.parse_args(
             args, SEASON_SHEETS, DEFAULT_SEASON, default_server=default_server
         )
         if unknown:
