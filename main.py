@@ -1266,7 +1266,7 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
         return
 
     async with ctx.typing():
-        , unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON)
+        opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON)
         if unknown:
             await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
             return
