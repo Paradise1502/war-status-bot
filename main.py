@@ -1156,7 +1156,6 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
                 min_power=min_power,
                 top=top,
                 limit=["limit"],
-                extra_cols=extra_cols,
             )
         except ValueError as e:
             await ctx.send(f"❌ {e}")
