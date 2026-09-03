@@ -2426,337 +2426,358 @@ async def farmcheck(ctx, farm_id: str):
         except Exception as e:
             await ctx.send(f"❌ Error: {e}")
 
+# =============================================================================
+# REBUILT !progress
+# =============================================================================
+# Replaces your existing progress command entirely. Delete the old one first.
+#
+# What changed:
+#   - Merits-sheet stats now work for ANY server you have an export for, not
+#     just 375. Looks up the player's home server and pulls that dataset.
+#   - Accepts a window: !progress 123456 7d
+#   - Season-to-date by default.
+#   - Cleaner embed layout.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Helper — merits-sheet profile for one player, with ranks
+# -----------------------------------------------------------------------------
+
+async def get_merits_profile(server, lord_id, window=None, min_power=50_000_000):
+    """
+    Pull one player's merits-sheet values plus their rank for each stat within
+    their own server.
+
+    Ranks are computed among players at/above min_power, but the requested
+    player is always included even if they're below it.
+
+    Returns (profile_dict, label) or (None, reason).
+    """
+    data, label = await get_merits_window(server, window)
+    if data is None:
+        return None, label
+
+    headers, rows = lb.as_dicts(data)
+
+    col = lambda *names: lb.find_col(headers, *names)
+    c_id    = col("Character ID")
+    c_power = col("Historical Highest Power")
+    if not c_id:
+        return None, "That export is missing a Character ID column."
+
+    target = str(lord_id).strip()
+    player = next((r for r in rows if str(r.get(c_id, "")).strip() == target), None)
+    if player is None:
+        return None, f"Not found in the {lb.server_label(server)} merits export."
+
+    # Ranking pool: everyone big enough, plus the player themselves
+    pool = [r for r in rows if lb.to_int(r.get(c_power, 0)) >= min_power]
+    if player not in pool:
+        pool.append(player)
+
+    def value_of(row, spec):
+        """spec: a column name, list of names (summed), or callable(get)."""
+        get = lambda c: lb.to_int(row.get(col(c), 0))
+        if callable(spec):
+            return spec(get)
+        if isinstance(spec, str):
+            return get(spec)
+        return sum(get(c) for c in spec)
+
+    def stat(spec):
+        """Returns (value, rank, pool_size)."""
+        mine = value_of(player, spec)
+        ranked = sorted(pool, key=lambda r: value_of(r, spec), reverse=True)
+        rank = next(
+            (i for i, r in enumerate(ranked, 1)
+             if str(r.get(c_id, "")).strip() == target),
+            None,
+        )
+        return mine, rank, len(pool)
+
+    traded = lambda get: max(0, get("Total Merits") - get("Enemy Merits"))
+
+    profile = {
+        "label":     label,
+        "pool":      len(pool),
+        "infantry":  stat("Infantry Only"),
+        "cavalry":   stat("Cavalry Only"),
+        "archer":    stat("Marksman Only"),
+        "magic":     stat("Magic Only"),
+        "other":     stat("Other Merits"),
+        "gathering": stat("Gathering"),
+        "total":     stat("Total Merits"),
+        "enemy":     stat("Enemy Merits"),
+        "traded":    stat(traded),
+        "t4_heal":   stat("T4 Healed"),
+        "t5_heal":   stat("T5 Healed"),
+        "build":     stat("Build Time"),
+        "destroy":   stat("Destruction Time"),
+        "t4_dead":   stat("T4 Deaths"),
+        "t5_dead":   stat("T5 Deaths"),
+    }
+    return profile, label
+
+
+def _stat_line(emoji, name, stat):
+    """Render one '(value) (#rank)' line."""
+    value, rank, _ = stat
+    rank_str = f" `#{rank}`" if rank else ""
+    return f"{emoji} **{name}:** {value:,}{rank_str}"
+
+
+# -----------------------------------------------------------------------------
+# The command
+# -----------------------------------------------------------------------------
+
 @bot.command(aliases=['stats'])
-async def progress(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+async def progress(ctx, lord_id: str, *args):
+    """
+    Full progress report.
+
+        !progress 11659353              season to date
+        !progress 11659353 7d           last 7 days
+        !progress 11659353 sos4         a different season
+        !progress 11659353 sos4 7d
+        !progress 11659353 2026-08-30   since a specific date
+    """
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
     async with ctx.typing():
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
-            
-    try:
-        season = season.lower()
-        is_default_season = (season == DEFAULT_SEASON)
-        
-        if season not in SEASON_SHEETS:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
-            return
-
-        # 1. CACHE CHECK: Ensure background task has synced both sheets
-        if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
-            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
-            return
-
-        # 2. LOAD DATA DIRECTLY FROM CACHE
-        data_latest  = bot_cache["seasons"][season]["latest"]
-        data_prev    = bot_cache["seasons"][season]["prev"]
-        latest_title = bot_cache["seasons"][season]["latest_title"]
-        prev_title   = bot_cache["seasons"][season]["prev_title"]
-        headers      = data_latest[0]
-
-        def col_idx(col): return headers.index(col)
-
-        id_idx = col_idx("lord_id")
-        name_idx = 1
-        alliance_idx = 3
-        power_idx = headers.index("highest_power")
-        kills_idx = headers.index("units_killed")
-        dead_idx = headers.index("units_dead")
-        healed_idx = headers.index("units_healed")
-        gold_idx = headers.index("gold_spent")
-        wood_idx = headers.index("wood_spent")
-        ore_idx = headers.index("stone_spent")
-        mana_idx = headers.index("mana_spent")
-        t5_idx = headers.index("killcount_t5")
-        t4_idx = headers.index("killcount_t4")
-        t3_idx = headers.index("killcount_t3")
-        t2_idx = headers.index("killcount_t2")
-        t1_idx = headers.index("killcount_t1")
-        gold_gathered_idx = headers.index("gold")
-        wood_gathered_idx = headers.index("wood")
-        ore_gathered_idx = headers.index("ore")
-        mana_gathered_idx = headers.index("mana")
-        home_server_idx = headers.index("home_server")
-        merit_idx = headers.index("merits")  # L
-
-        def idx_any(*names):
-            for n in names:
-                if n in headers:
-                    return headers.index(n)
-            raise ValueError(f"Missing column; tried: {names}")
-        
-        def to_int(v):
-            try:
-                return int(v.replace(",", "").strip()) if v not in ("-", "") else 0
-            except:
-                return 0
-
-        def find_row(data):
-            for row in data[1:]:
-                if row[id_idx] == lord_id:
-                    return row
-            return None
-
-        row_latest = find_row(data_latest)
-        row_prev = find_row(data_prev)
-
-        if not row_latest or not row_prev:
-            await ctx.send("❌ Lord ID not found in both sheets. That's likely because you recently migrated in and don't show up in the first scan at the start of the season because of that.")
-            return
-
-        name = row_latest[name_idx]
-        alliance = row_latest[alliance_idx]
-        player_server = str(row_latest[home_server_idx]).strip()
-        power_gain = to_int(row_latest[power_idx]) - to_int(row_prev[power_idx])
-        power_latest = to_int(row_latest[power_idx])
-        merit_latest = to_int(row_latest[merit_idx])
-        merit_ratio = (merit_latest / to_int(row_latest[power_idx]) * 100) if to_int(row_latest[power_idx]) > 0 else 0
-        kills_gain = to_int(row_latest[kills_idx]) - to_int(row_prev[kills_idx])
-        dead_gain = to_int(row_latest[dead_idx]) - to_int(row_prev[dead_idx])
-        healed_gain = to_int(row_latest[healed_idx]) - to_int(row_prev[healed_idx])
-        gold = to_int(row_latest[gold_idx]) - to_int(row_prev[gold_idx])
-        wood = to_int(row_latest[wood_idx]) - to_int(row_prev[wood_idx])
-        ore = to_int(row_latest[ore_idx]) - to_int(row_prev[ore_idx])
-        mana = to_int(row_latest[mana_idx]) - to_int(row_prev[mana_idx])
-        total_rss = gold + wood + ore + mana
-        gold_gathered = to_int(row_latest[gold_gathered_idx]) - to_int(row_prev[gold_gathered_idx])
-        wood_gathered = to_int(row_latest[wood_gathered_idx]) - to_int(row_prev[wood_gathered_idx])
-        ore_gathered = to_int(row_latest[ore_gathered_idx]) - to_int(row_prev[ore_gathered_idx])
-        mana_gathered = to_int(row_latest[mana_gathered_idx]) - to_int(row_prev[mana_gathered_idx])
-        total_gathered = gold_gathered + wood_gathered + ore_gathered + mana_gathered
-
-        prev_map = {row[id_idx]: row for row in data_prev[1:] if len(row) > mana_idx and row[id_idx].strip()}
-
-        def get_merit_ratio_rank():
-            ratios = []
-            for row in data_latest[1:]:
-                if len(row) <= max(merit_idx, power_idx, home_server_idx):
-                    continue
-                if str(row[home_server_idx]).strip() != player_server:
-                    continue
-                p_power = to_int(row[power_idx])
-                if p_power <= 0:
-                    continue
-                p_merit = to_int(row[merit_idx])
-                p_ratio = (p_merit / p_power) * 100
-                ratios.append((row[id_idx], p_ratio))
-
-            ratios.sort(key=lambda x: x[1], reverse=True)
-            for rank, (lid, _) in enumerate(ratios, 1):
-                if lid == lord_id:
-                    return rank
-            return None
-        
-        rank_merit_ratio = get_merit_ratio_rank()
-
-        def get_total_rank(col_index):
-            totals = []
-            for row in data_latest[1:]:
-                if len(row) <= max(col_index, home_server_idx):
-                    continue
-                if str(row[home_server_idx]).strip() != player_server:
-                    continue
-                
-                lid_current = str(row[id_idx]).strip()
-                if not lid_current:
-                    continue
-                
-                val = to_int(row[col_index])
-                totals.append((lid_current, val))
-                
-            totals.sort(key=lambda x: x[1], reverse=True)
-            for rank, (lid_curr, _) in enumerate(totals, 1):
-                if lid_curr == str(lord_id):
-                    return rank
-            return None
-
-        rank_total_merit = get_total_rank(merit_idx)
-        
-        def get_rank(col_index):
-            player_row = next((r for r in data_latest[1:] if r[id_idx].strip() == lord_id), None)
-            if not player_row or len(player_row) <= home_server_idx:
-                return None
-
-            if not player_server:
-                return None
-
-            gains = []
-            for row in data_latest[1:]:
-                if len(row) <= col_index or len(row) <= home_server_idx:
-                    continue
-                if str(row[home_server_idx]).strip() != player_server:
-                    continue
-
-                lid = row[id_idx].strip()
-                prev_row = prev_map.get(lid)
-                if not prev_row:
-                    continue
-
-                val = to_int(row[col_index]) - to_int(prev_row[col_index])
-                gains.append((lid, val))
-
-            gains.sort(key=lambda x: x[1], reverse=True)
-
-            for rank, (lid, _) in enumerate(gains, 1):
-                if lid == lord_id:
-                    return rank
-
-            return None
-
-        rank_power = get_total_rank(power_idx)
-        rank_kills = get_rank(kills_idx)
-        rank_dead = get_rank(dead_idx)
-        rank_healed = get_rank(healed_idx)
-        rank_merit = get_rank(merit_idx)
-        rank_mana_gathered = get_rank(mana_gathered_idx)
-
-        t5_total = to_int(row_latest[t5_idx])
-        t4_total = to_int(row_latest[t4_idx])
-        t3_total = to_int(row_latest[t3_idx])
-        t2_total = to_int(row_latest[t2_idx])
-        t1_total = to_int(row_latest[t1_idx])
-
-        t5_gain = t5_total - to_int(row_prev[t5_idx])
-        t4_gain = t4_total - to_int(row_prev[t4_idx])
-        t3_gain = t3_total - to_int(row_prev[t3_idx])
-        t2_gain = t2_total - to_int(row_prev[t2_idx])
-        t1_gain = t1_total - to_int(row_prev[t1_idx])
-
-        embed = discord.Embed(title=f"📈 Progress Report for [{alliance}] {name} for season `{season.upper()}`", color=discord.Color.green())
-        
-        embed.add_field(name="🟩 Highest Power", value=f"{power_latest:,} (+{power_gain:,})" + (f" `(#{rank_power})`" if rank_power else ""), inline=False)
-        
-        # Row 2 (3 Items)
-        embed.add_field(name="🧠 Total Merits", value=f"{merit_latest:,}" + (f" `(#{rank_total_merit})`" if rank_total_merit else ""), inline=True)
-        embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%" + (f" `(#{rank_merit_ratio})`" if rank_merit_ratio else ""), inline=True)
-        embed.add_field(name="💧 Mana Gathered", value=f"**+{mana_gathered:,}**" + (f" `(#{rank_mana_gathered})`" if rank_mana_gathered and mana_gathered > 0 else ""), inline=True)
-
-        embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}" + (f" `(#{rank_kills})`" if rank_kills else ""), inline=True)
-        embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}" + (f" `(#{rank_dead})`" if rank_dead else ""), inline=True)
-        embed.add_field(name="❤️ Healed", value=f"+{healed_gain:,}" + (f" `(#{rank_healed})`" if rank_healed else ""), inline=True)
-        
-        # -------------------------------------------------------------
-        # SERVER 375 EXCLUSIVE STATS CHECK (READ FROM CACHE)
-        # -------------------------------------------------------------
-        if player_server == "375":
-            try:
-                data_375 = bot_cache["375_data"]
-                headers_375 = data_375[0]
-                
-                id_col = headers_375.index("Character ID")
-                hist_power_col = headers_375.index("Historical Highest Power")
-                inf_col = headers_375.index("Infantry Only")
-                cav_col = headers_375.index("Cavalry Only")
-                arch_col = headers_375.index("Marksman Only")
-                magic_col = headers_375.index("Magic Only")
-                total_merit_col = headers_375.index("Total Merits")
-                enemy_merit_col = headers_375.index("Enemy Merits")
-                
-                # Split healing columns
-                t4_heal_col = headers_375.index("T4 Healed")
-                t5_heal_col = headers_375.index("T5 Healed")
-                heal_cols = [t4_heal_col, t5_heal_col]
-                
-                build_col = headers_375.index("Build Time")
-                dest_col = headers_375.index("Destruction Time")
-
-                server_375_data = []
-                player_row_375 = None
-                
-                max_needed_375 = max(id_col, hist_power_col, inf_col, cav_col, arch_col, magic_col, t4_heal_col, t5_heal_col, build_col, dest_col)
-
-                for r in data_375[1:]:
-                    if len(r) > max_needed_375:
-                        r_id = str(r[id_col]).strip()
-                        if to_int(r[hist_power_col]) >= 50000000:
-                            server_375_data.append(r)
-                        
-                        if r_id == str(lord_id):
-                            player_row_375 = r
-                            if to_int(r[hist_power_col]) < 50000000:
-                                server_375_data.append(r)
-                
-                def get_375_rank(col_indices, operation="sum"):
-                    if isinstance(col_indices, int):
-                        col_indices = [col_indices]
-                    
-                    if operation == "subtract" and len(col_indices) == 2:
-                        sorted_members = sorted(server_375_data, key=lambda x: to_int(x[col_indices[0]]) - to_int(x[col_indices[1]]), reverse=True)
-                    else:
-                        sorted_members = sorted(server_375_data, key=lambda x: sum(to_int(x[c]) for c in col_indices), reverse=True)
-                        
-                    for rank, row in enumerate(sorted_members, 1):
-                        if str(row[id_col]).strip() == str(lord_id):
-                            return rank
-                    return None
-
-                if player_row_375:
-                    inf_val = to_int(player_row_375[inf_col])
-                    cav_val = to_int(player_row_375[cav_col])
-                    arch_val = to_int(player_row_375[arch_col])
-                    magic_val = to_int(player_row_375[magic_col])
-                    total_merits_lifetime = to_int(player_row_375[total_merit_col])
-                    enemy_merits_lifetime = to_int(player_row_375[enemy_merit_col])
-                    traded_merits_lifetime = max(0, total_merits_lifetime - enemy_merits_lifetime)
-
-                    pvp_ratio = (enemy_merits_lifetime / total_merits_lifetime * 100) if total_merits_lifetime > 0 else 0
-                    
-                    t4_heal_val = to_int(player_row_375[t4_heal_col])
-                    t5_heal_val = to_int(player_row_375[t5_heal_col])
-                    
-                    build_val = to_int(player_row_375[build_col])
-                    dest_val = to_int(player_row_375[dest_col])
-
-                    embed.add_field(
-                        name="Troop Merits (Server Rank)",
-                        value=(
-                            f"⚔️ **Infantry:** {inf_val:,} `(#{get_375_rank(inf_col)})`\n"
-                            f"🐎 **Cavalry:** {cav_val:,} `(#{get_375_rank(cav_col)})`\n"
-                            f"🏹 **Archer:** {arch_val:,} `(#{get_375_rank(arch_col)})`\n"
-                            f"🪄 **Magic:** {magic_val:,} `(#{get_375_rank(magic_col)})`"
-                        ),
-                        inline=True
-                    )
-
-                    embed.add_field(
-                        name="Utility (Server Rank)",
-                        value=(
-                            f"❤️ **T5 RSS Healing:** {t5_heal_val:,} `(#{get_375_rank(t5_heal_col)})`\n"
-                            f"❤️ **T4 RSS Healing:** {t4_heal_val:,} `(#{get_375_rank(t4_heal_col)})`\n"
-                            f"🔨 **Build Time:** {build_val:,} `(#{get_375_rank(build_col)})`\n"
-                            f"🔨 **Destruction:** {dest_val:,} `(#{get_375_rank(dest_col)})`"
-                        ),
-                        inline=True
-                    )
-
-                    embed.add_field(
-                        name="Combat Breakdown (Server Stats)",
-                        value=(
-                            f"🎯 **Enemy (Real) Merits:** {enemy_merits_lifetime:,} `(#{get_375_rank(enemy_merit_col)})`\n"
-                            f"🤝 **Traded Merits:** {traded_merits_lifetime:,} `(#{get_375_rank([total_merit_col, enemy_merit_col], operation='subtract')})`\n"
-                        ),
-                        inline=False
-                    )
-            
-            except Exception as ex:
-                print(f"Failed to load Server 375 stats for {lord_id}: {ex}")
-
-        # Footers using cached sheet titles
-        if is_default_season:
-            embed.set_footer(
-                text=(
-                    f"📅 Timespan: {prev_title} → {latest_title}\n"
-                    "⚠️ Stats may vary slightly from in-game counters due to scan timing.\n"
-                    "🔍 View past seasons by appending a season code (e.g., !progress 123456 sos6)."
+        try:
+            season, window, unknown = split_args(args, SEASON_SHEETS)
+            if unknown:
+                await ctx.send(
+                    f"❌ Didn't understand `{unknown[0]}`.\n"
+                    f"Seasons: {', '.join(SEASON_SHEETS)} · "
+                    f"Windows: `7d`, `2w`, `season`, `2026-08-30`"
                 )
+                return
+
+            win = await get_window_data(season, window)
+            if win is None:
+                await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
+                return
+
+            data_latest = win["latest"]
+            data_prev   = win["prev"]
+            headers     = data_latest[0]
+
+            def idx(*names):
+                col = lb.find_col(headers, *names)
+                return headers.index(col) if col else None
+
+            id_idx     = idx("lord_id")
+            name_idx   = idx("name")
+            alliance_idx = idx("alliance_tag", "alliance")
+            server_idx = idx("home_server")
+            power_idx  = idx("highest_power")
+            merit_idx  = idx("merits")
+            kills_idx  = idx("units_killed")
+            dead_idx   = idx("units_dead")
+            healed_idx = idx("units_healed")
+            mana_g_idx = idx("mana")
+
+            target = str(lord_id).strip()
+            row_latest = next(
+                (r for r in data_latest[1:]
+                 if id_idx is not None and id_idx < len(r)
+                 and str(r[id_idx]).strip() == target),
+                None,
             )
-        else:
-            embed.set_footer(text=f"📅 Timespan: {prev_title} → {latest_title}")
+            if row_latest is None:
+                await ctx.send(
+                    "❌ That Lord ID isn't in the latest scan. "
+                    "If they migrated in recently they may not appear yet."
+                )
+                return
 
-        await ctx.send(embed=embed)
+            prev_map = {
+                str(r[id_idx]).strip(): r for r in data_prev[1:]
+                if id_idx < len(r) and str(r[id_idx]).strip()
+            }
+            row_prev = prev_map.get(target)
+            if row_prev is None:
+                await ctx.send(
+                    "❌ That Lord ID isn't in the earlier scan for this window, "
+                    "so gains can't be calculated."
+                )
+                return
 
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+            def val(row, i):
+                return lb.to_int(row[i]) if i is not None and i < len(row) else 0
+
+            def gain(i):
+                return max(0, val(row_latest, i) - val(row_prev, i))
+
+            name         = str(row_latest[name_idx]).strip() if name_idx is not None else "?"
+            alliance     = str(row_latest[alliance_idx]).strip() if alliance_idx is not None else ""
+            player_server = "".join(
+                ch for ch in str(row_latest[server_idx]) if ch.isdigit()
+            ) if server_idx is not None else ""
+
+            power_now  = val(row_latest, power_idx)
+            power_gain = gain(power_idx)
+            merits_now = val(row_latest, merit_idx)
+            merits_gain = gain(merit_idx)
+            kills_gain = gain(kills_idx)
+            dead_gain  = gain(dead_idx)
+            heal_gain  = gain(healed_idx)
+            mana_gain  = gain(mana_g_idx)
+            merit_ratio = (merits_now / power_now * 100) if power_now else 0
+
+            # --- Ranks within the player's own server -------------------------
+
+            def rank_gain(col_idx):
+                if col_idx is None:
+                    return None
+                vals = []
+                for r in data_latest[1:]:
+                    if server_idx is None or server_idx >= len(r):
+                        continue
+                    rs = "".join(ch for ch in str(r[server_idx]) if ch.isdigit())
+                    if rs != player_server:
+                        continue
+                    rid = str(r[id_idx]).strip()
+                    base = prev_map.get(rid)
+                    if not base:
+                        continue
+                    vals.append((rid, max(0, val(r, col_idx) - val(base, col_idx))))
+                vals.sort(key=lambda x: x[1], reverse=True)
+                return next((i for i, (rid, _) in enumerate(vals, 1) if rid == target), None)
+
+            def rank_total(col_idx):
+                if col_idx is None:
+                    return None
+                vals = []
+                for r in data_latest[1:]:
+                    if server_idx is None or server_idx >= len(r):
+                        continue
+                    rs = "".join(ch for ch in str(r[server_idx]) if ch.isdigit())
+                    if rs != player_server:
+                        continue
+                    vals.append((str(r[id_idx]).strip(), val(r, col_idx)))
+                vals.sort(key=lambda x: x[1], reverse=True)
+                return next((i for i, (rid, _) in enumerate(vals, 1) if rid == target), None)
+
+            r_power  = rank_total(power_idx)
+            r_merits = rank_total(merit_idx)
+            r_kills  = rank_gain(kills_idx)
+            r_dead   = rank_gain(dead_idx)
+            r_heal   = rank_gain(healed_idx)
+            r_mana   = rank_gain(mana_g_idx)
+
+            def rk(r):
+                return f" `#{r}`" if r else ""
+
+            # --- Build the embed ---------------------------------------------
+
+            display = f"[{alliance}] {name}" if alliance else name
+            embed = discord.Embed(
+                title=f"📈 {display}",
+                description=(
+                    f"**{lb.server_label(player_server)}** · "
+                    f"`{season.upper()}` · {win['label']}"
+                ),
+                color=lb.server_color(player_server),
+            )
+
+            embed.add_field(
+                name="🟩 Highest Power",
+                value=f"{power_now:,}" + (f" (+{power_gain:,})" if power_gain else "") + rk(r_power),
+                inline=False,
+            )
+            embed.add_field(name="🧠 Total Merits", value=f"{merits_now:,}{rk(r_merits)}", inline=True)
+            embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%", inline=True)
+            embed.add_field(name="💧 Mana", value=f"+{mana_gain:,}{rk(r_mana)}", inline=True)
+            embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}{rk(r_kills)}", inline=True)
+            embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}{rk(r_dead)}", inline=True)
+            embed.add_field(name="❤️ Healed", value=f"+{heal_gain:,}{rk(r_heal)}", inline=True)
+
+            embed.add_field(
+                name="\u200b",
+                value=f"**🧾 Merits Breakdown — {lb.server_label(player_server)}**",
+                inline=False,
+            )
+
+            # --- Merits sheet, for whichever server they're on ----------------
+
+            profile, merits_label = await get_merits_profile(
+                player_server, target, window=window
+            )
+
+            if profile is None:
+                embed.add_field(
+                    name="\u200b",
+                    value=(
+                        f"*{merits_label}*\n"
+                        f"Upload one with `!ingestmerits {player_server}` to see "
+                        f"troop-type merits, healing and build stats here."
+                    ),
+                    inline=False,
+                )
+            else:
+                embed.add_field(
+                    name="Troop Merits",
+                    value="\n".join([
+                        _stat_line("⚔️", "Infantry", profile["infantry"]),
+                        _stat_line("🐎", "Cavalry",  profile["cavalry"]),
+                        _stat_line("🏹", "Archer",   profile["archer"]),
+                        _stat_line("🪄", "Magic",    profile["magic"]),
+                    ]),
+                    inline=True,
+                )
+                embed.add_field(
+                    name="Utility",
+                    value="\n".join([
+                        _stat_line("❤️", "T5 Healed", profile["t5_heal"]),
+                        _stat_line("❤️", "T4 Healed", profile["t4_heal"]),
+                        _stat_line("🔨", "Build",     profile["build"]),
+                        _stat_line("🧨", "Destroy",   profile["destroy"]),
+                    ]),
+                    inline=True,
+                )
+
+                total_v = profile["total"][0]
+                enemy_v = profile["enemy"][0]
+                traded_v = profile["traded"][0]
+                pct = (enemy_v / total_v * 100) if total_v else 0
+
+                embed.add_field(
+                    name="Combat Breakdown",
+                    value=(
+                        f"{_stat_line('🎯', 'Enemy (Real)', profile['enemy'])}\n"
+                        f"{_stat_line('🤝', 'Traded', profile['traded'])}\n"
+                        f"📈 **Real merit share:** {pct:.1f}%\n"
+                    ),
+                    inline=False,
+                )
+                embed.set_footer(
+                    text=(
+                        f"📅 Scans: {win['prev_title']} → {win['latest_title']}\n"
+                        f"🧾 Merits: {merits_label} · ranked among {profile['pool']} "
+                        f"players ≥50M power\n"
+                        f"🔍 Try: !progress {target} 7d"
+                    )
+                )
+
+            if profile is None:
+                embed.set_footer(
+                    text=(
+                        f"📅 Scans: {win['prev_title']} → {win['latest_title']}\n"
+                        f"🔍 Try: !progress {target} 7d"
+                    )
+                )
+
+            embed.timestamp = datetime.now(UTC)
+            await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"❌ **Error:** {e}")
 
 from discord.ext import commands
 import discord
