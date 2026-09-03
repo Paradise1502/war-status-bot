@@ -8,7 +8,7 @@ import db
 import re
 from discord.ext import commands
 from discord.ext import tasks
-from datetime import datetime, timedelta, UTC, timezone
+from datetime import datetime, timedelta, UTC, timezone, date
 import asyncio
 import unicodedata
 
