@@ -3678,8 +3678,6 @@ def _help_embed(key, is_admin=False):
             "```\n"
             "**`!mana <lord_id>`**\n"
             "Mana gathered this season, with rank and a rough cash value.\n\n"
-            "**`!farmcheck <id>`**  ·  aliases `!farm`, `!checkfarm`\n"
-            "Check whether a farm account is registered, and to whom."
         )
 
     elif key == "scans":
