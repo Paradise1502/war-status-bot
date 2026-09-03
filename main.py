@@ -38,6 +38,82 @@ SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
 
 DEFAULT_SEASON = "sos2"
 
+# =============================================================================
+# SEASON CONFIG — put this near the top of main.py, after SEASON_SHEETS
+# =============================================================================
+# Everything that changes between seasons lives here. Next season you add one
+# entry and change DEFAULT_SEASON. You do not touch any command code.
+# =============================================================================
+
+# Every server you've ever encountered. Add new opponents here as you meet them.
+# lb.py has its own copy for defaults; this merges into it.
+ALL_SERVERS = {
+    "375": "NVR",
+    "357": "YSS",
+    "756": "SAB",
+    "341": "NW:E",
+    "320": "EvG",
+    "5":   "OMG",
+    # Next season, add the new opponent here, e.g.:
+    # "412": "XYZ",
+}
+
+SERVER_COLORS = {
+    "375": 0xE74C3C,   # red — home
+    "357": 0x3498DB,   # blue — main rival
+    "756": 0xE67E22,
+    "341": 0x9B59B6,
+    "320": 0x2ECC71,
+    "5":   0xF1C40F,
+}
+
+lb.SERVER_NAMES.update(ALL_SERVERS)
+lb.SERVER_COLORS.update(SERVER_COLORS)
+
+
+SEASON_CONFIG = {
+    "sos2": {
+        "label":   "SoS2",
+        "start":   date(2026, 8, 28),
+        "home":    "375",
+        # War pairings. Each side is a list, so alliances of multiple servers work.
+        "matchups": [
+            (["375"], ["357"]),
+            (["756"], ["341"]),
+            (["5"],   ["320"]),
+        ],
+    },
+
+    # ---- Next season: copy the block above, change the values ----------------
+    # "sos8": {
+    #     "label": "SoS8",
+    #     "start": date(2026, 11, 15),
+    #     "home":  "375",
+    #     "matchups": [
+    #         (["375"], ["412"]),
+    #     ],
+    # },
+}
+
+
+def season_cfg(season):
+    """Config for a season, with safe fallbacks if it hasn't been set up."""
+    cfg = SEASON_CONFIG.get(season, {})
+    return {
+        "label":    cfg.get("label", season.upper()),
+        "start":    cfg.get("start", SEASON_START),
+        "home":     cfg.get("home", lb.DEFAULT_SERVER),
+        "matchups": cfg.get("matchups", []),
+    }
+
+
+def season_start(season=None):
+    return season_cfg(season or DEFAULT_SEASON)["start"]
+
+
+def home_server(season=None):
+    return season_cfg(season or DEFAULT_SEASON)["home"]
+
 # Global memory bank for background tasks
 bot_cache = {
     "375_data": None,
@@ -2980,184 +3056,393 @@ async def matchups2(ctx, season: str = "test"):
     except Exception as e:
         await ctx.send(f"❌ Error: {e}")
 
+# =============================================================================
+# REBUILT !matchups  (v2 — power tracking + RSS healing costs)
+# =============================================================================
+# Replaces the previous matchups command.
+#
+#     !matchups              all pairings, season to date
+#     !matchups 357          just the pairing involving 357
+#     !matchups 1d           yesterday — power loss, healing spend, the lot
+#     !matchups 357 7d
+#
+# Everything is filtered to accounts at/above 50M HIGHEST power, on both the
+# scan side and the merits side, so the two datasets describe the same players.
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# Config
+# -----------------------------------------------------------------------------
+
+MIN_POWER = 50_000_000
+
+# Mana cost of healing, at max healing-cost reduction.
+# 1M T5 troops ≈ 66M mana · 1M T4 troops ≈ 16M mana
+MANA_PER_T5 = 66.0     # mana per single T5 unit healed
+MANA_PER_T4 = 16.0     # mana per single T4 unit healed
+
+
+def healing_mana_cost(t5, t4):
+    """Estimated mana spent healing, from T5/T4 unit counts."""
+    return int(t5 * MANA_PER_T5 + t4 * MANA_PER_T4)
+
+
+# -----------------------------------------------------------------------------
+# Scan aggregation
+# -----------------------------------------------------------------------------
+
+SCAN_STATS = [
+    ("kills",  "⚔️", "Kills",  "units_killed"),
+    ("dead",   "💀", "Deads",  "units_dead"),
+    ("healed", "❤️", "Units Healed", "units_healed"),
+    ("merits", "🧠", "Merits", "merits"),
+]
+
+
+def aggregate_scan(latest, prev, servers, min_power=MIN_POWER):
+    """
+    Sum gains per side, and track power separately since power is an absolute
+    value rather than an accumulating counter.
+
+    Only counts players present in BOTH scans, on one of the given servers,
+    at/above min_power highest power.
+    """
+    headers = [str(h).strip() for h in latest[0]]
+    lower = [h.lower() for h in headers]
+
+    def i(*names):
+        for n in names:
+            if n.lower() in lower:
+                return lower.index(n.lower())
+        return None
+
+    i_id      = i("lord_id")
+    i_server  = i("home_server")
+    i_power   = i("power")             # current power
+    i_hpower  = i("highest_power")     # historical highest
+    cols = {k: i(name) for k, _, _, name in SCAN_STATS}
+
+    def val(row, idx):
+        return lb.to_int(row[idx]) if idx is not None and idx < len(row) else 0
+
+    prev_map = {
+        str(r[i_id]).strip(): r for r in prev[1:]
+        if i_id is not None and i_id < len(r) and str(r[i_id]).strip()
+    }
+
+    wanted = {str(s) for s in servers}
+    totals = {k: 0 for k, *_ in SCAN_STATS}
+    totals.update({
+        "power_now": 0, "power_then": 0, "power_change": 0,
+        "highest_power": 0, "players": 0, "losers": 0,
+    })
+
+    for row in latest[1:]:
+        if i_id is None or i_id >= len(row):
+            continue
+        sid = "".join(ch for ch in str(row[i_server]) if ch.isdigit()) if i_server is not None else ""
+        if sid not in wanted:
+            continue
+
+        if val(row, i_hpower) < min_power:
+            continue
+
+        base = prev_map.get(str(row[i_id]).strip())
+        if base is None:
+            continue
+
+        totals["players"] += 1
+
+        p_now  = val(row, i_power)
+        p_then = val(base, i_power)
+        totals["power_now"]  += p_now
+        totals["power_then"] += p_then
+        totals["highest_power"] += val(row, i_hpower)
+        if p_now < p_then:
+            totals["losers"] += 1
+
+        for key, *_ in SCAN_STATS:
+            c = cols[key]
+            if c is not None:
+                totals[key] += max(0, val(row, c) - val(base, c))
+
+    totals["power_change"] = totals["power_now"] - totals["power_then"]
+    return totals
+
+
+# -----------------------------------------------------------------------------
+# Merits-sheet aggregation
+# -----------------------------------------------------------------------------
+
+MERIT_STATS = [
+    ("infantry", "⚔️", "Infantry",  "Infantry Only"),
+    ("cavalry",  "🐎", "Cavalry",   "Cavalry Only"),
+    ("archer",   "🏹", "Archer",    "Marksman Only"),
+    ("magic",    "🪄", "Magic",     "Magic Only"),
+]
+
+
+async def aggregate_merits(servers, window=None, min_power=MIN_POWER):
+    """Sum merits-sheet columns across servers. Returns (totals, label) or (None, reason)."""
+    combined = {key: 0 for key, *_ in MERIT_STATS}
+    combined.update({
+        "total": 0, "enemy": 0, "traded": 0,
+        "t4_healed": 0, "t5_healed": 0, "heal_mana": 0,
+        "build": 0, "destroy": 0,
+        "t5_dead": 0, "t4_dead": 0, "players": 0,
+    })
+    label = None
+    found = False
+
+    for server in servers:
+        data, lbl = await get_merits_window(server, window)
+        if data is None:
+            continue
+        found = True
+        label = label or lbl
+
+        headers, rows = lb.as_dicts(data)
+        col = lambda *n: lb.find_col(headers, *n)
+        c_power = col("Historical Highest Power")
+        mapping = {key: col(name) for key, _, _, name in MERIT_STATS}
+        c_total, c_enemy = col("Total Merits"), col("Enemy Merits")
+        c_t4h, c_t5h     = col("T4 Healed"), col("T5 Healed")
+        c_build, c_dest  = col("Build Time"), col("Destruction Time")
+        c_t5d, c_t4d     = col("T5 Deaths"), col("T4 Deaths")
+
+        for r in rows:
+            if lb.to_int(r.get(c_power, 0)) < min_power:
+                continue
+            combined["players"] += 1
+            for key, c in mapping.items():
+                if c:
+                    combined[key] += lb.to_int(r.get(c, 0))
+
+            total = lb.to_int(r.get(c_total, 0))
+            enemy = lb.to_int(r.get(c_enemy, 0))
+            t4h   = lb.to_int(r.get(c_t4h, 0))
+            t5h   = lb.to_int(r.get(c_t5h, 0))
+
+            combined["total"]     += total
+            combined["enemy"]     += enemy
+            combined["traded"]    += max(0, total - enemy)
+            combined["t4_healed"] += t4h
+            combined["t5_healed"] += t5h
+            combined["build"]     += lb.to_int(r.get(c_build, 0))
+            combined["destroy"]   += lb.to_int(r.get(c_dest, 0))
+            combined["t5_dead"]   += lb.to_int(r.get(c_t5d, 0))
+            combined["t4_dead"]   += lb.to_int(r.get(c_t4d, 0))
+
+    if not found:
+        return None, "no merits export stored"
+
+    combined["heal_mana"] = healing_mana_cost(combined["t5_healed"], combined["t4_healed"])
+    return combined, label
+
+
+# -----------------------------------------------------------------------------
+# Rendering
+# -----------------------------------------------------------------------------
+
+BAR_WIDTH = 10
+
+
+def vs_bar(a, b, left="🟥", right="🟦"):
+    total = abs(a) + abs(b)
+    if total <= 0:
+        return "⬛" * BAR_WIDTH
+    la = max(0, min(BAR_WIDTH, round(abs(a) / total * BAR_WIDTH)))
+    return left * la + right * (BAR_WIDTH - la)
+
+
+def vs_row(emoji, label, a, b, suffix=""):
+    marker = "◀" if a > b else ("▶" if b > a else "=")
+    return (
+        f"{emoji} **{label}** {marker}\n"
+        f"`{lb.fmt(a):>8}` {vs_bar(a, b)} `{lb.fmt(b):<8}`{suffix}"
+    )
+
+
+def vs_row_power(emoji, label, a, b):
+    """
+    For power change, where negative is bad. The bar shows relative magnitude
+    of LOSS, and the marker points at whoever came off worse.
+    """
+    def sign(n):
+        return f"+{lb.fmt(n)}" if n > 0 else lb.fmt(n)
+
+    if a < b:
+        note = "🔻 left side lost more"
+    elif b < a:
+        note = "🔻 right side lost more"
+    else:
+        note = "even"
+
+    return (
+        f"{emoji} **{label}**\n"
+        f"`{sign(a):>9}` {vs_bar(a, b)} `{sign(b):<9}`\n"
+        f"*{note}*"
+    )
+
+
+def side_name(servers):
+    return " & ".join(lb.SERVER_NAMES.get(s, s) for s in servers)
+
+
+def side_detail(servers):
+    return " & ".join(f"{lb.SERVER_NAMES.get(s, s)} ({s})" for s in servers)
+
+
+# -----------------------------------------------------------------------------
+# The command
+# -----------------------------------------------------------------------------
+
 @bot.command()
-async def matchups(ctx, season: str = DEFAULT_SEASON):
+async def matchups(ctx, *args):
+    """War comparison between paired servers."""
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
     async with ctx.typing():
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
-            
-    try:
-        season = season.lower()
-        
-        if season not in SEASON_SHEETS:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
-            return
-
-        # CACHE CHECK
-        if season not in bot_cache["seasons"]:
-            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
-            return
-
-        # Load instantly from bot memory
-        data_latest  = bot_cache["seasons"][season]["latest"]
-        data_prev    = bot_cache["seasons"][season]["prev"]
-        latest_title = bot_cache["seasons"][season]["latest_title"]
-        prev_title   = bot_cache["seasons"][season]["prev_title"]
-        headers      = data_latest[0]
-
-        # Header lookups with safe fallback
-        def find_idx(name, fallback):
-            return headers.index(name) if name in headers else fallback
-
-        def to_int(val):
-            try:
-                v = str(val).replace(',', '').replace(' ', '').strip()
-                if v in ("", "-"): return 0
-                return int(v)
-            except:
-                return 0
-
-        def fmt_gain(n): return f"+{n:,}" if n > 0 else f"{n:,}"
-
-        def emoji_bracket(server):
-            return {
-                "375": "🔴 ", "756": "🔴 ",
-                "357": "🔵 ", "320": "🔵 ",
-                "5": "🔴 ", "341": "🔴 " 
-            }.get(server, "")
-
-        SERVER_MAP = {
-            "375": "NVR", "357": "YSS", "756": "SAB", "341": "NW:E",
-            "320": "EvG", "5": "OMG"
-        }
-
-        # CRITICAL FIX: These must be formatted as lists inside the tuple, 
-        # otherwise Python treats ("375") as a raw string and iterates over characters ('3', '7', '5')
-        matchups = [
-            (["375"], ["357"]),  
-            (["756"], ["341"]),
-            (["5"], ["320"])
-        ]
-
-        MIN_POWER_FOR_DEADS = 50_000_000
-
-        # Indices
-        id_idx     = find_idx("lord_id",        0)
-        server_idx = find_idx("home_server",    5)
-        kills_idx  = find_idx("units_killed",   9) 
-        power_idx  = find_idx("highest_power",  12)
-        merits_idx = find_idx("merits (only 50m+ power)", 11) 
-        dead_idx   = find_idx("units_dead",     17)
-        heal_idx   = find_idx("units_healed",   18)
-
-        max_needed_idx = max(heal_idx, kills_idx, merits_idx, power_idx)
-
-        # Previous rows by lord_id
-        prev_map = {
-            row[id_idx]: row for row in data_prev[1:]
-            if len(row) > max_needed_idx and row[id_idx]
-        }
-
-        # Aggregate dictionaries
-        stat_map = {s: {
-            "kills": 0, "kills_gain": 0,
-            "dead": 0,  "dead_gain": 0,
-            "healed": 0,"healed_gain": 0,
-            "merits": 0, "merits_gain": 0
-        } for s in SERVER_MAP}
-
-        for row in data_latest[1:]:
-            if len(row) <= max_needed_idx: continue
-
-            # MUST exist in both sheets
-            lid = (row[id_idx] or "").strip()
-            prev_row = prev_map.get(lid)
-            if not lid or prev_row is None: continue
-
-            # Server (use latest, normalized to digits)
-            sid_raw = (row[server_idx] or "").strip()
-            sid = "".join(ch for ch in sid_raw if ch.isdigit())
-            if sid not in SERVER_MAP: continue
-
-            # Current values
-            power  = to_int(row[power_idx])
-            kills  = to_int(row[kills_idx])
-            dead   = to_int(row[dead_idx])
-            heal   = to_int(row[heal_idx])
-            merits = to_int(row[merits_idx])
-
-            # Previous values
-            kills_prev  = to_int(prev_row[kills_idx])
-            dead_prev   = to_int(prev_row[dead_idx])
-            heal_prev   = to_int(prev_row[heal_idx])
-            merits_prev = to_int(prev_row[merits_idx])
-
-            s = stat_map[sid]
-            
-            # Totals 
-            s["kills"]  += kills
-            s["healed"] += heal
-            s["merits"] += merits
-
-            # Deads only count for accounts currently at/above the power threshold
-            if power >= MIN_POWER_FOR_DEADS:
-                s["dead"]      += dead
-                s["dead_gain"] += (dead - dead_prev)
-            
-            # Deltas
-            s["kills_gain"]  += (kills  - kills_prev)
-            s["healed_gain"] += (heal   - heal_prev)
-            s["merits_gain"] += (merits - merits_prev)
-
-        def merge_stats(team_servers):
-            merged = {
-                "kills": 0, "kills_gain": 0,
-                "dead": 0, "dead_gain": 0,
-                "healed": 0, "healed_gain": 0,
-                "merits": 0, "merits_gain": 0
-            }
-            for server in team_servers:
-                for key in merged:
-                    merged[key] += stat_map[server][key]
-            return merged
-
-        # Clean sub-field formatter
-        def format_side(stats):
-            return (
-                f"⚔️ **Kills:** {stats['kills']:,}\n└ Gain: `{fmt_gain(stats['kills_gain'])}`\n\n"
-                f"💀 **Deads:** {stats['dead']:,}\n└ Gain: `{fmt_gain(stats['dead_gain'])}`\n\n"
-                f"❤️ **Heals:** {stats['healed']:,}\n└ Gain: `{fmt_gain(stats['healed_gain'])}`\n\n"
-                f"🏅 **Merits:** {stats['merits']:,}\n└ Gain: `{fmt_gain(stats['merits_gain'])}`"
+        try:
+            opts, unknown = lb.parse_args(
+                args, SEASON_SHEETS, DEFAULT_SEASON, default_server=None
             )
+            if unknown:
+                await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
+                return
 
-        for team_a, team_b in matchups:
-            name_a = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]} ({s})" for s in team_a])
-            name_b = " & ".join([f"{emoji_bracket(s)}{SERVER_MAP[s]} ({s})" for s in team_b])
-            
-            stats_a = merge_stats(team_a)
-            stats_b = merge_stats(team_b)
+            season, window = opts["season"], opts["window"]
+            cfg = season_cfg(season)
 
-            title_a = " & ".join([SERVER_MAP[s] for s in team_a])
-            title_b = " & ".join([SERVER_MAP[s] for s in team_b])
+            pairings = cfg["matchups"]
+            if not pairings:
+                await ctx.send(
+                    f"❌ No matchups configured for `{season}`. Add them to `SEASON_CONFIG`."
+                )
+                return
 
-            embed = discord.Embed(
-                title=f"⚔️ WAR: {title_a} vs {title_b}",
-                color=discord.Color.dark_red()
-            )
-            
-            # Places the two alliances in perfect side-by-side columns
-            embed.add_field(name=name_a, value=format_side(stats_a), inline=True)
-            embed.add_field(name=name_b, value=format_side(stats_b), inline=True)
-            
-            # Replaced google object calls with cached titles
-            embed.set_footer(text=f"Comparing: {prev_title} → {latest_title}")
-            
-            await ctx.send(embed=embed)
+            if opts["server"]:
+                target = str(opts["server"])
+                pairings = [p for p in pairings if target in p[0] + p[1]]
+                if not pairings:
+                    await ctx.send(
+                        f"❌ {lb.server_label(target)} isn't in any pairing this season."
+                    )
+                    return
 
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+            win = await get_window_data(season, window)
+            if win is None:
+                await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
+                return
+
+            for team_a, team_b in pairings:
+                a = aggregate_scan(win["latest"], win["prev"], team_a)
+                b = aggregate_scan(win["latest"], win["prev"], team_b)
+
+                ma, label_a = await aggregate_merits(team_a, window)
+                mb, label_b = await aggregate_merits(team_b, window)
+
+                embed = discord.Embed(
+                    title=f"⚔️ {side_name(team_a)}  vs  {side_name(team_b)}",
+                    description=(
+                        f"🟥 {side_detail(team_a)}  ·  🟦 {side_detail(team_b)}\n"
+                        f"**{win['label']}** · `{cfg['label']}` · *≥50M power only*"
+                    ),
+                    color=lb.server_color(team_a[0]),
+                )
+
+                # --- Power ------------------------------------------------
+                embed.add_field(
+                    name="⚡ Power",
+                    value=(
+                        f"{vs_row_power('📉', 'Power Change', a['power_change'], b['power_change'])}\n"
+                        f"*{a['losers']} of {a['players']} lost power · "
+                        f"{b['losers']} of {b['players']} lost power*\n\n"
+                        f"{vs_row('🟩', 'Current Power', a['power_now'], b['power_now'])}\n\n"
+                        f"{vs_row('🏔️', 'Highest Power', a['highest_power'], b['highest_power'])}"
+                    ),
+                    inline=False,
+                )
+
+                # --- Combat -----------------------------------------------
+                embed.add_field(
+                    name=f"📊 Combat — {a['players']:,} vs {b['players']:,} players",
+                    value="\n\n".join(
+                        vs_row(emoji, label, a[key], b[key])
+                        for key, emoji, label, _ in SCAN_STATS
+                    ),
+                    inline=False,
+                )
+
+                # --- RSS healing ------------------------------------------
+                if ma and mb:
+                    embed.add_field(
+                        name="🧪 RSS Healing (mana spent)",
+                        value=(
+                            f"{vs_row('💧', 'Est. Mana Cost', ma['heal_mana'], mb['heal_mana'])}\n\n"
+                            f"{vs_row('🟥', 'T5 Healed', ma['t5_healed'], mb['t5_healed'])}\n\n"
+                            f"{vs_row('🟦', 'T4 Healed', ma['t4_healed'], mb['t4_healed'])}\n"
+                            f"*Estimated at {MANA_PER_T5:.0f} mana per T5 · "
+                            f"{MANA_PER_T4:.0f} per T4*"
+                        ),
+                        inline=False,
+                    )
+
+                    embed.add_field(
+                        name="🛡️ Army Composition",
+                        value="\n\n".join(
+                            vs_row(emoji, label, ma[key], mb[key])
+                            for key, emoji, label, _ in MERIT_STATS
+                        ),
+                        inline=False,
+                    )
+
+                    pct_a = (ma["enemy"] / ma["total"] * 100) if ma["total"] else 0
+                    pct_b = (mb["enemy"] / mb["total"] * 100) if mb["total"] else 0
+                    embed.add_field(
+                        name="🔍 Merit Quality",
+                        value=(
+                            f"{vs_row('🎯', 'Enemy (Real) Merits', ma['enemy'], mb['enemy'])}\n"
+                            f"*Real share: {pct_a:.0f}% vs {pct_b:.0f}%*\n\n"
+                            f"{vs_row('🤝', 'Traded Merits', ma['traded'], mb['traded'])}"
+                        ),
+                        inline=False,
+                    )
+
+                elif ma or mb:
+                    got = ma or mb
+                    have = side_name(team_a) if ma else side_name(team_b)
+                    missing = side_name(team_b) if ma else side_name(team_a)
+                    embed.add_field(
+                        name=f"🧪 Merits Data — {have} only",
+                        value=(
+                            f"💧 **Est. Healing Mana:** {got['heal_mana']:,}\n"
+                            f"🟥 **T5 Healed:** {got['t5_healed']:,}\n"
+                            f"🟦 **T4 Healed:** {got['t4_healed']:,}\n\n"
+                            + "\n".join(
+                                f"{emoji} **{label}:** {got[key]:,}"
+                                for key, emoji, label, _ in MERIT_STATS
+                            )
+                            + f"\n\n*No merits export for {missing}. "
+                              f"Upload one with `!ingestmerits <server>`.*"
+                        ),
+                        inline=False,
+                    )
+
+                footer = f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+                if ma or mb:
+                    footer += f"\n🧾 Merits: {label_a or label_b}"
+                embed.set_footer(text=footer)
+                embed.timestamp = datetime.now(UTC)
+
+                await ctx.send(embed=embed)
+
+        except Exception as e:
+            await ctx.send(f"❌ **Error:** {e}")
 
 import os
 TOKEN = os.getenv("TOKEN")
