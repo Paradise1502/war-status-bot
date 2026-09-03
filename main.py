@@ -1156,6 +1156,7 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
                 min_power=min_power,
                 top=top,
                 limit=["limit"],
+                extra_cols=extra_cols,
             )
         except ValueError as e:
             await ctx.send(f"❌ {e}")
@@ -1367,16 +1368,34 @@ async def lowmage(ctx, *args):
                                  emoji="🪄", value="Magic Only", top=False)
 
 
-@bot.command(aliases=["toprsshealing", "toprssheals"])
+def _healing_detail(e):
+    return (f"   └ 🟥 T5 `{lb.fmt(e.get('t5', 0))}` · "
+            f"🟦 T4 `{lb.fmt(e.get('t4', 0))}` · "
+            f"💧 `{lb.fmt(e['value'])}` mana")
+
+
+def _healing_mana(get):
+    """Rank by mana spent, so T5 healing counts for what it actually costs."""
+    return int(get("T5 Healed") * MANA_PER_T5 + get("T4 Healed") * MANA_PER_T4)
+
+
+@bot.command(aliases=["toprsshealing", "toprssheals", "topheal375"])
 async def toprssheal(ctx, *args):
-    await run_merits_leaderboard(ctx, args, title="RSS Healing", emoji="❤️",
-                                 value=["T4 Healed", "T5 Healed"])
+    """!toprssheal [server] [count] [window] — ranked by mana spent healing."""
+    await run_merits_leaderboard(
+        ctx, args, title="RSS Healing (mana spent)", emoji="🧪",
+        value=_healing_mana, unit=" mana", detail=_healing_detail,
+        extra_cols={"t5": "T5 Healed", "t4": "T4 Healed"},
+    )
 
 
 @bot.command(aliases=["lowrsshealing", "lowrssheals"])
 async def lowrssheal(ctx, *args):
-    await run_merits_leaderboard(ctx, args, title="RSS Healing", emoji="❤️",
-                                 value=["T4 Healed", "T5 Healed"], top=False)
+    await run_merits_leaderboard(
+        ctx, args, title="RSS Healing (mana spent)", emoji="🧪",
+        value=_healing_mana, unit=" mana", top=False, detail=_healing_detail,
+        extra_cols={"t5": "T5 Healed", "t4": "T4 Healed"},
+    )
 
 
 @bot.command(aliases=["topbuildtime"])
