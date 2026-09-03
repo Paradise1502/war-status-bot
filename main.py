@@ -3610,53 +3610,354 @@ async def on_ready():
     if not update_utc_channels.is_running():
         update_utc_channels.start()
     
-@bot.command(aliases=['help', 'info', 'guide'])
-async def commands(ctx):
-    async with ctx.typing():
-        
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+# =============================================================================
+# REBUILT HELP COMMAND
+# =============================================================================
+# Replaces your existing `commands` help command.
+#
+# NOTE THE RENAME: the function is now show_commands, not commands. The old
+# name shadowed `from discord.ext import commands`, which would break any
+# @scan_admin() command defined below it. Users still type !help / !commands.
+#
+# Also delete the `kills` command — it's gone from the help text.
+# =============================================================================
+
+
+HELP_CATEGORIES = {
+    "player": {
+        "emoji": "📊",
+        "label": "Player Stats",
+        "desc": "Look up an individual account",
+    },
+    "scans": {
+        "emoji": "🏆",
+        "label": "Scan Leaderboards",
+        "desc": "Kills, deads, merits, healing, mana",
+    },
+    "merits": {
+        "emoji": "⚔️",
+        "label": "Merit Leaderboards",
+        "desc": "Troop types, healing, build, traded merits",
+    },
+    "war": {
+        "emoji": "🆚",
+        "label": "War & Groups",
+        "desc": "Matchups, Sun vs Moon, duels",
+    },
+    "args": {
+        "emoji": "🎛️",
+        "label": "Arguments Guide",
+        "desc": "Servers, time windows, counts, seasons",
+    },
+    "admin": {
+        "emoji": "🔧",
+        "label": "Admin",
+        "desc": "Uploading data and managing exclusions",
+    },
+}
+
+
+def _help_embed(key, is_admin=False):
+    cat = HELP_CATEGORIES[key]
+    embed = discord.Embed(
+        title=f"{cat['emoji']}  {cat['label']}",
+        color=0x5865F2,
+    )
+
+    if key == "player":
+        embed.description = (
+            "**`!progress <lord_id>`**  ·  alias `!stats`\n"
+            "Full profile: power, merits, kills, deads, healing, mana — with "
+            "gains and server ranks. Also shows troop-type merits, RSS healing "
+            "and build stats if a merits export exists for that player's server.\n\n"
+            "```\n"
+            "!progress 11659353\n"
+            "!progress 11659353 7d\n"
+            "!progress 11659353 sos4\n"
+            "!progress 11659353 2026-08-30\n"
+            "```\n"
+            "**`!mana <lord_id>`**\n"
+            "Mana gathered this season, with rank and a rough cash value.\n\n"
+            "**`!farmcheck <id>`**  ·  aliases `!farm`, `!checkfarm`\n"
+            "Check whether a farm account is registered, and to whom."
+        )
+
+    elif key == "scans":
+        embed.description = (
+            "Built from the daily scans. Cover **all six servers**, so you can "
+            "look at rivals as easily as your own.\n\n"
+            "**Top**\n"
+            "`!topmerits` `!topdeads` `!topkills` `!topheal` `!topmana`\n"
+            "`!topt5` — T5 kills\n"
+            "`!topefficiency` — merits per 1M power\n\n"
+            "**Bottom**\n"
+            "`!lowdeads` `!lowmerits`\n\n"
+            "```\n"
+            "!topmerits              top 10, server 375\n"
+            "!topmerits 357 50       top 50 on YSS\n"
+            "!topdeads 357 25 7d     last 7 days\n"
+            "!topmerits all 20       every server\n"
+            "```\n"
+            "*Short aliases: `!tm` `!td` `!ld` `!lm` `!tk` `!th`*"
+        )
+
+    elif key == "merits":
+        embed.description = (
+            "Built from the merits export. Filtered to **≥50M power**.\n\n"
+            "**Troop types**\n"
+            "`!topinf` / `!lowinf` — Infantry\n"
+            "`!topcav` / `!lowcav` — Cavalry\n"
+            "`!toparcher` / `!lowarcher` — Archer\n"
+            "`!topmage` / `!lowmage` — Magic\n\n"
+            "**Utility**\n"
+            "`!toprssheal` / `!lowrssheal` — RSS healing (T4 + T5)\n"
+            "`!topbuild` / `!lowbuild` — Build time\n"
+            "`!topdest` / `!lowdest` — Destruction time\n\n"
+            "**Merit quality**\n"
+            "`!topreal` — merits earned against actual enemies\n"
+            "`!toptraders` — total minus enemy merits, with traded %\n\n"
+            "```\n"
+            "!topinf 50\n"
+            "!toptraders 357 25\n"
+            "!topmage 357 7d\n"
+            "```\n"
+            "*A server only works here if its export has been uploaded.*"
+        )
+
+    elif key == "war":
+        embed.description = (
+            "**`!matchups`**\n"
+            "Head-to-head between paired servers: power change, combat stats, "
+            "RSS healing spend, army composition and merit quality.\n\n"
+            "```\n"
+            "!matchups           all pairings\n"
+            "!matchups 357       just that pairing\n"
+            "!matchups 1d        yesterday — power loss\n"
+            "!matchups 357 7d\n"
+            "```\n"
+            "**`!groupleaderboard`**  ·  aliases `!gl`, `!grouplb`\n"
+            "Sun vs Moon player rankings.\n\n"
+            "**`!groupstats`**\n"
+            "Sun vs Moon team totals.\n\n"
+            "**`!duel`** · **`!duel2`**\n"
+            "The running 1v1 challenges.\n\n"
+            "**`!allmana`**\n"
+            "Alliance-wide mana gathered."
+        )
+
+    elif key == "args":
+        embed.description = (
+            "Most commands take the same arguments, **in any order**.\n\n"
+            "**🌐 Server** — defaults to 375\n"
+            "```\n"
+            "375  357  756  341  320      by number\n"
+            "s5                            single-digit servers\n"
+            "nvr  yss  sab                 by tag\n"
+            "all                           every server\n"
+            "```\n"
+            "**🔢 Count** — defaults to 10, max 100\n"
+            "```\n"
+            "!topmerits 50\n"
+            "```\n"
+            "**📅 Time window** — defaults to the whole season\n"
+            "```\n"
+            "1d  7d  14d       last N days\n"
+            "2w                last N weeks\n"
+            "2026-08-30        since a date\n"
+            "season            explicit season-to-date\n"
+            "```\n"
+            "**🗂️ Season** — defaults to the current one\n"
+            "```\n"
+            "!progress 123456 sos4\n"
+            "```\n"
+            "⚠️ A bare number is read as a **count**, so use `s5` for OMG.\n"
+            "⚠️ Windows only reach back as far as stored scans. If you ask for "
+            "more history than exists, it falls back and tells you."
+        )
+
+    elif key == "admin":
+        if not is_admin:
+            embed.description = (
+                "🔒 These commands need the scan-admin role.\n\n"
+                "Data is uploaded daily by the alliance leadership — the scan "
+                "CSV and the merits export. Everything else reads from that."
+            )
+            return embed
+
+        embed.description = (
+            "**📥 Daily uploads** — attach the file to the message\n"
+            "```\n"
+            "!ingest sos2              the scan CSV\n"
+            "!ingestmerits             375 merits export\n"
+            "!ingestmerits 357         a rival's export\n"
+            "```\n"
+            "Dates are read from the filename. Re-uploading the same date "
+            "replaces it, so a bad upload is safe to redo.\n\n"
+            "**🗂️ Managing stored data**\n"
+            "```\n"
+            "!scans sos2               list stored scan dates\n"
+            "!scans s375               list merits exports\n"
+            "!unscan sos2 2026-09-01   delete one day\n"
+            "!backfill sos2            import old sheet tabs\n"
+            "!resync                   force a cache refresh\n"
+            "```\n"
+            "**🚫 Exclusions** — dead accounts, removed from every stat\n"
+            "```\n"
+            "!exclude 12345678 dead since July\n"
+            "!unexclude 12345678\n"
+            "!excluded\n"
+            "```\n"
+            "⚠️ Always export merits with the **season start** as the start "
+            "date, or windows won't line up."
+        )
+
+    return embed
+
+
+def _help_home(is_admin=False):
+    embed = discord.Embed(
+        title="📜  NVR Bot",
+        description=(
+            "Pick a category below, or use `!help <command>` for one command.\n\n"
+            "**Quick start**\n"
+            "```\n"
+            "!progress 11659353        your stats\n"
+            "!topmerits 50             top 50 on 375\n"
+            "!topmerits 357 50         top 50 on YSS\n"
+            "!matchups 1d              yesterday's war\n"
+            "```"
+        ),
+        color=0x5865F2,
+    )
+    for key, cat in HELP_CATEGORIES.items():
+        if key == "admin" and not is_admin:
+            continue
+        embed.add_field(
+            name=f"{cat['emoji']} {cat['label']}",
+            value=cat["desc"],
+            inline=True,
+        )
+    embed.set_footer(text="Square brackets aren't typed — !topmerits 50, not !topmerits [50]")
+    return embed
+
+
+class HelpView(discord.ui.View):
+    def __init__(self, author_id, is_admin, timeout=300):
+        super().__init__(timeout=timeout)
+        self.author_id = author_id
+        self.is_admin = is_admin
+        self.message = None
+
+        options = [
+            discord.SelectOption(
+                label="Overview", value="home", emoji="📜",
+                description="Back to the start",
+            )
+        ]
+        for key, cat in HELP_CATEGORIES.items():
+            if key == "admin" and not is_admin:
+                continue
+            options.append(
+                discord.SelectOption(
+                    label=cat["label"], value=key,
+                    emoji=cat["emoji"], description=cat["desc"][:100],
+                )
+            )
+        self.select.options = options
+
+    async def interaction_check(self, interaction):
+        if interaction.user.id != self.author_id:
+            await interaction.response.send_message(
+                "Run `!help` yourself to browse it.", ephemeral=True
+            )
+            return False
+        return True
+
+    async def on_timeout(self):
+        self.clear_items()
+        if self.message:
+            try:
+                await self.message.edit(view=self)
+            except Exception:
+                pass
+
+    @discord.ui.select(placeholder="Choose a category…")
+    async def select(self, interaction, select):
+        value = select.values[0]
+        embed = _help_home(self.is_admin) if value == "home" else _help_embed(value, self.is_admin)
+        await interaction.response.edit_message(embed=embed, view=self)
+
+
+# -----------------------------------------------------------------------------
+# Per-command lookup: !help topmerits
+# -----------------------------------------------------------------------------
+
+COMMAND_HELP = {
+    "progress": ("📊 !progress <lord_id> [window] [season]",
+                 "Full profile with gains, ranks and merit breakdown.\n"
+                 "`!progress 11659353 7d`"),
+    "mana": ("💧 !mana <lord_id> [season]",
+             "Mana gathered this season, with rank."),
+    "topmerits": ("🧠 !topmerits [server] [count] [window]",
+                  "Highest merit gains.\n`!topmerits 357 50 7d`"),
+    "topdeads": ("💀 !topdeads [server] [count] [window]",
+                 "Most units lost.\n`!topdeads 357 25`"),
+    "lowdeads": ("🔻 !lowdeads [server] [count] [window]",
+                 "Fewest units lost — who isn't fighting."),
+    "lowmerits": ("🔻 !lowmerits [server] [count] [window]",
+                  "Lowest merit gains."),
+    "topkills": ("⚔️ !topkills [server] [count] [window]", "Most kills."),
+    "topheal": ("❤️ !topheal [server] [count] [window]", "Most units healed."),
+    "topmana": ("💧 !topmana [server] [count] [window]", "Most mana gathered."),
+    "topefficiency": ("📊 !topefficiency [server] [count] [window]",
+                      "Merits per 1M power — who punches above their weight."),
+    "toptraders": ("🤝 !toptraders [server] [count] [window]",
+                   "Total merits minus enemy merits, with traded %."),
+    "topreal": ("🎯 !topreal [server] [count] [window]",
+                "Merits earned against actual enemies."),
+    "topinf": ("⚔️ !topinf [server] [count] [window]", "Infantry merits."),
+    "matchups": ("🆚 !matchups [server] [window]",
+                 "Head-to-head war comparison.\n`!matchups 1d`"),
+    "groupleaderboard": ("🏆 !gl [window]", "Sun vs Moon rankings."),
+    "excluded": ("🚫 !excluded", "Accounts excluded from all stats."),
+    "scans": ("🗂️ !scans <dataset>", "Stored dates.\n`!scans sos2` · `!scans s375`"),
+}
+
+
+@bot.command(name="commands", aliases=["help", "info", "guide"])
+async def show_commands(ctx, query: str = None):
+    """Browse the bot's commands."""
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    is_admin = any(
+        r.id == SCAN_ADMIN_ROLE_ID for r in getattr(ctx.author, "roles", [])
+    )
+
+    # !help <command>
+    if query:
+        key = query.strip().lstrip("!").lower()
+        entry = COMMAND_HELP.get(key)
+        if entry is None:
+            cmd = bot.get_command(key)
+            if cmd:
+                key = cmd.name
+                entry = COMMAND_HELP.get(key)
+        if entry:
+            title, body = entry
+            embed = discord.Embed(title=title, description=body, color=0x5865F2)
+            embed.set_footer(text="!help for everything · !help args for argument syntax")
+            await ctx.send(embed=embed)
             return
+        await ctx.send(
+            f"❓ No help entry for `{query}`. Try `!help` to browse."
+        )
+        return
 
-        help_text = """
-📜 **NVR Bot – Available Commands**
-You DONT need the [].
-
-**📊 Progress & Player Stats**
-- `!progress [lord_id] [season]` — Full profile: power, kills, deads, heals, mana (+gains & rank)
-- `!stats [lord_id] [season]` — Quick snapshot: power, kills, heals, deads (+gain & rank)
-- `!kills [lord_id] [season]` — Kill breakdown by troop tier
-- `!mana [lord_id] [season]` — Mana gathered (+gain & rank)
-
-**🏆 Leaderboards (Main Season)**
-- `!topmana` — Top mana gathered (delta)
-- `!topheal` — Top units healed
-- `!topkills` — Top kill gainers
-- `!topdeads` — Highest dead units
-- `!lowdeads` — Lowest dead units
-- `!topmerits [X]` — Top X by merits gain (optional season or alliance filter)
-- `!lowmerits [X]` — Bottom X by merits gain (optional season or alliance filter)
-
-**👑 Server 375 Leaderboards (≥ 50M Power)**
-*Optional limit `[amount]` up to 100 (default: 10). Example: `!topinf 50`*
-- `!topinf [N]` / `!lowinf [N]` — Infantry Merits
-- `!topcav [N]` / `!lowcav [N]` — Cavalry Merits
-- `!toparcher [N]` / `!lowarcher [N]` — Archer Merits
-- `!topmage [N]` / `!lowmage [N]` — Magic Merits
-- `!toprssheal [N]` / `!lowrssheal [N]` — RSS Healing
-- `!topbuild [N]` / `!lowbuild [N]` — Build Time
-- `!topdest [N]` / `!lowdest [N]` — Destruction Time
-
-**🆚 Matchups & Server Stats**
-- `!matchups [season]` — Summary of server war stats (kills, deads, merits)
-
-**🗂️ Season Support**
-You can append an optional season key like `sos4` or `sos2` etc. to pull archived data.
-> Example: `!progress 123456 sos4`  
-If no season is provided, the bot uses the current season automatically.
-"""
-        await ctx.send(help_text)
+    view = HelpView(ctx.author.id, is_admin)
+    message = await ctx.send(embed=_help_home(is_admin), view=view)
+    view.message = message
 
 bot.run(TOKEN)
