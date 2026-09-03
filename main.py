@@ -378,30 +378,28 @@ async def _load_season_from_sheets(season_key):
 
 
 async def _load_season_from_db(season_key):
-    dates = await db.get_latest_dates(season_key, n=2)
-    if len(dates) < 2:
-        return None  # not enough history yet
-
-    latest_date, prev_date = dates[0], dates[1]
+    dates = await db.get_latest_dates(season_key, n=1)
+    if not dates:
+        return None
+ 
+    latest_date = dates[0]
     oldest_date = await db.get_oldest_date(season_key)
-
+ 
+    if oldest_date == latest_date:
+        return None  # only one scan — no deltas possible yet
+ 
     latest_data = await db.get_scan(season_key, latest_date)
-    prev_data   = await db.get_scan(season_key, prev_date)
-    oldest_data = (
-        latest_data if oldest_date == latest_date
-        else await db.get_scan(season_key, oldest_date)
-    )
-
+    oldest_data = await db.get_scan(season_key, oldest_date)
+ 
     return {
         "latest":       latest_data,
-        "prev":         prev_data,
+        "prev":         oldest_data,              # <-- season start
         "oldest":       oldest_data,
         "latest_title": latest_date.isoformat(),
-        "prev_title":   prev_date.isoformat(),
+        "prev_title":   oldest_date.isoformat(),
         "oldest_title": oldest_date.isoformat(),
         "source":       "database",
     }
-
 
 async def refresh_season_cache():
     """
@@ -583,6 +581,127 @@ async def backfill_cmd(ctx, season: str, confirm: str = None):
     await status.edit(content=None, embed=embed)
 
     await refresh_season_cache()
+
+def parse_window(token):
+    """
+    Recognise a window argument. Returns one of:
+        ("days", 7)                -> "7d" / "7days" / "7"  (only if suffixed)
+        ("date", date(2026,8,15))  -> "2026-08-15"
+        ("season", None)           -> "season" / "all" / "full"
+        None                       -> not a window token
+    """
+    if not token:
+        return None
+    t = str(token).strip().lower()
+ 
+    if t in ("season", "all", "full", "total"):
+        return ("season", None)
+ 
+    m = re.fullmatch(r"(\d+)\s*d(?:ays?)?", t)
+    if m:
+        return ("days", int(m.group(1)))
+ 
+    m = re.fullmatch(r"(\d+)\s*w(?:eeks?)?", t)
+    if m:
+        return ("days", int(m.group(1)) * 7)
+ 
+    m = re.fullmatch(r"(20\d{2})-(\d{2})-(\d{2})", t)
+    if m:
+        try:
+            return ("date", date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
+        except ValueError:
+            return None
+ 
+    return None
+ 
+ 
+async def get_window_data(season, window=None):
+    """
+    Return {latest, prev, latest_title, prev_title} for a comparison window.
+ 
+    window=None      -> season-to-date (uses the cache, instant)
+    window="7d"      -> latest scan vs the nearest scan 7 days earlier
+    window="1d"      -> latest scan vs the previous day's scan
+    window=a date    -> latest scan vs that specific date
+ 
+    Returns None if there isn't enough data to build the window.
+    """
+    parsed = parse_window(window) if window else None
+ 
+    # Season-to-date: just use the cache, no queries needed
+    if parsed is None or parsed[0] == "season":
+        cached = bot_cache["seasons"].get(season)
+        if not cached:
+            return None
+        return {
+            "latest":       cached["latest"],
+            "prev":         cached["prev"],
+            "latest_title": cached["latest_title"],
+            "prev_title":   cached["prev_title"],
+            "label":        "Season to date",
+        }
+ 
+    dates = await db.get_latest_dates(season, n=1)
+    if not dates:
+        return None
+    latest_date = dates[0]
+ 
+    if parsed[0] == "days":
+        target = latest_date - timedelta(days=parsed[1])
+        label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+    else:
+        target = parsed[1]
+        label = f"Since {target}"
+ 
+    prev_date = await db.nearest_date_on_or_before(season, target)
+ 
+    # Nothing that far back — fall back to the earliest scan we have
+    if prev_date is None:
+        prev_date = await db.get_oldest_date(season)
+        label += " (limited by available history)"
+ 
+    if prev_date is None or prev_date == latest_date:
+        return None
+ 
+    latest_data = await db.get_scan(season, latest_date)
+    prev_data   = await db.get_scan(season, prev_date)
+    if not latest_data or not prev_data:
+        return None
+ 
+    return {
+        "latest":       latest_data,
+        "prev":         prev_data,
+        "latest_title": latest_date.isoformat(),
+        "prev_title":   prev_date.isoformat(),
+        "label":        label,
+    }
+ 
+ 
+def split_args(args, valid_seasons):
+    """
+    Pull a season and a window out of loose trailing arguments, in any order.
+ 
+        !progress 123 1d
+        !progress 123 sos4
+        !progress 123 sos4 7d
+        !progress 123 7d sos4
+ 
+    Returns (season, window, leftovers).
+    """
+    season = DEFAULT_SEASON
+    window = None
+    leftovers = []
+ 
+    for a in args:
+        t = str(a).strip().lower()
+        if t in valid_seasons:
+            season = t
+        elif parse_window(t) is not None:
+            window = t
+        else:
+            leftovers.append(a)
+ 
+    return season, window, leftovers
         
 @bot.command()
 async def totaldeads(ctx, *args):
