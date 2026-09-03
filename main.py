@@ -417,21 +417,6 @@ async def refresh_season_cache():
         except Exception as e:
             print(f"⚠️ Failed to cache season '{season_key}': {e}")
 
-@tasks.loop(minutes=10)
-async def fetch_sheets_background():
-    try:
-        print("🔄 [Background Task] Refreshing caches...")
-        try:
-            sheet_375 = await asyncio.to_thread(client.open, SERVER_375_SHEET)
-            bot_cache["375_data"] = await asyncio.to_thread(sheet_375.sheet1.get_all_values)
-        except Exception as e:
-            print(f"⚠️ Failed to refresh Server 375 sheet: {e}")
-
-        await refresh_season_cache()
-        print("✅ [Background Task] Caches refreshed.")
-    except Exception as e:
-        print(f"❌ [Background Task] Critical Error: {e}")
-
 # -----------------------------------------------------------------------------
 # BACKFILL — import existing Google Sheets tabs into the database
 # -----------------------------------------------------------------------------
@@ -702,6 +687,218 @@ def split_args(args, valid_seasons):
             leftovers.append(a)
  
     return season, window, leftovers
+
+# =============================================================================
+# SERVER 375 EXPORT → DATABASE  (replaces sheet375_ingest.py entirely)
+# =============================================================================
+# Paste into main.py. Requires the db.py additions from db_375.py.
+#
+# Workflow: export from the in-game tool with start = SEASON_START_375 and
+# end = today, then drop the .xlsx into the admin channel with !ingest375.
+# No more pasting into the Google Sheet.
+# =============================================================================
+ 
+ 
+# -----------------------------------------------------------------------------
+# 1. CONFIG
+# -----------------------------------------------------------------------------
+ 
+DATASET_375 = "s375"
+ID_COLUMN_375 = "Character ID"
+ 
+# The date your season started. Every export should use this as its start date
+# so the files stay cumulative and comparable. Ingest warns if one doesn't.
+SEASON_START_375 = date(2026, 8, 28)
+ 
+ 
+# -----------------------------------------------------------------------------
+# 2. INGEST
+# -----------------------------------------------------------------------------
+ 
+@bot.command(name="ingest375", aliases=["i375"])
+@scan_admin()
+async def ingest375_cmd(ctx, *args):
+    """
+    Upload the daily Server 375 export (.xlsx or .csv).
+ 
+        !ingest375                              dates read from the filename
+        !ingest375 2026-09-03                   explicit end date
+        !ingest375 2026-08-28 2026-09-03        explicit start and end
+ 
+    Re-uploading the same end date replaces it.
+    """
+    async with ctx.typing():
+        if not ctx.message.attachments:
+            await ctx.send("❌ Attach the export file to the same message.")
+            return
+ 
+        attachment = ctx.message.attachments[0]
+ 
+        # Work out the period
+        file_start, file_end = db.date_range_from_filename(attachment.filename)
+        explicit = []
+        for a in args:
+            try:
+                explicit.append(datetime.strptime(a.strip(), "%Y-%m-%d").date())
+            except ValueError:
+                await ctx.send(f"❌ `{a}` isn't a valid `YYYY-MM-DD` date.")
+                return
+ 
+        if len(explicit) >= 2:
+            period_start, period_end = explicit[0], explicit[1]
+        elif len(explicit) == 1:
+            period_start, period_end = (file_start or SEASON_START_375), explicit[0]
+        else:
+            period_start = file_start or SEASON_START_375
+            period_end = file_end or datetime.now(UTC).date()
+ 
+        if period_end < period_start:
+            await ctx.send("❌ The end date is before the start date.")
+            return
+ 
+        try:
+            raw = await attachment.read()
+            headers, rows = db.parse_scan_file(raw, attachment.filename)
+            result = await db.ingest_period(
+                season=DATASET_375,
+                period_start=period_start,
+                period_end=period_end,
+                headers=headers,
+                rows=rows,
+                id_column=ID_COLUMN_375,
+                source_file=attachment.filename,
+                ingested_by=str(ctx.author),
+            )
+        except Exception as e:
+            await ctx.send(f"❌ **Ingest failed:** {e}")
+            return
+ 
+        embed = discord.Embed(
+            title="✅ Server 375 export stored",
+            description=f"**{period_start}** → **{period_end}**",
+            color=discord.Color.green(),
+        )
+        embed.add_field(name="Players", value=f"{result['rows']:,}", inline=True)
+        embed.add_field(name="Columns", value=str(result["columns"]), inline=True)
+        embed.add_field(name="File", value=f"`{attachment.filename}`", inline=False)
+ 
+        warnings = []
+        if result["replaced"] is not None:
+            warnings.append(f"↻ Replaced the existing export for {period_end}.")
+        if period_start != SEASON_START_375:
+            warnings.append(
+                f"⚠️ Start date is **{period_start}**, expected "
+                f"**{SEASON_START_375}**. Windows only work if every export "
+                f"uses the same start date — re-export if this was a mistake."
+            )
+        if result["duplicate_ids"]:
+            warnings.append(f"⚠️ {result['duplicate_ids']} duplicate Character ID(s).")
+        if warnings:
+            embed.add_field(name="Notes", value="\n".join(warnings), inline=False)
+ 
+        await ctx.send(embed=embed)
+        await load_375_cache()
+ 
+ 
+# -----------------------------------------------------------------------------
+# 3. CACHE
+# -----------------------------------------------------------------------------
+ 
+async def load_375_cache():
+    """
+    bot_cache["375_data"] holds SEASON-TO-DATE values — i.e. the newest export
+    exactly as uploaded, since those files are already cumulative.
+    Falls back to the live Google Sheet if nothing is stored yet.
+    """
+    try:
+        data = await db.materialize_period(DATASET_375, ID_COLUMN_375)
+        if data:
+            dates = await db.get_latest_dates(DATASET_375, n=1)
+            bot_cache["375_data"] = data
+            bot_cache["375_date"] = dates[0] if dates else None
+            return
+    except Exception as e:
+        print(f"⚠️ Could not load 375 data from DB: {e}")
+ 
+    try:
+        sheet = await asyncio.to_thread(client.open, SERVER_375_SHEET)
+        bot_cache["375_data"] = await asyncio.to_thread(sheet.sheet1.get_all_values)
+        bot_cache["375_date"] = None
+    except Exception as e:
+        print(f"⚠️ Failed to refresh Server 375 sheet: {e}")
+ 
+ 
+@tasks.loop(minutes=10)
+async def fetch_sheets_background():
+    try:
+        print("🔄 [Background Task] Refreshing caches...")
+        await load_375_cache()
+        await refresh_season_cache()
+        print("✅ [Background Task] Caches refreshed.")
+    except Exception as e:
+        print(f"❌ [Background Task] Critical Error: {e}")
+ 
+ 
+# -----------------------------------------------------------------------------
+# 4. WINDOWS — the same window argument drives BOTH datasets
+# -----------------------------------------------------------------------------
+ 
+async def get_375_window(window=None):
+    """
+    Return 375 data for a window, in the usual [headers, row, ...] shape.
+ 
+    window=None / "season"  -> the latest export as-is (season to date)
+    window="5d"             -> latest MINUS the export from 5 days ago
+    window="2026-08-30"     -> latest MINUS that date's export
+ 
+    Returns (data, label) or (None, reason).
+    """
+    parsed = parse_window(window) if window else None
+ 
+    dates = await db.get_latest_dates(DATASET_375, n=1)
+    if not dates:
+        return None, "No 375 exports stored yet."
+    end_date = dates[0]
+ 
+    if parsed is None or parsed[0] == "season":
+        data = await db.materialize_period(DATASET_375, ID_COLUMN_375, end_date=end_date)
+        return data, "Season to date"
+ 
+    if parsed[0] == "days":
+        target = end_date - timedelta(days=parsed[1])
+        label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
+    else:
+        target = parsed[1]
+        label = f"Since {target}"
+ 
+    base_date = await db.nearest_date_on_or_before(DATASET_375, target)
+ 
+    if base_date is None or base_date == end_date:
+        data = await db.materialize_period(DATASET_375, ID_COLUMN_375, end_date=end_date)
+        return data, "Season to date (not enough 375 history for that window)"
+ 
+    data = await db.materialize_period(
+        DATASET_375, ID_COLUMN_375, base_date=base_date, end_date=end_date
+    )
+    return data, f"{label} ({base_date} → {end_date})"
+ 
+ 
+async def get_combined_window(season, window=None):
+    """
+    One call that resolves BOTH datasets for the same window, so a command can
+    show scan stats and 375 stats over a matching period.
+ 
+    Returns a dict, or None if the season data isn't available.
+    """
+    win = await get_window_data(season, window)
+    if win is None:
+        return None
+ 
+    data_375, label_375 = await get_375_window(window)
+ 
+    win["data_375"] = data_375
+    win["label_375"] = label_375
+    return win
         
 @bot.command()
 async def totaldeads(ctx, *args):
@@ -3833,6 +4030,7 @@ def role_check():
 @bot.event
 async def on_ready():
     await db.init_db() 
+    await db.upgrade_schema()
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
     await bot.load_extension("activity_checks")
