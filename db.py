@@ -218,7 +218,7 @@ async def ingest_scan(season, scan_date, headers, rows,
 
     Returns a dict summarising what happened.
     """
-        if id_column:
+    if id_column:
         lowered = [h.strip().lower() for h in headers]
         target = id_column.strip().lower()
         id_idx = lowered.index(target) if target in lowered else None
@@ -334,6 +334,15 @@ async def list_scan_dates(season, limit=None):
         q += f" LIMIT {int(limit)}"
     async with pool().acquire() as conn:
         return await conn.fetch(q, season)
+
+
+async def has_scan(season, scan_date):
+    """True if a scan already exists for this dataset and date."""
+    async with pool().acquire() as conn:
+        return await conn.fetchval(
+            "SELECT 1 FROM scan_meta WHERE season = $1 AND scan_date = $2",
+            season, scan_date,
+        ) is not None
 
 
 async def get_scan(season, scan_date):
@@ -454,7 +463,6 @@ async def dead_gains(season, from_date, to_date, min_power=0, server=None, limit
 # Requires: openpyxl  (add to requirements.txt)
 # =============================================================================
 
-import openpyxl
 
 
 # -----------------------------------------------------------------------------
