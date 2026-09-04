@@ -644,45 +644,84 @@ async def backfill_cmd(ctx, season: str, confirm: str = None):
 
     await refresh_season_cache()
 
-def parse_window(token):
+parse_window = lb.parse_window
+
+async def resolve_window_dates(dataset, window=None):
     """
-    Recognise a window argument. Returns one of:
-        ("days", 7)                -> "7d" / "7days" / "7"  (only if suffixed)
-        ("date", date(2026,8,15))  -> "2026-08-15"
-        ("season", None)           -> "season" / "all" / "full"
-        None                       -> not a window token
+    Work out which two stored dates a window refers to.
+ 
+    Returns (base_date, end_date, label) or (None, None, reason).
+    base_date is None for a plain season-to-date query on the merits data,
+    where the newest file already IS the season total.
     """
-    if not token:
-        return None
-    t = str(token).strip().lower()
+    dates = await db.get_latest_dates(dataset, n=1)
+    if not dates:
+        return None, None, f"No data stored for `{dataset}`."
+    newest = dates[0]
  
-    if t in ("season", "all", "full", "total"):
-        return ("season", None)
+    parsed = lb.parse_window(window) if window else None
  
-    m = re.fullmatch(r"(\d+)\s*d(?:ays?)?", t)
-    if m:
-        return ("days", int(m.group(1)))
+    if parsed is None or parsed[0] == "season":
+        oldest = await db.get_oldest_date(dataset)
+        return oldest, newest, "Season to date"
  
-    m = re.fullmatch(r"(\d+)\s*w(?:eeks?)?", t)
-    if m:
-        return ("days", int(m.group(1)) * 7)
+    kind, arg = parsed
  
-    m = re.fullmatch(r"(20\d{2})-(\d{2})-(\d{2})", t)
-    if m:
-        try:
-            return ("date", date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
-        except ValueError:
-            return None
+    if kind == "days":
+        target = newest - timedelta(days=arg)
+        end_date = newest
+        label = f"Last {arg} day{'s' if arg != 1 else ''}"
  
-    return None
+    elif kind == "since":
+        target = arg
+        end_date = newest
+        label = f"Since {arg}"
  
+    elif kind == "on":
+        # What was generated ON that day: that day minus the day before.
+        end_date = await db.nearest_date_on_or_before(dataset, arg)
+        if end_date is None:
+            return None, None, f"No data stored on or before {arg}."
+        target = end_date - timedelta(days=1)
+        label = f"On {end_date}"
+ 
+    elif kind == "range":
+        start, end = arg
+        end_date = await db.nearest_date_on_or_before(dataset, end)
+        if end_date is None:
+            return None, None, f"No data stored on or before {end}."
+        target = start
+        label = f"{start} → {end}"
+ 
+    else:
+        return None, None, "Unrecognised window."
+ 
+    base_date = await db.nearest_date_on_or_before(dataset, target)
+ 
+    if base_date is None:
+        base_date = await db.get_oldest_date(dataset)
+        label += " (limited by available history)"
+ 
+    if base_date is None or base_date == end_date:
+        return None, None, (
+            f"Not enough history for that window — only `{end_date}` is stored "
+            f"at or before it."
+        )
+ 
+    # Show the actual dates used when they differ from what was asked for
+    if kind in ("days", "since", "range"):
+        label += f" · {base_date} → {end_date}"
+ 
+    return base_date, end_date, label
+
 async def get_window_data(season, window=None, include_excluded=False):
     """
     Returns {latest, prev, latest_title, prev_title, label} for a window,
     with excluded IDs removed.
     """
-    parsed = parse_window(window) if window else None
+    parsed = lb.parse_window(window) if window else None
  
+    # Season-to-date reads straight from the cache — no queries needed
     if parsed is None or parsed[0] == "season":
         cached = bot_cache["seasons"].get(season)
         if not cached:
@@ -691,30 +730,15 @@ async def get_window_data(season, window=None, include_excluded=False):
         latest_title, prev_title = cached["latest_title"], cached["prev_title"]
         label = "Season to date"
     else:
-        dates = await db.get_latest_dates(season, n=1)
-        if not dates:
-            return None
-        latest_date = dates[0]
- 
-        if parsed[0] == "days":
-            target = latest_date - timedelta(days=parsed[1])
-            label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
-        else:
-            target = parsed[1]
-            label = f"Since {target}"
- 
-        prev_date = await db.nearest_date_on_or_before(season, target)
-        if prev_date is None:
-            prev_date = await db.get_oldest_date(season)
-            label += " (limited by available history)"
-        if prev_date is None or prev_date == latest_date:
+        base_date, end_date, label = await resolve_window_dates(season, window)
+        if base_date is None:
             return None
  
-        latest = await db.get_scan(season, latest_date)
-        prev   = await db.get_scan(season, prev_date)
+        latest = await db.get_scan(season, end_date)
+        prev   = await db.get_scan(season, base_date)
         if not latest or not prev:
             return None
-        latest_title, prev_title = latest_date.isoformat(), prev_date.isoformat()
+        latest_title, prev_title = end_date.isoformat(), base_date.isoformat()
  
     if not include_excluded:
         latest = strip_excluded(latest, "lord_id")
@@ -1076,33 +1100,33 @@ async def ingest_merits_cmd(ctx, *args):
 async def get_merits_window(server, window=None, include_excluded=False):
     """Returns (table, label) for a server's merits data over a window."""
     dataset = merits_dataset(server)
+    parsed = lb.parse_window(window) if window else None
+ 
     dates = await db.get_latest_dates(dataset, n=1)
     if not dates:
         return None, f"No merits export stored for {lb.server_label(server)}."
-    end_date = dates[0]
+    newest = dates[0]
  
-    parsed = lb.parse_window(window) if window else None
- 
+    # Season to date: the newest export already IS the season total
     if parsed is None or parsed[0] == "season":
-        data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
-        label = f"Season to date · through {end_date}"
+        data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=newest)
+        label = f"Season to date · through {newest}"
     else:
-        if parsed[0] == "days":
-            target = end_date - timedelta(days=parsed[1])
-            label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
-        else:
-            target = parsed[1]
-            label = f"Since {target}"
- 
-        base_date = await db.nearest_date_on_or_before(dataset, target)
-        if base_date is None or base_date == end_date:
-            data = await db.materialize_period(dataset, ID_COLUMN_MERITS, end_date=end_date)
-            label = "Season to date · not enough history for that window"
-        else:
+        base_date, end_date, label = await resolve_window_dates(dataset, window)
+        if base_date is None:
+            # Fall back rather than erroring, so a window that works on the
+            # scans doesn't break a command just because merits lack history
             data = await db.materialize_period(
-                dataset, ID_COLUMN_MERITS, base_date=base_date, end_date=end_date
+                dataset, ID_COLUMN_MERITS, end_date=newest
             )
-            label = f"{label} · {base_date} → {end_date}"
+            return (
+                strip_excluded(data, ID_COLUMN_MERITS) if data and not include_excluded else data,
+                f"Season to date · {label}",
+            )
+ 
+        data = await db.materialize_period(
+            dataset, ID_COLUMN_MERITS, base_date=base_date, end_date=end_date
+        )
  
     if data and not include_excluded:
         data = strip_excluded(data, ID_COLUMN_MERITS)
