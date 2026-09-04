@@ -2930,12 +2930,10 @@ async def progress(ctx, lord_id: str, *args):
             def rk(r):
                 return f" `#{r}`" if r else ""
 
-            has_window = window is not None
-
             def stat_field(total, gain, rank_total_=None, rank_gain_=None):
-                """Total on top. Gain underneath, only when a window was given."""
+                """Total on top. Gain underneath, unless it's the same number."""
                 line = f"{total:,}{rk(rank_total_)}"
-                if has_window:
+                if gain != total:
                     line += f"\n**+{lb.fmt(gain)}**{rk(rank_gain_)}"
                 return line
 
