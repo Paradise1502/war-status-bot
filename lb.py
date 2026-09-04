@@ -291,25 +291,61 @@ TAG_TO_SERVER = {v.lower(): k for k, v in SERVER_NAMES.items()}
 
 
 def parse_window(token):
+    """
+    Recognise a window argument. Returns one of:
+        ("season", None)                    season / all / full
+        ("days", 7)                         7d / 2w
+        ("since", date)                     2026-08-15
+        ("on", date)                        on:2026-09-02 / @2026-09-02
+        ("range", (start, end))             2026-09-01..2026-09-04
+        None                                not a window token
+    """
     if not token:
         return None
     t = str(token).strip().lower()
+ 
     if t in ("season", "all-season", "full", "total"):
         return ("season", None)
+ 
+    def as_date(s):
+        m = re.fullmatch(r"(20\d{2})-(\d{1,2})-(\d{1,2})", s.strip())
+        if not m:
+            return None
+        try:
+            return date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        except ValueError:
+            return None
+ 
+    # Range: 2026-09-01..2026-09-04  (also accepts .. / ... / :)
+    m = re.fullmatch(r"(20\d{2}-\d{1,2}-\d{1,2})\s*(?:\.{2,3}|:|to)\s*"
+                     r"(20\d{2}-\d{1,2}-\d{1,2})", t)
+    if m:
+        start, end = as_date(m.group(1)), as_date(m.group(2))
+        if start and end:
+            if start > end:
+                start, end = end, start
+            return ("range", (start, end))
+        return None
+ 
+    # Single day: on:2026-09-02 / on2026-09-02 / @2026-09-02
+    m = re.fullmatch(r"(?:on:?|@)(20\d{2}-\d{1,2}-\d{1,2})", t)
+    if m:
+        d = as_date(m.group(1))
+        return ("on", d) if d else None
+ 
     m = re.fullmatch(r"(\d+)\s*d(?:ays?)?", t)
     if m:
         return ("days", int(m.group(1)))
+ 
     m = re.fullmatch(r"(\d+)\s*w(?:eeks?)?", t)
     if m:
         return ("days", int(m.group(1)) * 7)
-    m = re.fullmatch(r"(20\d{2})-(\d{2})-(\d{2})", t)
-    if m:
-        try:
-            return ("date", date(int(m.group(1)), int(m.group(2)), int(m.group(3))))
-        except ValueError:
-            return None
+ 
+    d = as_date(t)
+    if d:
+        return ("since", d)
+ 
     return None
-
 
 def parse_server(token):
     """Return a server id string, 'all', or None if this isn't a server token."""
