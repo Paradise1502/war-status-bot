@@ -3457,7 +3457,7 @@ def section(rows, divider=True):
     return body + (f"\n\u200b\n{DIVIDER}" if divider else "")
 
 
-def vs_bar(a, b, left="🟥", right="🟦"):
+def vs_bar(a, b, left="🟦", right="🟥"):
     total = abs(a) + abs(b)
     if total <= 0:
         return "⬛" * BAR_WIDTH
@@ -3565,7 +3565,7 @@ async def matchups(ctx, *args):
                 embed = discord.Embed(
                     title=f"⚔️ {side_name(team_a)}  vs  {side_name(team_b)}",
                     description=(
-                        f"🟥 {side_detail(team_a)}  ·  🟦 {side_detail(team_b)}\n"
+                        f"🟦 {side_detail(team_a)}  ·  🟥 {side_detail(team_b)}\n"
                         f"**{win['label']}** · `{cfg['label']}` · *≥50M power only*"
                     ),
                     color=lb.server_color(team_a[0]),
@@ -3603,9 +3603,9 @@ async def matchups(ctx, *args):
                         value=section([
                             vs_row("💧", "Est. Mana Cost",
                                    ma["heal_mana"], mb["heal_mana"]),
-                            vs_row("🟥", "T5 Healed",
+                            vs_row("5️⃣", "T5 Healed",
                                    ma["t5_healed"], mb["t5_healed"]),
-                            vs_row("🟦", "T4 Healed",
+                            vs_row("4️⃣", "T4 Healed",
                                    ma["t4_healed"], mb["t4_healed"]),
                             f"*Estimated at {MANA_PER_T5:.0f} mana per T5 · "
                             f"{MANA_PER_T4:.0f} per T4*",
@@ -3644,8 +3644,8 @@ async def matchups(ctx, *args):
                         name=f"🧪  M E R I T S   —   {have} only",
                         value=section([
                             f"💧 **Est. Healing Mana:** {got['heal_mana']:,}\n"
-                            f"🟥 **T5 Healed:** {got['t5_healed']:,}\n"
-                            f"🟦 **T4 Healed:** {got['t4_healed']:,}",
+                            f"5️⃣ **T5 Healed:** {got['t5_healed']:,}\n"
+                            f"4️⃣ **T4 Healed:** {got['t4_healed']:,}",
                             "\n".join(
                                 f"{emoji} **{label}:** {got[key]:,}"
                                 for key, emoji, label, _ in MERIT_STATS
