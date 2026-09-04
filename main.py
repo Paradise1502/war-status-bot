@@ -992,8 +992,6 @@ async def before_utc_update():
 # -----------------------------------------------------------------------------
 
 ID_COLUMN_MERITS = "Character ID"
-SEASON_START = date(2026, 8, 28)
-
 
 def merits_dataset(server):
     """
