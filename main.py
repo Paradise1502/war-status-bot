@@ -59,8 +59,8 @@ ALL_SERVERS = {
 }
 
 SERVER_COLORS = {
-    "375": 0xE74C3C,   # red — home
-    "357": 0x3498DB,   # blue — main rival
+    "375": 0x3498DB,   # blue — home
+    "357": 0xE74C3C,   
     "756": 0xE67E22,
     "341": 0x9B59B6,
     "320": 0x2ECC71,
@@ -2915,14 +2915,29 @@ async def progress(ctx, lord_id: str, *args):
 
             r_power  = rank_total(power_idx)
             r_merits = rank_total(merit_idx)
+            rm_gain  = rank_gain(merit_idx)
             r_ratio  = rank_ratio() 
             r_kills  = rank_gain(kills_idx)
             r_dead   = rank_gain(dead_idx)
             r_heal   = rank_gain(healed_idx)
             r_mana   = rank_gain(mana_g_idx)
 
+            rt_kills = rank_total(kills_idx)
+            rt_dead  = rank_total(dead_idx)
+            rt_heal  = rank_total(healed_idx)
+            rt_mana  = rank_total(mana_g_idx)
+
             def rk(r):
                 return f" `#{r}`" if r else ""
+
+            has_window = window is not None
+
+            def stat_field(total, gain, rank_total_=None, rank_gain_=None):
+                """Total on top. Gain underneath, only when a window was given."""
+                line = f"{total:,}{rk(rank_total_)}"
+                if has_window:
+                    line += f"\n**+{lb.fmt(gain)}**{rk(rank_gain_)}"
+                return line
 
             # --- Build the embed ---------------------------------------------
 
@@ -2938,15 +2953,27 @@ async def progress(ctx, lord_id: str, *args):
 
             embed.add_field(
                 name="🟩 Highest Power",
-                value=f"{power_now:,}" + (f" (+{power_gain:,})" if power_gain else "") + rk(r_power),
+                value=f"{power_now:,}{rk(r_power)}" + (f"\n**+{lb.fmt(power_gain)}**" if power_gain else ""),
                 inline=False,
             )
-            embed.add_field(name="🧠 Total Merits", value=f"{merits_now:,}{rk(r_merits)}", inline=True)
-            embed.add_field(name="📊 Merit Ratio", value=f"{merit_ratio:.2f}%{rk(r_ratio)}", inline=True)
-            embed.add_field(name="💧 Mana", value=f"+{mana_gain:,}{rk(r_mana)}", inline=True)
-            embed.add_field(name="⚔️ Kills", value=f"+{kills_gain:,}{rk(r_kills)}", inline=True)
-            embed.add_field(name="💀 Deads", value=f"+{dead_gain:,}{rk(r_dead)}", inline=True)
-            embed.add_field(name="❤️ Healed", value=f"+{heal_gain:,}{rk(r_heal)}", inline=True)
+            embed.add_field(name="🧠 Merits",
+                            value=stat_field(merits_now, merits_gain, r_merits, rm_gain),
+                            inline=True)
+            embed.add_field(name="📊 Merit Ratio",
+                            value=f"{merit_ratio:.2f}%{rk(r_ratio)}",
+                            inline=True)
+            embed.add_field(name="💧 Mana",
+                            value=stat_field(val(row_latest, mana_g_idx), mana_gain, rt_mana, r_mana),
+                            inline=True)
+            embed.add_field(name="⚔️ Kills",
+                            value=stat_field(val(row_latest, kills_idx), kills_gain, rt_kills, r_kills),
+                            inline=True)
+            embed.add_field(name="💀 Deads",
+                            value=stat_field(val(row_latest, dead_idx), dead_gain, rt_dead, r_dead),
+                            inline=True)
+            embed.add_field(name="❤️ Healed",
+                            value=stat_field(val(row_latest, healed_idx), heal_gain, rt_heal, r_heal),
+                            inline=True)
 
             embed.add_field(
                 name="\u200b",
