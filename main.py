@@ -3763,17 +3763,20 @@ def _help_embed(key, is_admin=False):
     if key == "player":
         embed.description = (
             "**`!progress <lord_id>`**  ·  alias `!stats`\n"
-            "Full profile: power, merits, kills, deads, healing, mana — with "
-            "gains and server ranks. Also shows troop-type merits, RSS healing "
-            "and build stats if a merits export exists for that player's server.\n\n"
+            "Full profile: power, merits, kills, deads, healing, mana. Each "
+            "stat shows the **total** on top and the **gain** for your chosen "
+            "window underneath, both with server ranks. Troop-type merits, RSS "
+            "healing and build stats appear too if a merits export exists for "
+            "that player's server.\n\n"
             "```\n"
-            "!progress 11659353\n"
-            "!progress 11659353 7d\n"
-            "!progress 11659353 sos4\n"
-            "!progress 11659353 2026-08-30\n"
+            "!progress 11659353                      season to date\n"
+            "!progress 11659353 7d                   last 7 days\n"
+            "!progress 11659353 on:2026-09-02        that day only\n"
+            "!progress 11659353 2026-09-01..2026-09-04\n"
+            "!progress 11659353 sos4                 a different season\n"
             "```\n"
             "**`!mana <lord_id>`**\n"
-            "Mana gathered this season, with rank and a rough cash value.\n\n"
+            "Mana gathered this season, with rank and a rough cash value."
         )
 
     elif key == "scans":
@@ -3824,10 +3827,10 @@ def _help_embed(key, is_admin=False):
             "Head-to-head between paired servers: power change, combat stats, "
             "RSS healing spend, army composition and merit quality.\n\n"
             "```\n"
-            "!matchups           all pairings\n"
-            "!matchups 357       just that pairing\n"
+            "!matchups           NVR vs YSS\n"
+            "!matchups all       every pairing\n"
             "!matchups 1d        yesterday — power loss\n"
-            "!matchups 357 7d\n"
+            "!matchups 341       a different pairing\n"
             "```\n"
             "**`!groupleaderboard`**  ·  aliases `!gl`, `!grouplb`\n"
             "Sun vs Moon player rankings.\n\n"
@@ -3855,18 +3858,23 @@ def _help_embed(key, is_admin=False):
             "```\n"
             "**📅 Time window** — defaults to the whole season\n"
             "```\n"
-            "1d  7d  14d       last N days\n"
-            "2w                last N weeks\n"
-            "2026-08-30        since a date\n"
-            "season            explicit season-to-date\n"
+            "1d  7d  14d                  last N days\n"
+            "2w                           last N weeks\n"
+            "2026-08-30                   since that date\n"
+            "on:2026-09-02                that day only\n"
+            "2026-09-01..2026-09-04       between two dates\n"
+            "season                       explicit season-to-date\n"
             "```\n"
+            "*`on:` and `..` also accept `@2026-09-02` and `:` as separators.*\n\n"
             "**🗂️ Season** — defaults to the current one\n"
             "```\n"
             "!progress 123456 sos4\n"
             "```\n"
             "⚠️ A bare number is read as a **count**, so use `s5` for OMG.\n"
-            "⚠️ Windows only reach back as far as stored scans. If you ask for "
-            "more history than exists, it falls back and tells you."
+            "⚠️ Windows snap to the nearest stored scan — the footer always "
+            "shows the actual dates used.\n"
+            "⚠️ `2026-09-02` means *since* that date. For that day alone, "
+            "use `on:2026-09-02`."
         )
 
     elif key == "admin":
@@ -3988,8 +3996,10 @@ class HelpView(discord.ui.View):
 
 COMMAND_HELP = {
     "progress": ("📊 !progress <lord_id> [window] [season]",
-                 "Full profile with gains, ranks and merit breakdown.\n"
-                 "`!progress 11659353 7d`"),
+                 "Full profile with totals, window gains, ranks and merit "
+                 "breakdown.\n"
+                 "`!progress 11659353 7d`\n"
+                 "`!progress 11659353 on:2026-09-02`"),
     "mana": ("💧 !mana <lord_id> [season]",
              "Mana gathered this season, with rank."),
     "topmerits": ("🧠 !topmerits [server] [count] [window]",
