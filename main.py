@@ -3032,6 +3032,7 @@ async def progress(ctx, lord_id: str, *args):
                 embed.set_footer(
                     text=(
                         f"📅 Scans: {win['prev_title']} → {win['latest_title']}\n"
+                        f"⚠️ Merits breakdown data is {days}d behind the scan\n"
                         f"🧾 Merits: {merits_label} · ranked among {profile['pool']} "
                         f"players ≥50M power\n"
                         f"🔍 Try: !progress {target} 7d"
