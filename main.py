@@ -3503,6 +3503,111 @@ def side_detail(servers):
     return " & ".join(f"{lb.SERVER_NAMES.get(s, s)} ({s})" for s in servers)
 
 
+async def build_matchup_embed(team_a, team_b, win, window, season_label):
+    """Build one head-to-head embed. Used by both !matchups and !vs."""
+    a = aggregate_scan(win["latest"], win["prev"], team_a)
+    b = aggregate_scan(win["latest"], win["prev"], team_b)
+ 
+    ma, label_a = await aggregate_merits(team_a, window)
+    mb, label_b = await aggregate_merits(team_b, window)
+ 
+    embed = discord.Embed(
+        title=f"⚔️ {side_name(team_a)}  vs  {side_name(team_b)}",
+        description=(
+            f"🟦 {side_detail(team_a)}  ·  🟥 {side_detail(team_b)}\n"
+            f"**{win['label']}** · `{season_label}` · *≥50M power only*"
+        ),
+        color=lb.server_color(team_a[0]),
+    )
+ 
+    # --- Power ---------------------------------------------------------------
+    embed.add_field(
+        name="⚡  P O W E R",
+        value=section([
+            vs_row_power("📉", "Power Change", a["power_change"], b["power_change"]),
+            f"*{a['losers']} of {a['players']} lost power · "
+            f"{b['losers']} of {b['players']} lost power*",
+            vs_row("🟩", "Current Power", a["power_now"], b["power_now"]),
+            vs_row("🏔️", "Highest Power", a["highest_power"], b["highest_power"]),
+        ]),
+        inline=False,
+    )
+ 
+    # --- Combat --------------------------------------------------------------
+    embed.add_field(
+        name=f"📊  C O M B A T   —   {a['players']:,} vs {b['players']:,}",
+        value=section([
+            vs_row(emoji, label, a[key], b[key])
+            for key, emoji, label, _ in SCAN_STATS
+        ], divider=bool(ma or mb)),
+        inline=False,
+    )
+ 
+    # --- Merits sections -----------------------------------------------------
+    if ma and mb:
+        embed.add_field(
+            name="🧪  R S S   H E A L I N G",
+            value=section([
+                vs_row("💧", "Est. Mana Cost", ma["heal_mana"], mb["heal_mana"]),
+                vs_row("5️⃣", "T5 Healed", ma["t5_healed"], mb["t5_healed"]),
+                vs_row("4️⃣", "T4 Healed", ma["t4_healed"], mb["t4_healed"]),
+                f"*Estimated at {MANA_PER_T5:.0f} mana per T5 · "
+                f"{MANA_PER_T4:.0f} per T4*",
+            ]),
+            inline=False,
+        )
+ 
+        embed.add_field(
+            name="🛡️  T R O O P   M E R I T S",
+            value=section([
+                vs_row(emoji, label, ma[key], mb[key])
+                for key, emoji, label, _ in MERIT_STATS
+            ]),
+            inline=False,
+        )
+ 
+        pct_a = (ma["enemy"] / ma["total"] * 100) if ma["total"] else 0
+        pct_b = (mb["enemy"] / mb["total"] * 100) if mb["total"] else 0
+        embed.add_field(
+            name="🔍  M E R I T   Q U A L I T Y",
+            value=section([
+                vs_row("🎯", "Enemy (Real) Merits", ma["enemy"], mb["enemy"]),
+                f"*Real share: {pct_a:.0f}% vs {pct_b:.0f}%*",
+                vs_row("🤝", "Traded Merits", ma["traded"], mb["traded"]),
+            ], divider=False),
+            inline=False,
+        )
+ 
+    elif ma or mb:
+        got = ma or mb
+        have = side_name(team_a) if ma else side_name(team_b)
+        missing = side_name(team_b) if ma else side_name(team_a)
+        embed.add_field(
+            name=f"🧪  M E R I T S   —   {have} only",
+            value=section([
+                f"💧 **Est. Healing Mana:** {got['heal_mana']:,}\n"
+                f"5️⃣ **T5 Healed:** {got['t5_healed']:,}\n"
+                f"4️⃣ **T4 Healed:** {got['t4_healed']:,}",
+                "\n".join(
+                    f"{emoji} **{label}:** {got[key]:,}"
+                    for key, emoji, label, _ in MERIT_STATS
+                ),
+                f"*No merits export for {missing}. "
+                f"Upload one with `!ingestmerits <server>`.*",
+            ], divider=False),
+            inline=False,
+        )
+ 
+    footer = f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+    if ma or mb:
+        footer += f"\n🧾 Merits: {label_a or label_b}"
+        footer += ("\n⚠️ Scan and merits data are captured at different times — "
+                   "the two may differ slightly.")
+    embed.set_footer(text=footer)
+    embed.timestamp = datetime.now(UTC)
+ 
+    return embed
+    
 # -----------------------------------------------------------------------------
 # The command
 # -----------------------------------------------------------------------------
@@ -3556,117 +3661,14 @@ async def matchups(ctx, *args):
                 return
 
             for team_a, team_b in pairings:
-                a = aggregate_scan(win["latest"], win["prev"], team_a)
-                b = aggregate_scan(win["latest"], win["prev"], team_b)
-
-                ma, label_a = await aggregate_merits(team_a, window)
-                mb, label_b = await aggregate_merits(team_b, window)
-
-                embed = discord.Embed(
-                    title=f"⚔️ {side_name(team_a)}  vs  {side_name(team_b)}",
-                    description=(
-                        f"🟦 {side_detail(team_a)}  ·  🟥 {side_detail(team_b)}\n"
-                        f"**{win['label']}** · `{cfg['label']}` · *≥50M power only*"
-                    ),
-                    color=lb.server_color(team_a[0]),
+                embed = await build_matchup_embed(
+                    team_a, team_b, win, window, cfg["label"]
                 )
-
-                # --- Power ------------------------------------------------
-                embed.add_field(
-                    name="⚡  P O W E R",
-                    value=section([
-                        vs_row_power("📉", "Power Change",
-                                     a["power_change"], b["power_change"]),
-                        f"*{a['losers']} of {a['players']} lost power · "
-                        f"{b['losers']} of {b['players']} lost power*",
-                        vs_row("🟩", "Current Power", a["power_now"], b["power_now"]),
-                        vs_row("🏔️", "Highest Power",
-                               a["highest_power"], b["highest_power"]),
-                    ]),
-                    inline=False,
-                )
-
-                # --- Combat -----------------------------------------------
-                embed.add_field(
-                    name=f"📊  C O M B A T   —   {a['players']:,} vs {b['players']:,}",
-                    value=section([
-                        vs_row(emoji, label, a[key], b[key])
-                        for key, emoji, label, _ in SCAN_STATS
-                    ], divider=bool(ma or mb)),
-                    inline=False,
-                )
-
-                # --- RSS healing ------------------------------------------
-                if ma and mb:
-                    embed.add_field(
-                        name="🧪  R S S   H E A L I N G",
-                        value=section([
-                            vs_row("💧", "Est. Mana Cost",
-                                   ma["heal_mana"], mb["heal_mana"]),
-                            vs_row("5️⃣", "T5 Healed",
-                                   ma["t5_healed"], mb["t5_healed"]),
-                            vs_row("4️⃣", "T4 Healed",
-                                   ma["t4_healed"], mb["t4_healed"]),
-                            f"*Estimated at {MANA_PER_T5:.0f} mana per T5 · "
-                            f"{MANA_PER_T4:.0f} per T4*",
-                        ]),
-                        inline=False,
-                    )
-
-                    embed.add_field(
-                        name="🛡️ T R O O P   M E R I T S",
-                        value=section([
-                            vs_row(emoji, label, ma[key], mb[key])
-                            for key, emoji, label, _ in MERIT_STATS
-                        ]),
-                        inline=False,
-                    )
-
-                    pct_a = (ma["enemy"] / ma["total"] * 100) if ma["total"] else 0
-                    pct_b = (mb["enemy"] / mb["total"] * 100) if mb["total"] else 0
-                    embed.add_field(
-                        name="🔍  M E R I T   Q U A L I T Y",
-                        value=section([
-                            vs_row("🎯", "Enemy (Real) Merits",
-                                   ma["enemy"], mb["enemy"]),
-                            f"*Real share: {pct_a:.0f}% vs {pct_b:.0f}%*",
-                            vs_row("🤝", "Traded Merits",
-                                   ma["traded"], mb["traded"]),
-                        ], divider=False),
-                        inline=False,
-                    )
-
-                elif ma or mb:
-                    got = ma or mb
-                    have = side_name(team_a) if ma else side_name(team_b)
-                    missing = side_name(team_b) if ma else side_name(team_a)
-                    embed.add_field(
-                        name=f"🧪  M E R I T S   —   {have} only",
-                        value=section([
-                            f"💧 **Est. Healing Mana:** {got['heal_mana']:,}\n"
-                            f"5️⃣ **T5 Healed:** {got['t5_healed']:,}\n"
-                            f"4️⃣ **T4 Healed:** {got['t4_healed']:,}",
-                            "\n".join(
-                                f"{emoji} **{label}:** {got[key]:,}"
-                                for key, emoji, label, _ in MERIT_STATS
-                            ),
-                            f"*No merits export for {missing}. "
-                            f"Upload one with `!ingestmerits <server>`.*",
-                        ], divider=False),
-                        inline=False,
-                    )
-
-                footer = f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
-                if ma or mb:
-                    footer += f"\n🧾 Merits: {label_a or label_b}"
-                embed.set_footer(text=footer)
-                embed.timestamp = datetime.now(UTC)
-
                 await ctx.send(embed=embed)
 
                 if (team_a, team_b) != pairings[-1]:
                     await ctx.send("\u200b\n" + "\u2501" * 30 + "\n\u200b")
-
+               
         except Exception as e:
             await ctx.send(f"❌ **Error:** {e}")
 
