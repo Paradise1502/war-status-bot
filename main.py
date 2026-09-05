@@ -3671,6 +3671,75 @@ async def matchups(ctx, *args):
                
         except Exception as e:
             await ctx.send(f"❌ **Error:** {e}")
+            
+@bot.command(name="vs", aliases=["versus", "compare"])
+async def vs_cmd(ctx, *args):
+    """
+    Compare any two servers head-to-head.
+ 
+        !vs 5 357              OMG vs YSS
+        !vs omg yss 7d         by tag, last 7 days
+        !vs 5 357 1d           yesterday
+        !vs 341 320 on:2026-09-02
+    """
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+ 
+    async with ctx.typing():
+        try:
+            servers = []
+            window = None
+            season = DEFAULT_SEASON
+            unknown = []
+ 
+            for token in args:
+                t = str(token).strip().lower()
+                if t in SEASON_SHEETS:
+                    season = t
+                    continue
+                srv = lb.parse_server(t)
+                if srv and srv != "all":
+                    servers.append(srv)
+                    continue
+                if lb.parse_window(t) is not None:
+                    window = t
+                    continue
+                unknown.append(token)
+ 
+            if unknown:
+                await ctx.send(
+                    f"❌ Didn't understand `{unknown[0]}`.\n"
+                    f"Servers: {', '.join(lb.SERVER_NAMES)} (or tags like `omg`, `yss`)"
+                )
+                return
+ 
+            if len(servers) < 2:
+                await ctx.send(
+                    "❌ Name two servers, e.g. `!vs 5 357` or `!vs omg yss 7d`.\n"
+                    f"Known: {', '.join(f'{k} ({v})' for k, v in lb.SERVER_NAMES.items())}"
+                )
+                return
+ 
+            if servers[0] == servers[1]:
+                await ctx.send("❌ Those are the same server.")
+                return
+ 
+            team_a, team_b = [servers[0]], [servers[1]]
+ 
+            win = await get_window_data(season, window)
+            if win is None:
+                await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
+                return
+ 
+            embed = await build_matchup_embed(
+                team_a, team_b, win, window, season_cfg(season)["label"]
+            )
+            await ctx.send(embed=embed)
+ 
+        except Exception as e:
+            await ctx.send(f"❌ **Error:** {e}")
 
 import os
 TOKEN = os.getenv("TOKEN")
