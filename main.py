@@ -1392,8 +1392,8 @@ async def lowmage(ctx, *args):
 
 
 def _healing_detail(e):
-    return (f"   └ 🟥 T5 `{lb.fmt(e.get('t5', 0))}` · "
-            f"🟦 T4 `{lb.fmt(e.get('t4', 0))}` · "
+    return (f"   └ 5️⃣ T5 `{lb.fmt(e.get('t5', 0))}` · "
+            f"4️⃣ T4 `{lb.fmt(e.get('t4', 0))}` · "
             f"💧 `{lb.fmt(e['value'])}` mana")
 
 
