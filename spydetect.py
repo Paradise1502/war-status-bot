@@ -38,20 +38,14 @@ from discord.ext import commands
 # Configuration
 # --------------------------------------------------------------------------
 
-FINGERPRINT_SECRET = os.environ.get("OPSEC_FINGERPRINT_SECRET", "").encode()
+FINGERPRINT_SECRET = "No8qa3i03ns5D42Atni0MbOxHW2SaTt3w78Vz2am0iaKchIr".encode()
 
-
-def _env_ids(name: str) -> frozenset[int]:
-    raw = os.environ.get(name, "")
-    return frozenset(int(part) for part in re.findall(r"\d+", raw))
-
-
-LOG_CHANNEL_ID = int(os.environ.get("OPSEC_LOG_CHANNEL_ID", "0") or 0)
+LOG_CHANNEL_ID = 1527938722987900978
 
 ALLOWED_ROLE_IDS: dict[str, frozenset[int]] = {
-    "tactical": _env_ids("OPSEC_ROLES_TACTICAL"),
-    "row": _env_ids("OPSEC_ROLES_ROW"),
-    "casual": _env_ids("OPSEC_ROLES_CASUAL"),
+    "tactical": frozenset({1430370436222550046, 1527800467353112716}),
+    "row": frozenset({1430370436222550046, 1527800467353112716}),
+    "casual": frozenset({1430370436222550046, 1527800467353112716}),
 }
 
 DM_DELAY_SECONDS = 1.0          # pacing between DMs; do not set to 0
