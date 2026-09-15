@@ -172,6 +172,39 @@ class ActivityDB:
             out[r["status"]] = r["n"]
         return out
 
+    def response_history(self, guild_id=None, min_sent=3):
+        """
+        Per-user response record across all closed and open events.
+ 
+        A blocked bot's DM still SUCCEEDS from our side — Discord accepts it and
+        silently drops it — so blockers look identical to people who just never
+        reply. Both land in 'pending'. This finds the people who have never once
+        responded despite repeated checks.
+        """
+        sql = """
+            SELECT
+                t.user_id,
+                MAX(t.user_name)                                       AS user_name,
+                COUNT(*)                                               AS sent,
+                SUM(CASE WHEN t.status IN ('yes','no','maybe')
+                         THEN 1 ELSE 0 END)                            AS answered,
+                SUM(CASE WHEN t.status = 'pending'  THEN 1 ELSE 0 END)  AS pending,
+                SUM(CASE WHEN t.status = 'dm_failed' THEN 1 ELSE 0 END) AS dm_failed,
+                MAX(t.responded_at)                                     AS last_response
+            FROM targets t
+            JOIN events e ON e.event_id = t.event_id
+        """
+        params = []
+        if guild_id is not None:
+            sql += " WHERE e.guild_id = ?"
+            params.append(guild_id)
+        sql += """
+            GROUP BY t.user_id
+            HAVING sent >= ?
+            ORDER BY answered ASC, sent DESC
+        """
+        params.append(min_sent)
+        return self.conn.execute(sql, params).fetchall()
 
 # ---------------------------------------------------------------------------
 # THE BUTTONS (persistent view — survives bot restarts)
@@ -389,6 +422,97 @@ class ActivityChecks(commands.Cog):
             return
         await ctx.send(embed=self.build_dashboard_embed(event, ctx.guild))
 
+    @commands.command(name="neverresponds", aliases=["silent", "noreply"])
+    @commands.has_permissions(administrator=True)
+    async def neverresponds(self, ctx, min_sent: int = 3):
+        """
+        Who has never answered an activity check.
+ 
+            !neverresponds        people sent 3+ checks who never replied
+            !neverresponds 5      raise the bar to 5
+ 
+        Discord gives bots no way to detect a block — a blocked DM appears to
+        send fine. So this infers it: repeated checks, zero responses, ever.
+        """
+        rows = self.db.response_history(ctx.guild.id, min_sent=max(1, min_sent))
+        if not rows:
+            await ctx.send(
+                f"No one has been sent {min_sent}+ activity checks yet. "
+                "Run a few more and try again."
+            )
+            return
+ 
+        never = [r for r in rows if r["answered"] == 0]
+        blocked_dms = [r for r in never if r["dm_failed"] > 0]
+        silent = [r for r in never if r["dm_failed"] == 0]
+        partial = [r for r in rows if 0 < r["answered"] < r["sent"]]
+ 
+        def fmt(rows_):
+            out = []
+            for r in rows_:
+                m = ctx.guild.get_member(r["user_id"])
+                name = m.display_name if m else (r["user_name"] or str(r["user_id"]))
+                out.append(f"`{r['sent']}×` {name}")
+            text = "\n".join(out)
+            if len(text) > 1000:
+                keep = []
+                size = 0
+                for line in out:
+                    if size + len(line) > 950:
+                        break
+                    keep.append(line)
+                    size += len(line) + 1
+                text = "\n".join(keep) + f"\n*…and {len(out) - len(keep)} more*"
+            return text or "—"
+ 
+        embed = discord.Embed(
+            title="🔕 Activity check response history",
+            description=(
+                f"Everyone sent **{min_sent}+** checks. "
+                f"{len(rows)} member(s) qualify.\n\n"
+                "⚠️ Discord doesn't let bots detect blocks — a blocked DM looks "
+                "like a successful one. These are inferred from behaviour, not "
+                "confirmed."
+            ),
+            colour=discord.Colour.orange(),
+        )
+ 
+        if silent:
+            embed.add_field(
+                name=f"🤐 Never responded ({len(silent)})",
+                value=fmt(silent) + "\n*Blocked the bot, notifications off, or inactive.*",
+                inline=False,
+            )
+        if blocked_dms:
+            embed.add_field(
+                name=f"🚫 DMs closed & never responded ({len(blocked_dms)})",
+                value=fmt(blocked_dms) + "\n*Confirmed unreachable by DM.*",
+                inline=False,
+            )
+        if partial:
+            embed.add_field(
+                name=f"📉 Responds sometimes ({len(partial)})",
+                value="\n".join(
+                    f"`{r['answered']}/{r['sent']}` "
+                    + ((ctx.guild.get_member(r['user_id']).display_name)
+                       if ctx.guild.get_member(r["user_id"])
+                       else (r["user_name"] or str(r["user_id"])))
+                    for r in partial[:15]
+                ) + (f"\n*…and {len(partial) - 15} more*" if len(partial) > 15 else ""),
+                inline=False,
+            )
+        if not silent and not blocked_dms:
+            embed.add_field(
+                name="✅ Nobody is fully silent",
+                value="Everyone sent that many checks has answered at least once.",
+                inline=False,
+            )
+ 
+        embed.set_footer(
+            text="`N×` = checks sent · reach silent members in a channel instead of DM"
+        )
+        await ctx.send(embed=embed)
+
     @commands.command(name="activitylist", aliases=["aclist"])
     @commands.has_permissions(administrator=True)
     async def activitylist(self, ctx):
@@ -498,6 +622,7 @@ class ActivityChecks(commands.Cog):
     @activitystatus.error
     @activityremind.error
     @activityclose.error
+    @neverresponds.error
     async def _err(self, ctx, error):
         if isinstance(error, commands.MissingPermissions):
             await ctx.send("You need administrator permissions for that.")
