@@ -114,6 +114,20 @@ def season_start(season=None):
 def home_server(season=None):
     return season_cfg(season or DEFAULT_SEASON)["home"]
 
+# Season dead requirement, by highest power
+DEAD_REQUIREMENTS = [
+    (200_000_000, 5_600_000),   # 200M+
+    (150_000_000, 3_100_000),   # 150–200M
+    (0,           1_600_000),   # below 150M
+]
+
+
+def dead_requirement(highest_power):
+    for threshold, req in DEAD_REQUIREMENTS:
+        if highest_power >= threshold:
+            return req
+    return DEAD_REQUIREMENTS[-1][1]
+
 # Global memory bank for background tasks
 bot_cache = {
     "375_data": None,
@@ -1213,18 +1227,27 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
 
 # --- Scan command wrappers ---------------------------------------------------
 
+def _dead_req_detail(e):
+    req = dead_requirement(e["power"])
+    pct = (e["value"] / req * 100) if req else 0
+    icon = "✅" if pct >= 100 else ("🟡" if pct >= 75 else "🔴")
+    return f"   └ {icon} `{pct:.0f}%` of {lb.fmt(req)} required"
+
+
 @bot.command(aliases=["td"])
 async def topdeads(ctx, *args):
     """!topdeads [server] [count] [window] — e.g. !topdeads 357 50 7d"""
     await run_scan_leaderboard(ctx, args, title="Dead Units", emoji="💀",
-                               value="units_dead", top=True)
+                               value="units_dead", top=True,
+                               detail=_dead_req_detail)
 
 
 @bot.command(aliases=["ld"])
 async def lowdeads(ctx, *args):
     await run_scan_leaderboard(ctx, args, title="Dead Units", emoji="🔻",
                                value="units_dead", top=False,
-                               min_power=50_000_000)
+                               min_power=50_000_000,
+                               detail=_dead_req_detail)
 
 
 @bot.command(aliases=["tm"])
@@ -1601,6 +1624,99 @@ async def excluded_cmd(ctx):
         embed.description += f"\n*...and {len(rows) - 40} more.*"
     embed.set_footer(text="These are removed from every leaderboard and total.")
     await ctx.send(embed=embed)
+
+@bot.command(name="deadcheck", aliases=["reqs", "deadreq"])
+async def deadcheck(ctx, *args):
+    """
+    Season dead requirement progress, worst first.
+
+        !deadcheck           375, everyone under 100%
+        !deadcheck 50        show 50
+        !deadcheck 357       another server
+        !deadcheck done      everyone who has met it
+    """
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    async with ctx.typing():
+        show_done = any(str(a).strip().lower() == "done" for a in args)
+        args = [a for a in args if str(a).strip().lower() != "done"]
+
+        opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON,
+                                      default_limit=25)
+        if unknown:
+            await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
+            return
+
+        # Always season to date — the requirement is seasonal
+        win = await get_window_data(opts["season"], None)
+        if win is None:
+            await ctx.send(f"❌ Not enough scan history. Try `!scans {opts['season']}`.")
+            return
+
+        gains = lb.materialize_gains(win["latest"], win["prev"], id_col="lord_id")
+        headers, rows = lb.as_dicts(gains)
+        c_id   = lb.find_col(headers, "lord_id")
+        c_name = lb.find_col(headers, "name")
+        c_tag  = lb.find_col(headers, "alliance_tag", "alliance")
+        c_srv  = lb.find_col(headers, "home_server")
+        c_pow  = lb.find_col(headers, "highest_power")
+        c_dead = lb.find_col(headers, "units_dead")
+
+        entries = []
+        for r in rows:
+            if opts["server"] and c_srv:
+                sid = "".join(ch for ch in str(r.get(c_srv, "")) if ch.isdigit())
+                if sid != str(opts["server"]):
+                    continue
+            power = lb.to_int(r.get(c_pow, 0))
+            deads = lb.to_int(r.get(c_dead, 0))
+            req = dead_requirement(power)
+            pct = (deads / req * 100) if req else 0
+            if show_done != (pct >= 100):
+                continue
+            entries.append({
+                "lord_id": str(r.get(c_id, "")).strip(),
+                "name": str(r.get(c_name, "?")).strip() or "?",
+                "alliance": str(r.get(c_tag, "")).strip(),
+                "power": power,
+                "value": deads,
+                "req": req,
+                "pct": pct,
+            })
+
+        if not entries:
+            await ctx.send(
+                "✅ Everyone has met the requirement." if not show_done
+                else "📭 Nobody has met it yet."
+            )
+            return
+
+        entries.sort(key=lambda e: e["pct"], reverse=show_done)
+        total = len(entries)
+        entries = entries[:opts["limit"]]
+
+        def line(i, e):
+            icon = "✅" if e["pct"] >= 100 else ("🟡" if e["pct"] >= 75 else "🔴")
+            tag = f"`[{e['alliance']}]` " if e["alliance"] else ""
+            return (f"{icon} {tag}**{e['name']}** — `{e['pct']:.0f}%`\n"
+                    f"   └ {lb.fmt(e['value'])} / {lb.fmt(e['req'])} · "
+                    f"{lb.fmt(e['power'])} power")
+
+        await lb.send_leaderboard(
+            ctx,
+            title=("✅ Requirement met" if show_done else "💀 Behind on dead requirement"),
+            subtitle=(f"**{lb.server_label(opts['server'])}** · Season to date\n"
+                      f"*{total:,} player(s) · 200M+ → 5.6M · 150–200M → 3.1M · "
+                      f"under 150M → 1.6M*"),
+            footer=f"{win['prev_title']} → {win['latest_title']}",
+            color=lb.server_color(opts["server"]),
+            entries=entries,
+            show_detail=None,
+        )
+        return
 
 @bot.command()
 async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
@@ -2925,6 +3041,34 @@ async def progress(ctx, lord_id: str, *args):
             rt_heal  = rank_total(healed_idx)
             rt_mana  = rank_total(mana_g_idx)
 
+            # Requirement progress always measures the SEASON, not the window
+            season_dead_gain = dead_gain
+            if window:
+                sw = await get_window_data(season, None)
+                if sw:
+                    sh = sw["latest"][0]
+                    c_id = lb.find_col(sh, "lord_id")
+                    c_dd = lb.find_col(sh, "units_dead")
+                    if c_id and c_dd:
+                        i_id, i_dd = sh.index(c_id), sh.index(c_dd)
+                        cur = next((r for r in sw["latest"][1:]
+                                    if i_id < len(r) and str(r[i_id]).strip() == target), None)
+                        old = next((r for r in sw["prev"][1:]
+                                    if i_id < len(r) and str(r[i_id]).strip() == target), None)
+                        if cur and old:
+                            season_dead_gain = max(
+                                0, lb.to_int(cur[i_dd]) - lb.to_int(old[i_dd])
+                            )
+
+            req = dead_requirement(power_now)
+            req_pct = (season_dead_gain / req * 100) if req else 0
+            if req_pct >= 100:
+                req_line = f"✅ **{req_pct:.0f}%** of {lb.fmt(req)}"
+            elif req_pct >= 75:
+                req_line = f"🟡 **{req_pct:.0f}%** of {lb.fmt(req)}"
+            else:
+                req_line = f"🔴 **{req_pct:.0f}%** of {lb.fmt(req)}"
+
             def rk(r):
                 return f" `#{r}`" if r else ""
 
@@ -2965,7 +3109,8 @@ async def progress(ctx, lord_id: str, *args):
                             value=stat_field(val(row_latest, kills_idx), kills_gain, rt_kills, r_kills),
                             inline=True)
             embed.add_field(name="💀 Deads",
-                            value=stat_field(val(row_latest, dead_idx), dead_gain, rt_dead, r_dead),
+                            value=stat_field(val(row_latest, dead_idx), dead_gain, rt_dead, r_dead)
+                                  + f"\n{req_line}",
                             inline=True)
             embed.add_field(name="❤️ Healed",
                             value=stat_field(val(row_latest, healed_idx), heal_gain, rt_heal, r_heal),
