@@ -1626,7 +1626,7 @@ async def excluded_cmd(ctx):
     await ctx.send(embed=embed)
 
 @bot.command(name="deadcheck", aliases=["reqs", "deadreq"])
-async def deadcheck(ctx, *args):
+async def deadcheck(ctx, *args, min_power=50_000_000):
     """
     Season dead requirement progress, worst first.
 
@@ -1641,8 +1641,9 @@ async def deadcheck(ctx, *args):
         return
 
     async with ctx.typing():
+        MIN_POWER_DEADCHECK = 50_000_000   # skip farms
+
         show_done = any(str(a).strip().lower() == "done" for a in args)
-        args = [a for a in args if str(a).strip().lower() != "done"]
 
         opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON,
                                       default_limit=25)
@@ -1672,6 +1673,8 @@ async def deadcheck(ctx, *args):
                 if sid != str(opts["server"]):
                     continue
             power = lb.to_int(r.get(c_pow, 0))
+            if power < MIN_POWER_DEADCHECK:
+                continue
             deads = lb.to_int(r.get(c_dead, 0))
             req = dead_requirement(power)
             pct = (deads / req * 100) if req else 0
@@ -1709,8 +1712,8 @@ async def deadcheck(ctx, *args):
             ctx,
             title=("✅ Requirement met" if show_done else "💀 Behind on dead requirement"),
             subtitle=(f"**{lb.server_label(opts['server'])}** · Season to date\n"
-                      f"*{total:,} player(s) · 200M+ → 5.6M · 150–200M → 3.1M · "
-                      f"under 150M → 1.6M*"),
+                      f"*{total:,} player(s) ≥{lb.fmt(MIN_POWER_DEADCHECK)} power · "
+                      f"200M+ → 5.6M · 150–200M → 3.1M · under 150M → 1.6M*"),
             footer=f"{win['prev_title']} → {win['latest_title']}",
             color=lb.server_color(opts["server"]),
             entries=entries,
