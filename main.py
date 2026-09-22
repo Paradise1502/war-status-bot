@@ -239,7 +239,7 @@ SHELL_CHANNEL_ID = 1551945976812671076              # ⬅️ channel that gets r
 SHELL_REACTION_CHANNEL_ID = 1551946364878065704     # ⬅️ channel where the reaction message lives
 SHELL_REACTION_MESSAGE_ID = 1551946863526027337     # ⬅️ message builders react on
 SHELL_LOG_CHANNEL_ID = CONFIRM_CHANNEL_ID  # where "changed by X" logs go
-BUILDER_ROLE_ID = 1290174362472681472            # ⬅️ role ID to restrict who can change it, or None = everyone
+BUILDER_ROLE_ID = None            # ⬅️ role ID to restrict who can change it, or None = everyone
 
 MAX_SHELLS = 3
 BUFF_EMOJI = "⚡"
