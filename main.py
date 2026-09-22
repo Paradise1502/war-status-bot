@@ -225,7 +225,312 @@ async def on_raw_reaction_add(payload):
         await confirm_channel.send(f"✅ War channel renamed to `{new_name}` by **{user.display_name}** based on reaction {emoji}")
     except Exception as e:
         await confirm_channel.send(f"❌ Failed to rename war channel: {e}")
-        
+
+# ─────────────────────────────────────────────────────────────
+#  SHELL BUILD STATUS  –  paste below your war-channel code
+#  (uses the same `bot` object; needs `import asyncio, json, discord`)
+# ─────────────────────────────────────────────────────────────
+import asyncio
+import json
+import discord
+
+# ── Config ───────────────────────────────────────────────────
+SHELL_CHANNEL_ID = 1551945976812671076              # ⬅️ channel that gets renamed + holds the status embed
+SHELL_REACTION_CHANNEL_ID = 1551946364878065704     # ⬅️ channel where the reaction message lives
+SHELL_REACTION_MESSAGE_ID = 1551946863526027337     # ⬅️ message builders react on
+SHELL_LOG_CHANNEL_ID = CONFIRM_CHANNEL_ID  # where "changed by X" logs go
+BUILDER_ROLE_ID = 1290174362472681472            # ⬅️ role ID to restrict who can change it, or None = everyone
+
+MAX_SHELLS = 3
+BUFF_EMOJI = "⚡"
+RENAME_DELAY = 20                 # seconds to wait for more clicks before renaming
+STATE_FILE = "shell_state.json"
+
+# Emoji → alliance tag (custom emojis: use "<:name:id>" as the key)
+SHELL_ALLIANCES = {
+    "🇦": "NVR!",
+    "🇧": "NVR-",
+    "🇨": "NVR2",
+    "🇩": "NVR3",
+    "🇪": "NVR4",
+    "🇫": "NVR5",
+    "🇬": "NVR6",
+    "🇭": "NxW",
+    "🇮": "MFD",
+    "🇯": "UHA",
+    "🇰": "NOIR",
+    "🇱": "-GG-",
+}
+
+# ── State (saved to disk so it survives restarts) ────────────
+def _load_state():
+    try:
+        with open(STATE_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return {
+            "alliances": data.get("alliances", []),
+            "buff": data.get("buff", False),
+            "status_message_id": data.get("status_message_id"),
+        }
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"alliances": [], "buff": False, "status_message_id": None}
+
+
+shell_state = _load_state()
+
+
+def _save_state():
+    with open(STATE_FILE, "w", encoding="utf-8") as f:
+        json.dump(shell_state, f)
+
+
+# ── Helpers ──────────────────────────────────────────────────
+def to_bold(text):
+    """Channel names force lowercase, so convert to 𝐁𝐎𝐋𝐃 unicode like the war channel."""
+    out = []
+    for ch in text:
+        if "A" <= ch <= "Z":
+            out.append(chr(0x1D400 + ord(ch) - ord("A")))
+        elif "a" <= ch <= "z":
+            out.append(chr(0x1D41A + ord(ch) - ord("a")))
+        elif "0" <= ch <= "9":
+            out.append(chr(0x1D7CE + ord(ch) - ord("0")))
+        elif ch == "!":
+            out.append("ǃ")   # look-alike – Discord strips "!" from channel names
+        elif ch == "-":
+            out.append("－")  # fullwidth dash – plain "-" gets merged/trimmed
+        else:
+            out.append(ch)
+    return "".join(out)
+
+
+def build_channel_name():
+    tags = shell_state["alliances"]
+    body = "｜".join(to_bold(t) for t in tags) if tags else to_bold("NO-BUILDS")
+    buff = f"｜{BUFF_EMOJI}" if shell_state["buff"] else ""
+    return f"🏗️｜{body}{buff}"[:100]
+
+
+def build_embed():
+    buff_on = shell_state["buff"]
+    embed = discord.Embed(
+        title="🏗️ Current Shell Builds",
+        color=discord.Color.gold() if buff_on else discord.Color.blurple(),
+    )
+    numbers = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
+    tags = shell_state["alliances"]
+    if tags:
+        lines = [f"{numbers[i]} **{tag}**" for i, tag in enumerate(tags)]
+        embed.add_field(name="Priority order", value="\n".join(lines), inline=False)
+    else:
+        embed.add_field(name="Priority order", value="No active shell builds", inline=False)
+    embed.add_field(
+        name="Build buff",
+        value="⚡ **ACTIVE**" if buff_on else "❌ Off",
+        inline=False,
+    )
+    embed.set_footer(text="Send builders from farm accounts in priority order")
+    embed.timestamp = discord.utils.utcnow()
+    return embed
+
+
+def can_edit(member):
+    if member is None or member.bot:
+        return False
+    if BUILDER_ROLE_ID is None:
+        return True
+    return any(r.id == BUILDER_ROLE_ID for r in member.roles)
+
+
+async def remove_reaction(guild, payload, member):
+    channel = guild.get_channel(payload.channel_id)
+    if not channel:
+        return
+    try:
+        await channel.get_partial_message(payload.message_id).remove_reaction(payload.emoji, member)
+    except discord.HTTPException:
+        pass
+
+
+async def update_status_message(guild):
+    """Instant update – message edits don't have the harsh rename rate limit."""
+    channel = guild.get_channel(SHELL_CHANNEL_ID)
+    if not channel:
+        return
+    embed = build_embed()
+    msg_id = shell_state.get("status_message_id")
+    if msg_id:
+        try:
+            await channel.get_partial_message(msg_id).edit(embed=embed)
+            return
+        except discord.NotFound:
+            pass  # message was deleted – post a new one
+    msg = await channel.send(embed=embed)
+    shell_state["status_message_id"] = msg.id
+    _save_state()
+
+
+# Channel renames are limited to 2 per 10 min, so wait for clicks to settle
+_rename_task = None
+
+
+def schedule_rename(guild):
+    global _rename_task
+    if _rename_task and not _rename_task.done():
+        _rename_task.cancel()
+    _rename_task = asyncio.create_task(_delayed_rename(guild))
+
+
+async def _delayed_rename(guild):
+    await asyncio.sleep(RENAME_DELAY)
+    channel = guild.get_channel(SHELL_CHANNEL_ID)
+    if not channel:
+        return
+    new_name = build_channel_name()
+    if channel.name == new_name:
+        return
+    try:
+        await channel.edit(name=new_name)
+    except discord.HTTPException as e:
+        log = guild.get_channel(SHELL_LOG_CHANNEL_ID)
+        if log:
+            await log.send(f"❌ Failed to rename shell channel: {e}")
+
+
+async def _apply_change(guild, action, member):
+    _save_state()
+    await update_status_message(guild)
+    schedule_rename(guild)
+    log = guild.get_channel(SHELL_LOG_CHANNEL_ID)
+    if log:
+        await log.send(f"{action} by **{member.display_name}**")
+
+
+# ── Reaction added ───────────────────────────────────────────
+@bot.listen("on_raw_reaction_add")  # listen() = runs alongside your war handler
+async def shell_reaction_add(payload):
+    if payload.message_id != SHELL_REACTION_MESSAGE_ID:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    member = payload.member
+    if not guild or member is None or member.bot:
+        return
+
+    if not can_edit(member):
+        await remove_reaction(guild, payload, member)
+        return
+
+    emoji = str(payload.emoji)
+
+    if emoji == BUFF_EMOJI:
+        if shell_state["buff"]:
+            return
+        shell_state["buff"] = True
+        action = "⚡ Build buff turned **ON**"
+
+    elif emoji in SHELL_ALLIANCES:
+        tag = SHELL_ALLIANCES[emoji]
+        if tag in shell_state["alliances"]:
+            return
+        if len(shell_state["alliances"]) >= MAX_SHELLS:
+            await remove_reaction(guild, payload, member)
+            log = guild.get_channel(SHELL_LOG_CHANNEL_ID)
+            if log:
+                await log.send(
+                    f"⚠️ {member.mention} {MAX_SHELLS} shells are already active – "
+                    f"remove one before adding **{tag}**.",
+                    delete_after=15,
+                )
+            return
+        shell_state["alliances"].append(tag)
+        action = f"🏗️ **{tag}** added as priority #{len(shell_state['alliances'])}"
+
+    else:
+        await remove_reaction(guild, payload, member)  # stray emoji
+        return
+
+    await _apply_change(guild, action, member)
+
+
+# ── Reaction removed ─────────────────────────────────────────
+@bot.listen("on_raw_reaction_remove")
+async def shell_reaction_remove(payload):
+    if payload.message_id != SHELL_REACTION_MESSAGE_ID:
+        return
+    guild = bot.get_guild(payload.guild_id)
+    if not guild:
+        return
+
+    # payload.member is None on remove events, so look the member up
+    member = guild.get_member(payload.user_id)
+    if member is None:
+        try:
+            member = await guild.fetch_member(payload.user_id)
+        except discord.HTTPException:
+            return
+    if not can_edit(member):
+        return
+
+    emoji = str(payload.emoji)
+
+    # If another builder still has this emoji reacted, keep it active
+    channel = guild.get_channel(payload.channel_id)
+    if not channel:
+        return
+    try:
+        msg = await channel.fetch_message(payload.message_id)
+    except discord.HTTPException:
+        return
+    for r in msg.reactions:
+        if str(r.emoji) == emoji and r.count > (1 if r.me else 0):
+            return
+
+    if emoji == BUFF_EMOJI:
+        if not shell_state["buff"]:
+            return
+        shell_state["buff"] = False
+        action = "⚡ Build buff turned **OFF**"
+
+    elif emoji in SHELL_ALLIANCES:
+        tag = SHELL_ALLIANCES[emoji]
+        if tag not in shell_state["alliances"]:
+            return
+        shell_state["alliances"].remove(tag)
+        action = f"🧹 **{tag}** removed (priorities shifted up)"
+
+    else:
+        return
+
+    await _apply_change(guild, action, member)
+
+
+# ── !shellreset – clears everything / first-time setup ───────
+@bot.command(name="shellreset")
+async def shell_reset(ctx):
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        return
+    if not can_edit(ctx.author):
+        await ctx.send("❌ Only builders can reset the shell status.", delete_after=10)
+        return
+
+    shell_state["alliances"] = []
+    shell_state["buff"] = False
+    _save_state()
+
+    channel = ctx.guild.get_channel(SHELL_REACTION_CHANNEL_ID)
+    if channel:
+        try:
+            msg = await channel.fetch_message(SHELL_REACTION_MESSAGE_ID)
+            await msg.clear_reactions()
+            for e in list(SHELL_ALLIANCES) + [BUFF_EMOJI]:
+                await msg.add_reaction(e)
+        except discord.HTTPException as e:
+            await ctx.send(f"⚠️ Couldn't reset reactions: {e}")
+
+    await update_status_message(ctx.guild)
+    schedule_rename(ctx.guild)
+    await ctx.send("✅ Shell builds cleared – ready for today's builds.")
+
 # ============================
 # Parsers / formatters
 # ============================
