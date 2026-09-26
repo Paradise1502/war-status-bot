@@ -4351,7 +4351,7 @@ def rss_describe(entry):
         if entry.get("rss_type"):
             parts.append(entry["rss_type"])
     if entry.get("ign"):
-        parts.append(f"IGN: {entry['ign']}")
+        parts.append(f"ID: {entry['ign']}")
     return " · ".join(parts)
 
 
@@ -4457,7 +4457,7 @@ class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
         label="⛏️ Ore", placeholder="e.g. 1.5b – leave empty if you don't need ore",
         required=False, max_length=20)
     ign = discord.ui.TextInput(
-        label="In-game name", required=False, max_length=40)
+        label="In-game ID", placeholder="e.g. 12345678", required=False, max_length=40)
 
     async def on_submit(self, interaction: discord.Interaction):
         resources = {}
