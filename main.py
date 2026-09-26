@@ -244,7 +244,9 @@ BUILDER_ROLE_ID = None            # ⬅️ role ID to restrict who can change it
 MAX_SHELLS = 3
 BUFF_EMOJI = "⚡"
 RENAME_DELAY = 20                 # seconds to wait for more clicks before renaming
-STATE_FILE = "shell_state.json"
+# Save data on the /data volume if it exists (survives deploys), otherwise next to main.py
+BOT_DATA_DIR = os.getenv("DATA_DIR") or ("/data" if os.path.isdir("/data") else ".")
+STATE_FILE = os.path.join(BOT_DATA_DIR, "shell_state.json")
 
 # Emoji → alliance tag (custom emojis: use "<:name:id>" as the key)
 SHELL_ALLIANCES = {
@@ -4261,7 +4263,7 @@ RESET_TZ = ZoneInfo("Europe/Berlin")       # weekly limit resets Monday 00:00 in
 DM_ON_CALL = True                          # also DM the buyer when they're called
 DM_HEADS_UP = True                         # DM the person who is now next in line
 SHOW_MAX = 15                              # how many queue entries the board shows
-RSS_STATE_FILE = "rss_queue.json"
+RSS_STATE_FILE = os.path.join(BOT_DATA_DIR, "rss_queue.json")   # on the /data volume → survives deploys
 
 # Order matters: this is also the order the bot suggests when splitting over weeks
 RSS_RESOURCES = {"Gold": "🪙", "Wood": "🪵", "Ore": "⛏️"}
