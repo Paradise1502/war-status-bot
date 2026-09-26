@@ -4257,7 +4257,7 @@ SHOW_MAX = 15                              # how many queue entries the board sh
 RSS_STATE_FILE = "rss_queue.json"
 
 # ── State (saved to disk so it survives restarts) ────────────
-def _load():
+def _rss_load():
     try:
         with open(RSS_STATE_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -4270,18 +4270,18 @@ def _load():
     return data
 
 
-rss = _load()
+rss = _rss_load()
 rss_lock = asyncio.Lock()
 
 
-def _save():
+def _rss_save():
     with open(RSS_STATE_FILE, "w", encoding="utf-8") as f:
         json.dump(rss, f)
 
 
 # ── Helpers ──────────────────────────────────────────────────
 def week_key():
-    y, w, _ = datetime.datetime.now(RESET_TZ).isocalendar()
+    y, w, _ = _dt.datetime.now(RESET_TZ).isocalendar()
     return f"{y}-W{w:02d}"
 
 
@@ -4291,8 +4291,8 @@ def _roll_week():
 
 
 def next_reset_ts():
-    now = datetime.datetime.now(RESET_TZ)
-    monday = (now + datetime.timedelta(days=7 - now.weekday())).replace(
+    now = _dt.datetime.now(RESET_TZ)
+    monday = (now + _dt.timedelta(days=7 - now.weekday())).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
     return int(monday.timestamp())
@@ -4309,7 +4309,7 @@ def pending_for(uid):
     return total
 
 
-def parse_amount(text):
+def rss_parse_amount(text):
     """Accepts 500m, 1.5b, 1,5b, 2 billion, 750000000 ..."""
     t = text.strip().lower().replace(" ", "").replace("_", "")
     if re.fullmatch(r"\d+,\d{1,2}[a-z]*", t):   # German decimal: 1,5b
@@ -4329,15 +4329,15 @@ def parse_amount(text):
     return int(round(value * mult)) if value > 0 else None
 
 
-def fmt(n):
+def rss_fmt(n):
     for size, unit in ((1e9, "B"), (1e6, "M"), (1e3, "K")):
         if n >= size:
             return f"{n / size:.2f}".rstrip("0").rstrip(".") + unit
     return str(n)
 
 
-def describe(entry):
-    parts = [f"**{fmt(entry['amount'])}**"]
+def rss_describe(entry):
+    parts = [f"**{rss_fmt(entry['amount'])}**"]
     if entry.get("rss_type"):
         parts.append(entry["rss_type"])
     if entry.get("ign"):
@@ -4345,7 +4345,7 @@ def describe(entry):
     return " · ".join(parts)
 
 
-def is_seller(member):
+def rss_is_seller(member):
     if not isinstance(member, discord.Member):
         return False
     if member.guild_permissions.administrator:
@@ -4353,11 +4353,11 @@ def is_seller(member):
     return any(r.id == RSS_SELLER_ROLE_ID for r in member.roles)
 
 
-def build_embed():
+def rss_build_embed():
     embed = discord.Embed(title="💰 RSS Selling Queue", color=discord.Color.green())
 
     if rss["serving"]:
-        lines = [f"<@{sid}> ➜ <@{e['user_id']}> · {describe(e)}"
+        lines = [f"<@{sid}> ➜ <@{e['user_id']}> · {rss_describe(e)}"
                  for sid, e in rss["serving"].items()]
     else:
         lines = ["*Nobody is being served right now*"]
@@ -4368,7 +4368,7 @@ def build_embed():
         lines = []
         for i, e in enumerate(q[:SHOW_MAX], start=1):
             badge = "⏭️" if i == 1 else f"`{i}.`"
-            lines.append(f"{badge} <@{e['user_id']}> · {describe(e)} · <t:{e['joined']}:R>")
+            lines.append(f"{badge} <@{e['user_id']}> · {rss_describe(e)} · <t:{e['joined']}:R>")
         if len(q) > SHOW_MAX:
             lines.append(f"*…and {len(q) - SHOW_MAX} more*")
         value = "\n".join(lines)
@@ -4378,7 +4378,7 @@ def build_embed():
 
     embed.add_field(
         name="ℹ️ Info",
-        value=(f"Max **{fmt(WEEKLY_LIMIT)}** per member per week · "
+        value=(f"Max **{rss_fmt(WEEKLY_LIMIT)}** per member per week · "
                f"resets <t:{next_reset_ts()}:R>\n"
                f"Wait for your ping – sellers call people in order."),
         inline=False,
@@ -4388,7 +4388,7 @@ def build_embed():
     return embed
 
 
-async def update_panel():
+async def rss_update_panel():
     ch_id, msg_id = rss["panel"]["channel_id"], rss["panel"]["message_id"]
     if not ch_id or not msg_id:
         return
@@ -4396,15 +4396,15 @@ async def update_panel():
     if not channel:
         return
     try:
-        await channel.get_partial_message(msg_id).edit(embed=build_embed(), view=RSSQueueView())
+        await channel.get_partial_message(msg_id).edit(embed=rss_build_embed(), view=RSSQueueView())
     except discord.NotFound:
         rss["panel"] = {"channel_id": None, "message_id": None}
-        _save()
+        _rss_save()
     except discord.HTTPException:
         pass
 
 
-async def log(guild, text):
+async def rss_log(guild, text):
     if RSS_LOG_CHANNEL_ID is None:
         return
     channel = guild.get_channel(RSS_LOG_CHANNEL_ID)
@@ -4415,7 +4415,7 @@ async def log(guild, text):
             pass
 
 
-async def safe_dm(guild, user_id, text):
+async def rss_safe_dm(guild, user_id, text):
     member = guild.get_member(user_id)
     if member:
         try:
@@ -4446,13 +4446,13 @@ class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
         label="In-game name", required=False, max_length=40)
 
     async def on_submit(self, interaction: discord.Interaction):
-        amount = parse_amount(self.amount.value)
+        amount = rss_parse_amount(self.amount.value)
         if amount is None:
             return await interaction.response.send_message(
                 "❌ Couldn't read that amount. Try something like `500m` or `1.5b`.", ephemeral=True)
         if amount < MIN_ORDER:
             return await interaction.response.send_message(
-                f"❌ Minimum order is **{fmt(MIN_ORDER)}**.", ephemeral=True)
+                f"❌ Minimum order is **{rss_fmt(MIN_ORDER)}**.", ephemeral=True)
 
         uid = interaction.user.id
         async with rss_lock:
@@ -4465,7 +4465,7 @@ class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
             remaining = WEEKLY_LIMIT - weekly_used(uid) - pending_for(uid)
             if amount > remaining:
                 return await interaction.response.send_message(
-                    f"❌ That's over your weekly limit. You can still order **{fmt(max(remaining, 0))}** "
+                    f"❌ That's over your weekly limit. You can still order **{rss_fmt(max(remaining, 0))}** "
                     f"this week (resets <t:{next_reset_ts()}:R>).", ephemeral=True)
 
             rss["queue"].append({
@@ -4476,12 +4476,12 @@ class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
                 "joined": int(time.time()),
             })
             position = len(rss["queue"])
-            _save()
+            _rss_save()
 
         await interaction.response.send_message(
-            f"✅ You're **#{position}** in line for **{fmt(amount)}**. "
+            f"✅ You're **#{position}** in line for **{rss_fmt(amount)}**. "
             f"You'll get pinged when a seller is ready.", ephemeral=True)
-        await update_panel()
+        await rss_update_panel()
 
 
 # ── Buttons ──────────────────────────────────────────────────
@@ -4504,10 +4504,10 @@ class RSSQueueView(discord.ui.View):
             rss["queue"] = [e for e in rss["queue"] if e["user_id"] != uid]
             removed = len(rss["queue"]) < before
             if removed:
-                _save()
+                _rss_save()
         if removed:
             await interaction.response.send_message("👋 You left the queue.", ephemeral=True)
-            await update_panel()
+            await rss_update_panel()
         elif any(e["user_id"] == uid for e in rss["serving"].values()):
             await interaction.response.send_message(
                 "ℹ️ A seller is already serving you – tell them if you want to cancel.", ephemeral=True)
@@ -4533,8 +4533,8 @@ class RSSQueueView(discord.ui.View):
 
         await interaction.response.send_message(
             f"{where}\n"
-            f"This week: **{fmt(used)}** received · **{fmt(pending)}** pending · "
-            f"**{fmt(left)}** left of {fmt(WEEKLY_LIMIT)}\n"
+            f"This week: **{rss_fmt(used)}** received · **{rss_fmt(pending)}** pending · "
+            f"**{rss_fmt(left)}** left of {rss_fmt(WEEKLY_LIMIT)}\n"
             f"Limit resets <t:{next_reset_ts()}:R>.", ephemeral=True)
 
     # Seller buttons (row 1)
@@ -4542,7 +4542,7 @@ class RSSQueueView(discord.ui.View):
                        custom_id="rss:next", row=1)
     async def next_customer(self, interaction: discord.Interaction, button: discord.ui.Button):
         seller = interaction.user
-        if not is_seller(seller):
+        if not rss_is_seller(seller):
             return await interaction.response.send_message("❌ Only RSS sellers can use this.", ephemeral=True)
 
         async with rss_lock:
@@ -4551,70 +4551,70 @@ class RSSQueueView(discord.ui.View):
             if nxt:
                 rss["serving"][str(seller.id)] = nxt
             new_first = rss["queue"][0] if rss["queue"] else None
-            _save()
+            _rss_save()
 
         if finished:
-            await log(interaction.guild,
-                      f"✅ {seller.mention} delivered {describe(finished)} to <@{finished['user_id']}>")
+            await rss_log(interaction.guild,
+                      f"✅ {seller.mention} delivered {rss_describe(finished)} to <@{finished['user_id']}>")
 
         if not nxt:
             await interaction.response.send_message(
                 ("✅ Marked the last customer as delivered. " if finished else "") +
                 "📭 Queue is empty – nobody to call.", ephemeral=True)
-            return await update_panel()
+            return await rss_update_panel()
 
         await interaction.response.send_message(
-            f"📣 Calling <@{nxt['user_id']}> – {describe(nxt)}", ephemeral=True)
+            f"📣 Calling <@{nxt['user_id']}> – {rss_describe(nxt)}", ephemeral=True)
 
         await interaction.channel.send(
-            f"🔔 <@{nxt['user_id']}> **you're up!** {seller.mention} is ready to sell you {describe(nxt)}.",
+            f"🔔 <@{nxt['user_id']}> **you're up!** {seller.mention} is ready to sell you {rss_describe(nxt)}.",
             allowed_mentions=discord.AllowedMentions(users=True),
             delete_after=PING_DELETE_AFTER,
         )
         if DM_ON_CALL:
-            await safe_dm(interaction.guild, nxt["user_id"],
+            await rss_safe_dm(interaction.guild, nxt["user_id"],
                           f"🔔 It's your turn for RSS! **{seller.display_name}** is ready to sell you "
-                          f"{describe(nxt)}. Head to {interaction.channel.mention}.")
+                          f"{rss_describe(nxt)}. Head to {interaction.channel.mention}.")
         if DM_HEADS_UP and new_first:
-            await safe_dm(interaction.guild, new_first["user_id"],
+            await rss_safe_dm(interaction.guild, new_first["user_id"],
                           "⏭️ Heads up – you're **next** in the RSS queue. Get ready!")
-        await update_panel()
+        await rss_update_panel()
 
     @discord.ui.button(label="Done", emoji="✅", style=discord.ButtonStyle.success,
                        custom_id="rss:done", row=1)
     async def done(self, interaction: discord.Interaction, button: discord.ui.Button):
         seller = interaction.user
-        if not is_seller(seller):
+        if not rss_is_seller(seller):
             return await interaction.response.send_message("❌ Only RSS sellers can use this.", ephemeral=True)
         async with rss_lock:
             finished = _finish_current(seller.id, delivered=True)
-            _save()
+            _rss_save()
         if not finished:
             return await interaction.response.send_message("ℹ️ You're not serving anyone.", ephemeral=True)
         await interaction.response.send_message(
             f"✅ Delivered to <@{finished['user_id']}>. You're free – press ▶️ Next when ready.", ephemeral=True)
-        await log(interaction.guild,
-                  f"✅ {seller.mention} delivered {describe(finished)} to <@{finished['user_id']}>")
-        await update_panel()
+        await rss_log(interaction.guild,
+                  f"✅ {seller.mention} delivered {rss_describe(finished)} to <@{finished['user_id']}>")
+        await rss_update_panel()
 
     @discord.ui.button(label="No-show", emoji="⏭️", style=discord.ButtonStyle.danger,
                        custom_id="rss:noshow", row=1)
     async def no_show(self, interaction: discord.Interaction, button: discord.ui.Button):
         seller = interaction.user
-        if not is_seller(seller):
+        if not rss_is_seller(seller):
             return await interaction.response.send_message("❌ Only RSS sellers can use this.", ephemeral=True)
         async with rss_lock:
             dropped = _finish_current(seller.id, delivered=False)
-            _save()
+            _rss_save()
         if not dropped:
             return await interaction.response.send_message("ℹ️ You're not serving anyone.", ephemeral=True)
         await interaction.response.send_message(
             f"⏭️ Dropped <@{dropped['user_id']}> (not counted). Press ▶️ Next to call the next person.",
             ephemeral=True)
-        await safe_dm(interaction.guild, dropped["user_id"],
+        await rss_safe_dm(interaction.guild, dropped["user_id"],
                       "⏭️ You missed your RSS turn and were removed from the queue. Feel free to join again.")
-        await log(interaction.guild, f"⏭️ {seller.mention} marked <@{dropped['user_id']}> as no-show")
-        await update_panel()
+        await rss_log(interaction.guild, f"⏭️ {seller.mention} marked <@{dropped['user_id']}> as no-show")
+        await rss_update_panel()
 
 
 # Register the persistent view once so buttons keep working after a restart
@@ -4627,18 +4627,18 @@ async def _rss_on_ready():
     if not _rss_view_added:
         bot.add_view(RSSQueueView())
         _rss_view_added = True
-    await update_panel()
+    await rss_update_panel()
 
 
 # ── Commands (sellers / admins) ──────────────────────────────
 @bot.command(name="rsspanel")
 async def rss_panel(ctx):
     """Post the queue board in this channel."""
-    if not is_seller(ctx.author):
+    if not rss_is_seller(ctx.author):
         return
-    msg = await ctx.send(embed=build_embed(), view=RSSQueueView())
+    msg = await ctx.send(embed=rss_build_embed(), view=RSSQueueView())
     rss["panel"] = {"channel_id": ctx.channel.id, "message_id": msg.id}
-    _save()
+    _rss_save()
     try:
         await ctx.message.delete()
     except discord.HTTPException:
@@ -4648,45 +4648,45 @@ async def rss_panel(ctx):
 @bot.command(name="rssadd")
 async def rss_add(ctx, member: discord.Member, amount: str, *, rss_type: str = ""):
     """Add someone manually: !rssadd @user 1.5b Food"""
-    if not is_seller(ctx.author):
+    if not rss_is_seller(ctx.author):
         return
-    value = parse_amount(amount)
+    value = rss_parse_amount(amount)
     if value is None:
         return await ctx.send("❌ Couldn't read that amount.", delete_after=10)
     async with rss_lock:
         rss["queue"].append({"user_id": member.id, "amount": value, "rss_type": rss_type.strip(),
                              "ign": "", "joined": int(time.time())})
         pos = len(rss["queue"])
-        _save()
-    await ctx.send(f"✅ Added {member.display_name} as **#{pos}** for **{fmt(value)}**.", delete_after=10)
-    await update_panel()
+        _rss_save()
+    await ctx.send(f"✅ Added {member.display_name} as **#{pos}** for **{rss_fmt(value)}**.", delete_after=10)
+    await rss_update_panel()
 
 
 @bot.command(name="rssremove")
 async def rss_remove(ctx, member: discord.Member):
     """Remove someone from the queue: !rssremove @user"""
-    if not is_seller(ctx.author):
+    if not rss_is_seller(ctx.author):
         return
     async with rss_lock:
         before = len(rss["queue"])
         rss["queue"] = [e for e in rss["queue"] if e["user_id"] != member.id]
         removed = len(rss["queue"]) < before
-        _save()
+        _rss_save()
     await ctx.send(f"{'🗑️ Removed' if removed else 'ℹ️ Not in queue:'} {member.display_name}", delete_after=10)
-    await update_panel()
+    await rss_update_panel()
 
 
 @bot.command(name="rssclear")
 async def rss_clear(ctx):
     """Empty the whole queue (weekly totals are kept)."""
-    if not is_seller(ctx.author):
+    if not rss_is_seller(ctx.author):
         return
     async with rss_lock:
         rss["queue"] = []
         rss["serving"] = {}
-        _save()
+        _rss_save()
     await ctx.send("🧹 RSS queue cleared.", delete_after=10)
-    await update_panel()
+    await rss_update_panel()
     
 # =============================================================================
 # REBUILT HELP COMMAND
