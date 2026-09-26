@@ -4263,7 +4263,7 @@ def _rss_load():
             data = json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         data = {}
-    data.setdefault("queue", [])        # [{user_id, amount, rss_type, ign, joined}]
+    data.setdefault("queue", [])        # [{user_id, amount, resources, ign, joined}]
     data.setdefault("serving", {})      # {seller_id: entry}
     data.setdefault("weekly", {"week": None, "used": {}})
     data.setdefault("panel", {"channel_id": None, "message_id": None})
@@ -4336,10 +4336,20 @@ def rss_fmt(n):
     return str(n)
 
 
+RSS_RESOURCES = {"Gold": "🪙", "Wood": "🪵", "Ore": "⛏️"}
+
+
 def rss_describe(entry):
-    parts = [f"**{rss_fmt(entry['amount'])}**"]
-    if entry.get("rss_type"):
-        parts.append(entry["rss_type"])
+    res = entry.get("resources")
+    if res:
+        items = [f"{RSS_RESOURCES.get(k, '')} **{rss_fmt(v)}** {k}" for k, v in res.items() if v]
+        parts = [" + ".join(items)]
+        if len(items) > 1:
+            parts.append(f"total {rss_fmt(entry['amount'])}")
+    else:  # older entries from before the resource split
+        parts = [f"**{rss_fmt(entry['amount'])}**"]
+        if entry.get("rss_type"):
+            parts.append(entry["rss_type"])
     if entry.get("ign"):
         parts.append(f"IGN: {entry['ign']}")
     return " · ".join(parts)
@@ -4437,19 +4447,36 @@ def _finish_current(seller_id, delivered):
 
 # ── Join form ────────────────────────────────────────────────
 class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
-    amount = discord.ui.TextInput(
-        label="Amount", placeholder="e.g. 500m, 1.5b, 2b", max_length=20)
-    rss_type = discord.ui.TextInput(
-        label="Resource type", placeholder="Food / Wood / Stone / Ore / Mixed",
-        required=False, max_length=40)
+    gold = discord.ui.TextInput(
+        label="🪙 Gold", placeholder="e.g. 1b – leave empty if you don't need gold",
+        required=False, max_length=20)
+    wood = discord.ui.TextInput(
+        label="🪵 Wood", placeholder="e.g. 500m – leave empty if you don't need wood",
+        required=False, max_length=20)
+    ore = discord.ui.TextInput(
+        label="⛏️ Ore", placeholder="e.g. 1.5b – leave empty if you don't need ore",
+        required=False, max_length=20)
     ign = discord.ui.TextInput(
         label="In-game name", required=False, max_length=40)
 
     async def on_submit(self, interaction: discord.Interaction):
-        amount = rss_parse_amount(self.amount.value)
-        if amount is None:
+        resources = {}
+        for name, field in (("Gold", self.gold), ("Wood", self.wood), ("Ore", self.ore)):
+            text = field.value.strip()
+            if not text or text == "0":
+                continue
+            value = rss_parse_amount(text)
+            if value is None:
+                return await interaction.response.send_message(
+                    f"❌ Couldn't read the **{name}** amount `{text}`. Try something like `500m` or `1.5b`.",
+                    ephemeral=True)
+            resources[name] = value
+
+        if not resources:
             return await interaction.response.send_message(
-                "❌ Couldn't read that amount. Try something like `500m` or `1.5b`.", ephemeral=True)
+                "❌ Fill in at least one of Gold, Wood or Ore.", ephemeral=True)
+
+        amount = sum(resources.values())
         if amount < MIN_ORDER:
             return await interaction.response.send_message(
                 f"❌ Minimum order is **{rss_fmt(MIN_ORDER)}**.", ephemeral=True)
@@ -4471,7 +4498,7 @@ class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
             rss["queue"].append({
                 "user_id": uid,
                 "amount": amount,
-                "rss_type": self.rss_type.value.strip(),
+                "resources": resources,
                 "ign": self.ign.value.strip(),
                 "joined": int(time.time()),
             })
@@ -4479,7 +4506,7 @@ class RSSOrderModal(discord.ui.Modal, title="Join the RSS queue"):
             _rss_save()
 
         await interaction.response.send_message(
-            f"✅ You're **#{position}** in line for **{rss_fmt(amount)}**. "
+            f"✅ You're **#{position}** in line for {rss_describe(rss['queue'][position - 1])}. "
             f"You'll get pinged when a seller is ready.", ephemeral=True)
         await rss_update_panel()
 
@@ -4646,19 +4673,29 @@ async def rss_panel(ctx):
 
 
 @bot.command(name="rssadd")
-async def rss_add(ctx, member: discord.Member, amount: str, *, rss_type: str = ""):
-    """Add someone manually: !rssadd @user 1.5b Food"""
+async def rss_add(ctx, member: discord.Member, *, order: str = ""):
+    """Add someone manually: !rssadd @user 1b gold 500m wood"""
     if not rss_is_seller(ctx.author):
         return
-    value = rss_parse_amount(amount)
-    if value is None:
-        return await ctx.send("❌ Couldn't read that amount.", delete_after=10)
+    resources = {}
+    tokens = order.split()
+    usage = "Use it like `!rssadd @user 1b gold 500m wood` (Gold / Wood / Ore)."
+    if not tokens or len(tokens) % 2:
+        return await ctx.send(f"❌ {usage}", delete_after=15)
+    for amount_txt, name_txt in zip(tokens[0::2], tokens[1::2]):
+        name = next((r for r in RSS_RESOURCES if r.lower() == name_txt.lower()), None)
+        value = rss_parse_amount(amount_txt)
+        if name is None or value is None:
+            return await ctx.send(f"❌ Couldn't read `{amount_txt} {name_txt}`. {usage}", delete_after=15)
+        resources[name] = resources.get(name, 0) + value
+    value = sum(resources.values())
     async with rss_lock:
-        rss["queue"].append({"user_id": member.id, "amount": value, "rss_type": rss_type.strip(),
-                             "ign": "", "joined": int(time.time())})
+        entry = {"user_id": member.id, "amount": value, "resources": resources,
+                 "ign": "", "joined": int(time.time())}
+        rss["queue"].append(entry)
         pos = len(rss["queue"])
         _rss_save()
-    await ctx.send(f"✅ Added {member.display_name} as **#{pos}** for **{rss_fmt(value)}**.", delete_after=10)
+    await ctx.send(f"✅ Added {member.display_name} as **#{pos}** for {rss_describe(entry)}.", delete_after=10)
     await rss_update_panel()
 
 
