@@ -4284,6 +4284,7 @@ def _rss_load():
     data.setdefault("serving", {})      # {seller_id: {user_id, resources (this portion), ign, joined}}
     data.setdefault("weekly", {"week": None, "used": {}})
     data.setdefault("panel", {"channel_id": None, "message_id": None})
+    data.setdefault("notes", {})       # {seller_id: "where buyers have to go"}
     data["queue"] = [_rss_migrate(e) for e in data["queue"]]
     data["serving"] = {k: _rss_migrate(v) for k, v in data["serving"].items()}
     return data
@@ -4399,6 +4400,34 @@ def id_text(entry):
     return f" · ID: `{entry['ign']}`" if entry.get("ign") else ""
 
 
+def last_note(seller_id):
+    """The seller's last used location (pre-fills the Next pop-up)."""
+    n = rss.get("notes", {}).get(str(seller_id)) or {}
+    return {"extra": n} if isinstance(n, str) else n
+
+
+def note_text(note, short=False):
+    if not note:
+        return ""
+    parts = []
+    if note.get("alliance"):
+        parts.append(f"Alliance **{note['alliance']}**")
+    if note.get("marker"):
+        parts.append(f"Marker **{note['marker']}**")
+    text = " · ".join(parts)
+    if note.get("extra"):
+        extra = note["extra"]
+        if short and len(extra) > 80:
+            extra = extra[:80] + "…"
+        text += ("\n　" if text and not short else (" · " if text else "")) + extra
+    return text
+
+
+def note_block(note):
+    text = note_text(note)
+    return f"\n📍 **Where to go:** {text}" if text else ""
+
+
 def serving_amount(uid):
     return sum(res_total(e["resources"]) for e in rss["serving"].values() if e["user_id"] == uid)
 
@@ -4455,6 +4484,8 @@ def rss_build_embed():
         lines = []
         for sid, e in rss["serving"].items():
             line = f"<@{sid}> ➜ <@{e['user_id']}> · {res_text(e['resources'])}{id_text(e)}"
+            if e.get("note"):
+                line += f"\n　📍 {note_text(e['note'], short=True)}"
             i = queue_index(e["user_id"])
             if i is not None:
                 line += f" · *+{rss_fmt(res_total(rss['queue'][i]['resources']))} in later weeks*"
@@ -4726,31 +4757,17 @@ class RSSQueueView(discord.ui.View):
         if not rss_is_seller(seller):
             return await interaction.response.send_message("❌ Only RSS sellers can use this.", ephemeral=True)
 
-        async with rss_lock:
-            finished = _finish_current(seller.id, delivered=True)
-            nxt, later = None, 0
-            i = next_eligible_index()
-            if i is not None:
-                entry = rss["queue"][i]
-                portion, rest = take_portion(entry["resources"], allowance_now(entry["user_id"]))
-                nxt = {"user_id": entry["user_id"], "resources": portion,
-                       "ign": entry.get("ign", ""), "joined": entry["joined"]}
-                rss["serving"][str(seller.id)] = nxt
-                if rest:
-                    entry["resources"] = rest      # keeps their place for next week
-                    later = res_total(rest)
-                else:
-                    rss["queue"].pop(i)
-            waiting_next_week = sum(1 for e in rss["queue"] if allowance_now(e["user_id"]) == 0)
-            j = next_eligible_index()
-            new_first = rss["queue"][j] if j is not None else None
-            _rss_save()
-
-        if finished:
-            await rss_log(interaction.guild,
-                          f"✅ {seller.mention} delivered {res_text(finished['resources'])} to <@{finished['user_id']}>")
-
-        if not nxt:
+        i = next_eligible_index()
+        if i is None:
+            # Nobody to call – just close the current delivery (no pop-up needed)
+            async with rss_lock:
+                finished = _finish_current(seller.id, delivered=True)
+                waiting_next_week = sum(1 for e in rss["queue"] if allowance_now(e["user_id"]) == 0)
+                _rss_save()
+            if finished:
+                await rss_log(interaction.guild,
+                              f"✅ {seller.mention} delivered {res_text(finished['resources'])} "
+                              f"to <@{finished['user_id']}>")
             msg = "✅ Marked the last customer as delivered. " if finished else ""
             msg += "📭 Nobody left to call this week."
             if waiting_next_week:
@@ -4758,25 +4775,9 @@ class RSSQueueView(discord.ui.View):
             await interaction.response.send_message(msg, ephemeral=True)
             return await rss_update_panel()
 
-        later_txt = f"\n*They still get {rss_fmt(later)} in the coming weeks.*" if later else ""
-        await interaction.response.send_message(
-            f"📣 Calling <@{nxt['user_id']}> – {res_text(nxt['resources'])}{id_text(nxt)}{later_txt}",
-            ephemeral=True)
-
-        await interaction.channel.send(
-            f"🔔 <@{nxt['user_id']}> **you're up!** {seller.mention} is ready to send you "
-            f"{res_text(nxt['resources'])}{id_text(nxt)}.",
-            allowed_mentions=discord.AllowedMentions(users=True),
-            delete_after=PING_DELETE_AFTER,
-        )
-        if DM_ON_CALL:
-            await rss_safe_dm(interaction.guild, nxt["user_id"],
-                              f"🔔 It's your turn for RSS! **{seller.display_name}** is ready to send you "
-                              f"{res_text(nxt['resources'])}. Head to {interaction.channel.mention}.")
-        if DM_HEADS_UP and new_first:
-            await rss_safe_dm(interaction.guild, new_first["user_id"],
-                              "⏭️ Heads up – you're **next** in the RSS queue. Get ready!")
-        await rss_update_panel()
+        buyer = interaction.guild.get_member(rss["queue"][i]["user_id"])
+        await interaction.response.send_modal(
+            RSSCallModal(last_note(seller.id), buyer.display_name if buyer else None, seller.display_name))
 
     @discord.ui.button(label="Done", emoji="✅", style=discord.ButtonStyle.success,
                        custom_id="rss:done", row=1)
@@ -4824,6 +4825,92 @@ class RSSQueueView(discord.ui.View):
                           "Your order is kept.")
         await rss_log(interaction.guild, f"⏭️ {seller.mention} marked <@{dropped['user_id']}> as no-show")
         await rss_update_panel()
+
+
+# ── "Next" pop-up: seller says where the buyer has to go ────
+class RSSCallModal(discord.ui.Modal):
+    def __init__(self, last=None, buyer_name=None, seller_name="me"):
+        title = f"Call {buyer_name}" if buyer_name else "Call next buyer"
+        super().__init__(title=title[:45])
+        last = last or {}
+        self.alliance = discord.ui.TextInput(
+            label="Alliance the buyer has to join", placeholder="e.g. NVR2",
+            default=last.get("alliance") or None, required=True, max_length=40)
+        self.marker = discord.ui.TextInput(
+            label="Marker / location", placeholder="e.g. marker 'RSS' or X:512 Y:640",
+            default=last.get("marker") or None, required=True, max_length=100)
+        self.extra = discord.ui.TextInput(
+            label="Extra info (optional)", style=discord.TextStyle.paragraph,
+            placeholder=f"e.g. ping @{seller_name} in DM when you're there"[:100],
+            # "@YourName" becomes a clickable mention when the buyer gets the message
+            default=last.get("extra") or f"Ping @{seller_name} in DM when you're there",
+            required=False, max_length=200)
+        self.add_item(self.alliance)
+        self.add_item(self.marker)
+        self.add_item(self.extra)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        note = {"alliance": self.alliance.value.strip(),
+                "marker": self.marker.value.strip(),
+                "extra": self.extra.value.strip()}
+        await rss_call_next(interaction, note)
+
+
+async def rss_call_next(interaction: discord.Interaction, note: dict):
+    seller = interaction.user
+    async with rss_lock:
+        rss["notes"][str(seller.id)] = note          # pre-fill next time (plain text)
+        # Turn "@SellerName" in the text into a real, clickable mention
+        note = dict(note)
+        for field in ("alliance", "marker", "extra"):
+            note[field] = note[field].replace(f"@{seller.display_name}", seller.mention)
+        finished = _finish_current(seller.id, delivered=True)
+        nxt, later = None, 0
+        i = next_eligible_index()
+        if i is not None:
+            entry = rss["queue"][i]
+            portion, rest = take_portion(entry["resources"], allowance_now(entry["user_id"]))
+            nxt = {"user_id": entry["user_id"], "resources": portion,
+                   "ign": entry.get("ign", ""), "joined": entry["joined"], "note": note}
+            rss["serving"][str(seller.id)] = nxt
+            if rest:
+                entry["resources"] = rest      # keeps their place for next week
+                later = res_total(rest)
+            else:
+                rss["queue"].pop(i)
+        j = next_eligible_index()
+        new_first = rss["queue"][j] if j is not None else None
+        _rss_save()
+
+    if finished:
+        await rss_log(interaction.guild,
+                      f"✅ {seller.mention} delivered {res_text(finished['resources'])} to <@{finished['user_id']}>")
+
+    if not nxt:  # someone else took the last buyer while the pop-up was open
+        msg = "✅ Marked the last customer as delivered. " if finished else ""
+        await interaction.response.send_message(msg + "📭 Nobody left to call right now.", ephemeral=True)
+        return await rss_update_panel()
+
+    later_txt = f"\n*They still get {rss_fmt(later)} in the coming weeks.*" if later else ""
+    await interaction.response.send_message(
+        f"📣 Calling <@{nxt['user_id']}> – {res_text(nxt['resources'])}{id_text(nxt)}{later_txt}"
+        f"{note_block(note)}", ephemeral=True)
+
+    await interaction.channel.send(
+        f"🔔 <@{nxt['user_id']}> **you're up!** {seller.mention} is ready to send you "
+        f"{res_text(nxt['resources'])}{id_text(nxt)}.{note_block(note)}",
+        allowed_mentions=discord.AllowedMentions(users=[discord.Object(nxt["user_id"])]),  # only ping the buyer
+        delete_after=PING_DELETE_AFTER,
+    )
+    if DM_ON_CALL:
+        await rss_safe_dm(interaction.guild, nxt["user_id"],
+                          f"🔔 It's your turn for RSS! **{seller.display_name}** is ready to send you "
+                          f"{res_text(nxt['resources'])}.{note_block(note)}\n"
+                          f"Details in {interaction.channel.mention}.")
+    if DM_HEADS_UP and new_first:
+        await rss_safe_dm(interaction.guild, new_first["user_id"],
+                          "⏭️ Heads up – you're **next** in the RSS queue. Get ready!")
+    await rss_update_panel()
 
 
 # Refresh the board when the week rolls over (so "⏳ next week" people become callable)
