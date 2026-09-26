@@ -4248,7 +4248,7 @@ import discord
 from discord.ext import tasks
 
 # ── Config ───────────────────────────────────────────────────
-RSS_SELLER_ROLE_ID = 0                     # ⬅️ role your 3 RSS sellers have
+RSS_SELLER_ROLE_ID = 1553185357095506000                 # ⬅️ role your 3 RSS sellers have
 RSS_LOG_CHANNEL_ID = CONFIRM_CHANNEL_ID    # where "delivered / skipped" logs go (None = off)
 WEEKLY_LIMIT = 2_000_000_000               # max a member can RECEIVE per week (2B)
 MAX_ORDER_TOTAL = 10_000_000_000           # biggest single order (10B = 5 weeks) – None = no cap
