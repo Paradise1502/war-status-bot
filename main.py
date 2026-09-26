@@ -10,8 +10,6 @@ import re
 from discord.ext import commands
 from discord.ext import tasks
 from datetime import datetime, timedelta, UTC, timezone, date
-import time
-from zoneinfo import ZoneInfo
 import asyncio
 import unicodedata
 
@@ -4238,7 +4236,14 @@ async def on_ready():
 #  RSS SELLING QUEUE  –  paste below your other bot code
 #  Uses the same `bot` object (commands.Bot) – requires discord.py 2.x
 # ─────────────────────────────────────────────────────────────
-
+import asyncio
+import datetime as _dt  # alias so it never clashes with "from datetime import datetime"
+import json
+import re
+import time
+from zoneinfo import ZoneInfo
+ 
+import discord
 # ── Config ───────────────────────────────────────────────────
 RSS_SELLER_ROLE_ID = 0                     # ⬅️ role your 3 RSS sellers have
 RSS_LOG_CHANNEL_ID = CONFIRM_CHANNEL_ID    # where "delivered / skipped" logs go (None = off)
