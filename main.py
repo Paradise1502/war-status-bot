@@ -1078,10 +1078,10 @@ def split_args(args, valid_seasons):
     """
     Pull a season and a window out of loose trailing arguments, in any order.
  
-        !progress 123 1d
-        !progress 123 sos4
-        !progress 123 sos4 7d
-        !progress 123 7d sos4
+        ! 123 1d
+        ! 123 sos4
+        ! 123 sos4 7d
+        ! 123 7d sos4
  
     Returns (season, window, leftovers).
     """
@@ -1935,7 +1935,7 @@ async def excluded_cmd(ctx):
 @bot.command(name="deadcheck", aliases=["reqs", "deadreq"])
 async def deadcheck(ctx, *args, min_power=50_000_000):
     """
-    Season dead requirement progress, worst first.
+    Season dead requirement , worst first.
 
         !deadcheck           375, everyone under 100%
         !deadcheck 50        show 50
@@ -3082,14 +3082,14 @@ async def farmcheck(ctx, farm_id: str):
             await ctx.send(f"❌ Error: {e}")
 
 # =============================================================================
-# REBUILT !progress
+# REBUILT !
 # =============================================================================
-# Replaces your existing progress command entirely. Delete the old one first.
+# Replaces your existing  command entirely. Delete the old one first.
 #
 # What changed:
 #   - Merits-sheet stats now work for ANY server you have an export for, not
 #     just 375. Looks up the player's home server and pulls that dataset.
-#   - Accepts a window: !progress 123456 7d
+#   - Accepts a window: ! 123456 7d
 #   - Season-to-date by default.
 #   - Cleaner embed layout.
 # =============================================================================
@@ -3412,7 +3412,7 @@ async def progress(ctx, lord_id: str, *args):
             embed.add_field(name="📊 Merit Ratio",
                             value=f"{merit_ratio:.2f}%{rk(r_ratio)}",
                             inline=True)
-            embed.add_field(name="💧 Mana",
+            embed.add_field(name="💧 Mana gathered",
                             value=stat_field(val(row_latest, mana_g_idx), mana_gain, rt_mana, r_mana),
                             inline=True)
             embed.add_field(name="⚔️ Kills",
