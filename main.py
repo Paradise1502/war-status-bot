@@ -2120,7 +2120,7 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
-async def groupstats(ctx, season: str = DEFAULT_SEASON):
+async def groupstats(ctx, *args):
     allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
     
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
@@ -2173,18 +2173,24 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
     }
     
     try:
-        season = season.lower()
-        
-        # Check if synced in cache
-        if season not in bot_cache["seasons"]:
-            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+        season, window, unknown = split_args(args, SEASON_SHEETS)
+        if unknown:
+            await ctx.send(
+                f"❌ Didn't understand `{unknown[0]}`.\n"
+                f"Seasons: {', '.join(SEASON_SHEETS)} · "
+                f"Windows: `7d`, `on:2026-09-02`, `2026-09-01..2026-09-04`"
+            )
             return
 
-        # Load from bot memory instantly
-        data_latest = bot_cache["seasons"][season]["latest"]
-        data_prev   = bot_cache["seasons"][season]["prev"]
-        latest_title = bot_cache["seasons"][season]["latest_title"]
-        prev_title   = bot_cache["seasons"][season]["prev_title"]
+        win = await get_window_data(season, window)
+        if win is None:
+            await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
+            return
+
+        data_latest  = win["latest"]
+        data_prev    = win["prev"]
+        latest_title = win["latest_title"]
+        prev_title   = win["prev_title"]
         headers = data_latest[0]
 
         def find_idx(name, fallback):
@@ -2323,7 +2329,7 @@ async def groupstats(ctx, season: str = DEFAULT_SEASON):
         await ctx.send(f"❌ **Error:** {e}")
         
 @bot.command(aliases=['grouplb', 'gl'])
-async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
+async def groupleaderboard(ctx, *args):
     async with ctx.typing():
         allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
 
@@ -2377,16 +2383,24 @@ async def groupleaderboard(ctx, season: str = DEFAULT_SEASON):
         }
 
         try:
-            season = season.lower()
-
-            if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
-                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+            season, window, unknown = split_args(args, SEASON_SHEETS)
+            if unknown:
+                await ctx.send(
+                    f"❌ Didn't understand `{unknown[0]}`.\n"
+                    f"Seasons: {', '.join(SEASON_SHEETS)} · "
+                    f"Windows: `7d`, `on:2026-09-02`, `2026-09-01..2026-09-04`"
+                )
                 return
-
-            data_latest = bot_cache["seasons"][season]["latest"]
-            data_prev   = bot_cache["seasons"][season]["prev"]
-            latest_title = bot_cache["seasons"][season]["latest_title"]
-            prev_title   = bot_cache["seasons"][season]["prev_title"]
+    
+            win = await get_window_data(season, window)
+            if win is None:
+                await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
+                return
+    
+            data_latest  = win["latest"]
+            data_prev    = win["prev"]
+            latest_title = win["latest_title"]
+            prev_title   = win["prev_title"]
             headers = data_latest[0]
 
             def find_idx(name):
