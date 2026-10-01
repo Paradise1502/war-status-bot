@@ -5348,6 +5348,206 @@ async def rss_clear(ctx):
     await ctx.send("🧹 RSS queue cleared.", delete_after=10)
     await rss_update_panel()
 
+# ─────────────────────────────────────────────────────────────
+#  TRANSLATOR
+#   • Right-click a message → Apps → "Translate"  (private, into YOUR Discord language)
+#   • React with a flag 🇬🇧 🇨🇳 🇩🇪 …              (bot replies with that language)
+#   • Auto-translate: non-English messages in chosen channels get an English reply
+#  Uses Google Translate's free web endpoint – no API key needed.
+# ─────────────────────────────────────────────────────────────
+import aiohttp
+
+# ── Config ───────────────────────────────────────────────────
+AUTO_TRANSLATE_CHANNEL_IDS = []      # ⬅️ channel IDs for auto-translate, e.g. [123, 456]  ([] = off)
+AUTO_TRANSLATE_TO = "en"             # auto-translate non-English messages into this language
+FLAG_REPLY_DELETE_AFTER = 5 * 60     # flag-reaction translations delete themselves after 5 min (None = keep)
+TRANSLATE_MIN_CHARS = 2              # ignore super short messages ("k", "?")
+
+FLAG_LANGS = {
+    "🇬🇧": "en", "🇺🇸": "en", "🇨🇳": "zh-CN", "🇹🇼": "zh-TW", "🇭🇰": "zh-TW",
+    "🇩🇪": "de", "🇦🇹": "de", "🇫🇷": "fr", "🇪🇸": "es", "🇲🇽": "es", "🇮🇹": "it",
+    "🇷🇺": "ru", "🇺🇦": "uk", "🇵🇱": "pl", "🇳🇱": "nl", "🇹🇷": "tr", "🇧🇷": "pt",
+    "🇵🇹": "pt", "🇯🇵": "ja", "🇰🇷": "ko", "🇻🇳": "vi", "🇹🇭": "th", "🇮🇩": "id",
+    "🇵🇭": "tl", "🇲🇾": "ms", "🇸🇦": "ar", "🇮🇳": "hi",
+}
+
+LANG_NAMES = {
+    "en": "English", "zh-CN": "Chinese", "zh-TW": "Chinese (Trad.)", "zh": "Chinese", "de": "German",
+    "fr": "French", "es": "Spanish", "it": "Italian", "ru": "Russian", "uk": "Ukrainian",
+    "pl": "Polish", "nl": "Dutch", "tr": "Turkish", "pt": "Portuguese", "ja": "Japanese",
+    "ko": "Korean", "vi": "Vietnamese", "th": "Thai", "id": "Indonesian", "tl": "Filipino",
+    "ms": "Malay", "ar": "Arabic", "hi": "Hindi", "sv": "Swedish", "da": "Danish",
+    "no": "Norwegian", "fi": "Finnish", "cs": "Czech", "ro": "Romanian", "hu": "Hungarian",
+    "el": "Greek", "he": "Hebrew", "iw": "Hebrew",
+}
+
+
+def lang_name(code):
+    return LANG_NAMES.get(code) or LANG_NAMES.get((code or "").split("-")[0]) or (code or "?").upper()
+
+
+# ── Translation engine ───────────────────────────────────────
+_tr_session = None
+
+
+async def _tr_http():
+    global _tr_session
+    if _tr_session is None or _tr_session.closed:
+        _tr_session = aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15))
+    return _tr_session
+
+
+_CUSTOM_EMOJI_RE = re.compile(r"<a?:\w+:\d+>")
+_URL_RE = re.compile(r"https?://\S+")
+
+
+def _clean_for_translation(text):
+    text = _CUSTOM_EMOJI_RE.sub("", text)
+    return text.strip()
+
+
+def _worth_translating(text):
+    """Skip messages that are only links, numbers, emojis or punctuation."""
+    letters = _URL_RE.sub("", text)
+    return len(letters.strip()) >= TRANSLATE_MIN_CHARS and any(ch.isalpha() for ch in letters)
+
+
+async def translate_text(text, target="en"):
+    """Returns (translated_text, detected_source_language) or (None, None) on failure."""
+    text = _clean_for_translation(text)
+    if not _worth_translating(text):
+        return None, None
+    try:
+        session = await _tr_http()
+        async with session.post(
+            "https://translate.googleapis.com/translate_a/single",
+            params={"client": "gtx", "sl": "auto", "tl": target, "dt": "t"},
+            data={"q": text[:4500]},
+        ) as resp:
+            if resp.status != 200:
+                print(f"[translate] HTTP {resp.status}")
+                return None, None
+            data = await resp.json(content_type=None)
+        translated = "".join(seg[0] for seg in (data[0] or []) if seg and seg[0])
+        source = data[2] if len(data) > 2 else None
+        return translated.strip() or None, source
+    except Exception as e:  # network trouble, rate limit, odd response …
+        print(f"[translate] failed: {e!r}")
+        return None, None
+
+
+def _same_language(source, target):
+    return bool(source) and source.split("-")[0].lower() == target.split("-")[0].lower()
+
+
+def _locale_to_lang(locale):
+    """Discord client language → Google language code."""
+    loc = str(locale or "en-US")
+    if loc in ("zh-CN", "zh-TW"):
+        return loc
+    return loc.split("-")[0]
+
+
+def _format_translation(translated, source, target):
+    return f"-# 🌐 {lang_name(source)} → {lang_name(target)}\n{translated}"[:2000]
+
+
+# ── 1) Right-click → Apps → Translate (only you see it) ─────
+@bot.tree.context_menu(name="Translate")
+async def translate_context_menu(interaction: discord.Interaction, message: discord.Message):
+    target = _locale_to_lang(interaction.locale)
+    if not message.content:
+        return await interaction.response.send_message("ℹ️ That message has no text to translate.",
+                                                       ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    translated, source = await translate_text(message.clean_content, target)
+    if not translated:
+        return await interaction.followup.send("❌ Couldn't translate that right now – try again in a bit.",
+                                               ephemeral=True)
+    if _same_language(source, target):
+        return await interaction.followup.send(f"ℹ️ That message is already in {lang_name(target)}.",
+                                               ephemeral=True)
+    await interaction.followup.send(_format_translation(translated, source, target), ephemeral=True,
+                                    allowed_mentions=discord.AllowedMentions.none())
+
+
+# Make the right-click command show up (synced to each server so it appears instantly)
+_tr_synced = False
+
+
+@bot.listen("on_ready")
+async def _translate_sync_commands():
+    global _tr_synced
+    if _tr_synced:
+        return
+    _tr_synced = True
+    for guild in bot.guilds:
+        try:
+            bot.tree.copy_global_to(guild=guild)
+            await bot.tree.sync(guild=guild)
+        except discord.HTTPException as e:
+            print(f"[translate] couldn't register the Translate command in {guild.name}: {e} "
+                  f"(re-invite the bot with the 'applications.commands' scope)")
+
+
+# ── 2) Flag reactions → translated reply ─────────────────────
+_flag_done = {}   # (message_id, lang) → time, so 5 people reacting 🇬🇧 only gives one reply
+
+
+@bot.listen("on_raw_reaction_add")
+async def _translate_flag_reaction(payload):
+    target = FLAG_LANGS.get(str(payload.emoji))
+    if not target or (payload.member and payload.member.bot):
+        return
+    key = (payload.message_id, target)
+    now = time.time()
+    if now - _flag_done.get(key, 0) < 600:
+        return
+    _flag_done[key] = now
+    if len(_flag_done) > 500:  # keep memory small
+        for k in [k for k, t in _flag_done.items() if now - t > 600]:
+            _flag_done.pop(k, None)
+
+    channel = bot.get_channel(payload.channel_id)
+    if channel is None:
+        return
+    try:
+        message = await channel.fetch_message(payload.message_id)
+    except discord.HTTPException:
+        return
+    if not message.content or message.author.id == bot.user.id:
+        return
+
+    translated, source = await translate_text(message.clean_content, target)
+    if not translated or _same_language(source, target):
+        return
+    try:
+        await message.reply(_format_translation(translated, source, target), mention_author=False,
+                            allowed_mentions=discord.AllowedMentions.none(),
+                            delete_after=FLAG_REPLY_DELETE_AFTER)
+    except discord.HTTPException:
+        pass
+
+
+# ── 3) Auto-translate chosen channels ────────────────────────
+@bot.listen("on_message")
+async def _translate_auto(message):
+    if message.channel.id not in AUTO_TRANSLATE_CHANNEL_IDS:
+        return
+    if message.author.bot or not message.content or message.content.startswith("!"):
+        return
+    translated, source = await translate_text(message.clean_content, AUTO_TRANSLATE_TO)
+    if not translated or _same_language(source, AUTO_TRANSLATE_TO):
+        return
+    if translated.casefold() == _clean_for_translation(message.clean_content).casefold():
+        return  # nothing actually changed (names, "lol", etc.)
+    try:
+        await message.reply(_format_translation(translated, source, AUTO_TRANSLATE_TO), mention_author=False,
+                            allowed_mentions=discord.AllowedMentions.none())
+    except discord.HTTPException:
+        pass
+
+
 # =============================================================================
 # REBUILT HELP COMMAND
 # =============================================================================
