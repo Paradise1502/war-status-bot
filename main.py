@@ -5412,28 +5412,101 @@ def _worth_translating(text):
     return len(letters.strip()) >= TRANSLATE_MIN_CHARS and any(ch.isalpha() for ch in letters)
 
 
+_TR_HEADERS = {
+    "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                   "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"),
+}
+_tr_last_error = ""
+
+
+async def _tr_google(text, target):
+    """Google Translate web endpoint (same one the browser extension uses)."""
+    session = await _tr_http()
+    params = {"client": "gtx", "sl": "auto", "tl": target, "dt": "t", "q": text}
+    async with session.get("https://translate.googleapis.com/translate_a/single",
+                           params=params, headers=_TR_HEADERS) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"google HTTP {resp.status}")
+        data = await resp.json(content_type=None)
+    translated = "".join(seg[0] for seg in (data[0] or []) if seg and seg[0])
+    return translated, (data[2] if len(data) > 2 else None)
+
+
+async def _tr_google_dict(text, target):
+    """Second Google endpoint – used if the first one is blocked or rate-limited."""
+    session = await _tr_http()
+    params = {"client": "dict-chrome-ex", "sl": "auto", "tl": target, "q": text}
+    async with session.get("https://clients5.google.com/translate_a/t",
+                           params=params, headers=_TR_HEADERS) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"google-dict HTTP {resp.status}")
+        data = await resp.json(content_type=None)
+    first = data[0] if isinstance(data, list) and data else data
+    if isinstance(first, list):          # [["translated", "zh-CN"]]
+        return first[0], (first[1] if len(first) > 1 else None)
+    if isinstance(data, dict) and "sentences" in data:
+        return "".join(x.get("trans", "") for x in data["sentences"]), data.get("src")
+    return str(first), None
+
+
+def _guess_lang(text):
+    """Rough script-based guess – only needed for the MyMemory fallback."""
+    for ch in text:
+        o = ord(ch)
+        if 0x3040 <= o <= 0x30FF:
+            return "ja"
+        if 0xAC00 <= o <= 0xD7AF:
+            return "ko"
+        if 0x4E00 <= o <= 0x9FFF:
+            return "zh-CN"
+        if 0x0400 <= o <= 0x04FF:
+            return "ru"
+        if 0x0E00 <= o <= 0x0E7F:
+            return "th"
+        if 0x0600 <= o <= 0x06FF:
+            return "ar"
+    return "en"
+
+
+async def _tr_mymemory(text, target):
+    """Free MyMemory API – last fallback (needs a guessed source language)."""
+    source = _guess_lang(text)
+    if _same_language(source, target):
+        return text, source
+    session = await _tr_http()
+    params = {"q": text[:500], "langpair": f"{source}|{target}"}
+    async with session.get("https://api.mymemory.translated.net/get", params=params,
+                           headers=_TR_HEADERS) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"mymemory HTTP {resp.status}")
+        data = await resp.json(content_type=None)
+    if str(data.get("responseStatus")) != "200":
+        raise RuntimeError(f"mymemory: {data.get('responseDetails')}")
+    return data["responseData"]["translatedText"], source
+
+
+_TR_PROVIDERS = [("Google", _tr_google), ("Google (2)", _tr_google_dict), ("MyMemory", _tr_mymemory)]
+
+
 async def translate_text(text, target="en"):
-    """Returns (translated_text, detected_source_language) or (None, None) on failure."""
+    """Returns (translated_text, detected_source_language) or (None, None) on failure.
+    Tries each provider in order until one works."""
+    global _tr_last_error
     text = _clean_for_translation(text)
     if not _worth_translating(text):
         return None, None
-    try:
-        session = await _tr_http()
-        async with session.post(
-            "https://translate.googleapis.com/translate_a/single",
-            params={"client": "gtx", "sl": "auto", "tl": target, "dt": "t"},
-            data={"q": text[:4500]},
-        ) as resp:
-            if resp.status != 200:
-                print(f"[translate] HTTP {resp.status}")
-                return None, None
-            data = await resp.json(content_type=None)
-        translated = "".join(seg[0] for seg in (data[0] or []) if seg and seg[0])
-        source = data[2] if len(data) > 2 else None
-        return translated.strip() or None, source
-    except Exception as e:  # network trouble, rate limit, odd response …
-        print(f"[translate] failed: {e!r}")
-        return None, None
+    errors = []
+    for name, provider in _TR_PROVIDERS:
+        try:
+            translated, source = await provider(text[:1800], target)
+            if translated and translated.strip():
+                return translated.strip(), source
+            errors.append(f"{name}: empty answer")
+        except Exception as e:
+            errors.append(f"{name}: {e!r}"[:150])
+    _tr_last_error = " | ".join(errors)
+    print(f"[translate] all providers failed: {_tr_last_error}")
+    return None, None
 
 
 def _same_language(source, target):
@@ -5462,8 +5535,9 @@ async def translate_context_menu(interaction: discord.Interaction, message: disc
     await interaction.response.defer(ephemeral=True, thinking=True)
     translated, source = await translate_text(message.clean_content, target)
     if not translated:
-        return await interaction.followup.send("❌ Couldn't translate that right now – try again in a bit.",
-                                               ephemeral=True)
+        return await interaction.followup.send(
+            f"❌ Couldn't translate that right now – try again in a bit.\n-# {_tr_last_error[:300]}",
+            ephemeral=True)
     if _same_language(source, target):
         return await interaction.followup.send(f"ℹ️ That message is already in {lang_name(target)}.",
                                                ephemeral=True)
@@ -5546,6 +5620,23 @@ async def _translate_auto(message):
                             allowed_mentions=discord.AllowedMentions.none())
     except discord.HTTPException:
         pass
+
+
+
+# ── !trtest – checks every translation service and shows what works ──
+@bot.command(name="trtest")
+async def translate_test(ctx, *, text: str = "rac不是disband了么 没拉点人过来么"):
+    """Admins: !trtest [text]"""
+    if not ctx.author.guild_permissions.administrator:
+        return
+    lines = [f"🧪 Testing translation of `{text[:100]}` → English"]
+    for name, provider in _TR_PROVIDERS:
+        try:
+            out, src = await provider(_clean_for_translation(text), "en")
+            lines.append(f"✅ **{name}** ({src or '?'}): {out[:200]}")
+        except Exception as e:
+            lines.append(f"❌ **{name}**: `{e!r}`"[:300])
+    await ctx.send("\n".join(lines), allowed_mentions=discord.AllowedMentions.none())
 
 
 # =============================================================================
