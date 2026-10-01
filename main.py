@@ -5355,6 +5355,7 @@ async def rss_clear(ctx):
 #   • Auto-translate: non-English messages in chosen channels get an English reply
 #  Uses Google Translate's free web endpoint – no API key needed.
 # ─────────────────────────────────────────────────────────────
+import os
 import aiohttp
 
 # ── Config ───────────────────────────────────────────────────
@@ -5362,6 +5363,11 @@ AUTO_TRANSLATE_CHANNEL_IDS = []      # ⬅️ channel IDs for auto-translate, e.
 AUTO_TRANSLATE_TO = "en"             # auto-translate non-English messages into this language
 FLAG_REPLY_DELETE_AFTER = 5 * 60     # flag-reaction translations delete themselves after 5 min (None = keep)
 TRANSLATE_MIN_CHARS = 2              # ignore super short messages ("k", "?")
+# Optional but recommended: a free DeepL key (500k characters/month) – set it as the
+# DEEPL_API_KEY environment variable on your host, like TOKEN. Without it the bot uses
+# Google's free web endpoint, which often blocks shared hosting (HTTP 429).
+DEEPL_API_KEY = os.getenv("DEEPL_API_KEY", "").strip()
+MYMEMORY_EMAIL = os.getenv("MYMEMORY_EMAIL", "").strip()   # optional: raises MyMemory's free limit 10x
 
 FLAG_LANGS = {
     "🇬🇧": "en", "🇺🇸": "en", "🇨🇳": "zh-CN", "🇹🇼": "zh-TW", "🇭🇰": "zh-TW",
@@ -5475,6 +5481,8 @@ async def _tr_mymemory(text, target):
         return text, source
     session = await _tr_http()
     params = {"q": text[:500], "langpair": f"{source}|{target}"}
+    if MYMEMORY_EMAIL:
+        params["de"] = MYMEMORY_EMAIL
     async with session.get("https://api.mymemory.translated.net/get", params=params,
                            headers=_TR_HEADERS) as resp:
         if resp.status != 200:
@@ -5485,7 +5493,32 @@ async def _tr_mymemory(text, target):
     return data["responseData"]["translatedText"], source
 
 
-_TR_PROVIDERS = [("Google", _tr_google), ("Google (2)", _tr_google_dict), ("MyMemory", _tr_mymemory)]
+_DEEPL_TARGET = {"en": "EN-US", "pt": "PT-BR", "zh-CN": "ZH-HANS", "zh-TW": "ZH-HANT", "zh": "ZH"}
+_DEEPL_SOURCE = {"ZH": "zh-CN"}
+
+
+async def _tr_deepl(text, target):
+    """Official DeepL API – most reliable. Only used when DEEPL_API_KEY is set."""
+    if not DEEPL_API_KEY:
+        raise RuntimeError("no DEEPL_API_KEY set")
+    host = "api-free.deepl.com" if DEEPL_API_KEY.endswith(":fx") else "api.deepl.com"
+    session = await _tr_http()
+    payload = {"text": [text], "target_lang": _DEEPL_TARGET.get(target, target.split("-")[0].upper())}
+    async with session.post(f"https://{host}/v2/translate", json=payload,
+                            headers={"Authorization": f"DeepL-Auth-Key {DEEPL_API_KEY}"}) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"deepl HTTP {resp.status}: {(await resp.text())[:100]}")
+        data = await resp.json(content_type=None)
+    t = data["translations"][0]
+    src = t.get("detected_source_language", "")
+    return t["text"], _DEEPL_SOURCE.get(src, src.lower() or None)
+
+
+_TR_PROVIDERS = [("DeepL", _tr_deepl), ("Google", _tr_google), ("Google (2)", _tr_google_dict),
+                 ("MyMemory", _tr_mymemory)]
+_tr_cooldown = {}          # provider name → time until which we skip it (after 429 / 403)
+_tr_cache = {}             # (text, target) → (translated, source)
+TR_COOLDOWN_SECONDS = 15 * 60
 
 
 async def translate_text(text, target="en"):
@@ -5495,15 +5528,30 @@ async def translate_text(text, target="en"):
     text = _clean_for_translation(text)
     if not _worth_translating(text):
         return None, None
+    key = (text, target)
+    if key in _tr_cache:
+        return _tr_cache[key]
     errors = []
+    now = time.time()
     for name, provider in _TR_PROVIDERS:
+        if name == "DeepL" and not DEEPL_API_KEY:
+            continue
+        if _tr_cooldown.get(name, 0) > now:
+            errors.append(f"{name}: paused (was blocked)")
+            continue
         try:
             translated, source = await provider(text[:1800], target)
             if translated and translated.strip():
-                return translated.strip(), source
+                if len(_tr_cache) > 300:
+                    _tr_cache.clear()
+                _tr_cache[key] = (translated.strip(), source)
+                return _tr_cache[key]
             errors.append(f"{name}: empty answer")
         except Exception as e:
-            errors.append(f"{name}: {e!r}"[:150])
+            msg = repr(e)
+            if "429" in msg or "403" in msg:          # blocked / rate limited → skip it for a while
+                _tr_cooldown[name] = now + TR_COOLDOWN_SECONDS
+            errors.append(f"{name}: {msg}"[:150])
     _tr_last_error = " | ".join(errors)
     print(f"[translate] all providers failed: {_tr_last_error}")
     return None, None
@@ -5629,8 +5677,12 @@ async def translate_test(ctx, *, text: str = "rac不是disband了么 没拉点�
     """Admins: !trtest [text]"""
     if not ctx.author.guild_permissions.administrator:
         return
-    lines = [f"🧪 Testing translation of `{text[:100]}` → English"]
+    lines = [f"🧪 Testing translation of `{text[:100]}` → English",
+             f"DeepL key: {'✅ set' if DEEPL_API_KEY else '❌ not set (DEEPL_API_KEY)'}"]
+    _tr_cooldown.clear()
     for name, provider in _TR_PROVIDERS:
+        if name == "DeepL" and not DEEPL_API_KEY:
+            continue
         try:
             out, src = await provider(_clean_for_translation(text), "en")
             lines.append(f"✅ **{name}** ({src or '?'}): {out[:200]}")
