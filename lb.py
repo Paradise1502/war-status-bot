@@ -144,13 +144,15 @@ ABSOLUTE_SCAN_COLUMNS = {
 
 
 def materialize_gains(latest, prev, id_col="lord_id",
-                      absolute_columns=ABSOLUTE_SCAN_COLUMNS):
+                      absolute_columns=ABSOLUTE_SCAN_COLUMNS,
+                      keep_new=False):
     """
-    Subtract prev from latest, giving a table of gains in the same
-    [headers, row, ...] shape. Absolute columns keep their latest value.
+    Subtract prev from latest, giving a table of gains.
 
-    Players missing from prev are kept as-is (they appeared mid-window).
-    Negative gains are clamped to 0, guarding against sheet corrections.
+    Players absent from prev are DROPPED by default: the scan columns are
+    lifetime counters, so treating their whole total as a window gain puts
+    mid-season migrants at the top of every leaderboard. Pass keep_new=True
+    to include them anyway.
     """
     if not latest:
         return None
@@ -175,7 +177,8 @@ def materialize_gains(latest, prev, id_col="lord_id",
         rid = str(row[idx]).strip()
         base = prev_map.get(rid)
         if base is None:
-            out.append(list(row))
+            if keep_new:
+                out.append(list(row))
             continue
 
         new_row = []
