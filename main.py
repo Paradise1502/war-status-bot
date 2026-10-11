@@ -5361,7 +5361,7 @@ import aiohttp
 # ── Config ───────────────────────────────────────────────────
 AUTO_TRANSLATE_CHANNEL_IDS = []      # ⬅️ channel IDs for auto-translate, e.g. [123, 456]  ([] = off)
 AUTO_TRANSLATE_TO = "en"             # auto-translate non-English messages into this language
-FLAG_REPLY_DELETE_AFTER = 5 * 60     # flag-reaction translations delete themselves after 5 min (None = keep)
+FLAG_REPLY_DELETE_AFTER = 2 * 60     # flag-reaction translations delete themselves after 2 min (None = keep)
 TRANSLATE_MIN_CHARS = 2              # ignore super short messages ("k", "?")
 # Optional but recommended: a free DeepL key (500k characters/month) – set it as the
 # DEEPL_API_KEY environment variable on your host, like TOKEN. Without it the bot uses
@@ -5623,32 +5623,42 @@ async def _translate_flag_reaction(payload):
         return
     key = (payload.message_id, target)
     now = time.time()
-    if now - _flag_done.get(key, 0) < 600:
-        return
-    _flag_done[key] = now
+    window = FLAG_REPLY_DELETE_AFTER or 600
+    if now - _flag_done.get(key, 0) < window:
+        return  # already translated into this language and the reply is still there
     if len(_flag_done) > 500:  # keep memory small
-        for k in [k for k, t in _flag_done.items() if now - t > 600]:
+        for k in [k for k, t in _flag_done.items() if now - t > window]:
             _flag_done.pop(k, None)
 
-    channel = bot.get_channel(payload.channel_id)
-    if channel is None:
-        return
+    # Works in normal channels AND threads / forum posts (even ones the bot hasn't cached)
     try:
-        message = await channel.fetch_message(payload.message_id)
-    except discord.HTTPException:
+        message = await bot.get_partial_messageable(payload.channel_id).fetch_message(payload.message_id)
+    except discord.HTTPException as e:
+        print(f"[translate] flag {payload.emoji}: can't read message {payload.message_id} "
+              f"in channel {payload.channel_id}: {e}")
         return
     if not message.content or message.author.id == bot.user.id:
         return
 
     translated, source = await translate_text(message.clean_content, target)
-    if not translated or _same_language(source, target):
+    if not translated:
+        print(f"[translate] flag {payload.emoji} on {payload.message_id} failed: {_tr_last_error}")
+        try:
+            await message.reply("-# 🌐 Translation services are busy right now – try again in a minute.",
+                                mention_author=False, allowed_mentions=discord.AllowedMentions.none(),
+                                delete_after=30)
+        except discord.HTTPException:
+            pass
+        return
+    if _same_language(source, target):
         return
     try:
         await message.reply(_format_translation(translated, source, target), mention_author=False,
                             allowed_mentions=discord.AllowedMentions.none(),
                             delete_after=FLAG_REPLY_DELETE_AFTER)
-    except discord.HTTPException:
-        pass
+        _flag_done[key] = now
+    except discord.HTTPException as e:
+        print(f"[translate] flag {payload.emoji}: couldn't reply in channel {payload.channel_id}: {e}")
 
 
 # ── 3) Auto-translate chosen channels ────────────────────────
