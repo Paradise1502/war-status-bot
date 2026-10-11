@@ -290,10 +290,7 @@ def rank_table(table, value, *,
 # For single-digit servers (OMG = 5) use the s-prefix: "s5".
 # ---------------------------------------------------------------------------
 
-TAG_TO_SERVER = {v.lower(): k for k, v in SERVER_NAMES.items()}
-
-
-def _window(token):
+def parse_window(token):
     """
     Recognise a window argument. Returns one of:
         ("season", None)                    season / all / full
