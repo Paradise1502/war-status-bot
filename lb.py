@@ -293,7 +293,7 @@ def rank_table(table, value, *,
 TAG_TO_SERVER = {v.lower(): k for k, v in SERVER_NAMES.items()}
 
 
-def parse_window(token):
+def _window(token):
     """
     Recognise a window argument. Returns one of:
         ("season", None)                    season / all / full
@@ -350,13 +350,21 @@ def parse_window(token):
  
     return None
 
+def _norm_tag(s):
+    return "".join(ch for ch in str(s).lower() if ch.isalnum())
+ 
+ 
 def parse_server(token):
     """Return a server id string, 'all', or None if this isn't a server token."""
     t = str(token).strip().lower()
     if t in ("all", "*", "everyone"):
         return "all"
-    if t in TAG_TO_SERVER:
-        return TAG_TO_SERVER[t]
+ 
+    tags = {_norm_tag(v): k for k, v in SERVER_NAMES.items()}
+    nt = _norm_tag(t)
+    if nt and not nt.isdigit() and nt in tags:
+        return tags[nt]
+ 
     m = re.fullmatch(r"s(\d+)", t)
     if m:
         return m.group(1)
