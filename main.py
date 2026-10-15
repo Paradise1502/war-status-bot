@@ -3765,6 +3765,10 @@ async def progress(ctx, *args):
                     )
                 )
 
+            # Gentle nudge for people who haven't linked yet; gone once they do
+            if not await db.get_link(ctx.author.id):
+                embed.set_footer(text=(embed.footer.text or "") +
+                                 f"\n💡 Your account? !link {target} once, then just type !progress")
             embed.timestamp = datetime.now(UTC)
             await ctx.send(embed=embed)
 
@@ -4858,8 +4862,11 @@ async def build_daily_report(season=None):
             inline=False,
         )
 
-    embed.set_footer(text=f"Merits and power from the daily export · data through {day}\n"
-                          f"!report shows this any time · !matchups for the full picture")
+    footer = (f"Merits and power from the daily export · data through {day}\n"
+              f"!report shows this any time · !matchups for the full picture")
+    if (day - cfg["start"]).days < 7:   # first week of the season only
+        footer += "\n🔗 New: !link <your Lord ID> once, then !progress needs no ID"
+    embed.set_footer(text=footer)
     embed.timestamp = datetime.now(UTC)
     return embed, None
 
