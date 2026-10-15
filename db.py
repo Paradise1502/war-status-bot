@@ -719,3 +719,66 @@ async def load_exclusions():
     async with pool().acquire() as conn:
         rows = await conn.fetch("SELECT lord_id FROM excluded_ids")
     return {r["lord_id"] for r in rows}
+
+
+# ---------------------------------------------------------------------------
+# Bot state (small settings that must survive restarts) and Discord links
+# ---------------------------------------------------------------------------
+
+STATE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS bot_state (
+    key        TEXT PRIMARY KEY,
+    value      TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS discord_links (
+    user_id   BIGINT PRIMARY KEY,
+    lord_id   TEXT NOT NULL,
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"""
+
+
+async def ensure_state_tables():
+    async with pool().acquire() as conn:
+        await conn.execute(STATE_SCHEMA)
+
+
+async def get_state(key):
+    async with pool().acquire() as conn:
+        return await conn.fetchval("SELECT value FROM bot_state WHERE key = $1", key)
+
+
+async def set_state(key, value):
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO bot_state (key, value) VALUES ($1, $2)
+            ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()
+            """,
+            key, None if value is None else str(value),
+        )
+
+
+async def set_link(user_id, lord_id):
+    async with pool().acquire() as conn:
+        await conn.execute(
+            """
+            INSERT INTO discord_links (user_id, lord_id) VALUES ($1, $2)
+            ON CONFLICT (user_id) DO UPDATE SET lord_id = EXCLUDED.lord_id, linked_at = now()
+            """,
+            int(user_id), str(lord_id),
+        )
+
+
+async def get_link(user_id):
+    async with pool().acquire() as conn:
+        return await conn.fetchval(
+            "SELECT lord_id FROM discord_links WHERE user_id = $1", int(user_id)
+        )
+
+
+async def remove_link(user_id):
+    async with pool().acquire() as conn:
+        result = await conn.execute("DELETE FROM discord_links WHERE user_id = $1", int(user_id))
+    return result.endswith("1")
