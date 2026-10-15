@@ -32,11 +32,13 @@ SEASON_SHEETS = {
     "sos7": "EvG - SoS7",
     "sos2": "NVR - SoS2",
     "statue": "NVR - SoS2 Statue",
+    # No Google Sheet — this season lives only in the database (!ingest sos8)
+    "sos8": None,
 }
 
 SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
 
-DEFAULT_SEASON = "sos2"
+DEFAULT_SEASON = "sos8"
 
 # =============================================================================
 # SEASON CONFIG — put this near the top of main.py, after SEASON_SHEETS
@@ -48,19 +50,32 @@ DEFAULT_SEASON = "sos2"
 # Every server you've ever encountered. Add new opponents here as you meet them.
 # lb.py has its own copy for defaults; this merges into it.
 ALL_SERVERS = {
+    # SoS8
     "375": "NVR",
+    "509": "-I-",
+    "221": "21SW",
+    "249": "WB",
     "357": "YSS",
+    "283": "RFF",
+    "701": "HOT",
+    # earlier seasons — kept so old data still shows names
     "756": "SAB",
     "341": "NW:E",
     "320": "EvG",
     "5":   "OMG",
-    # Next season, add the new opponent here, e.g.:
-    # "412": "XYZ",
 }
 
 SERVER_COLORS = {
-    "375": 0x3498DB,   # blue — home
-    "357": 0xE74C3C,   
+    # our side: blues and greens
+    "375": 0x3498DB,
+    "509": 0x1ABC9C,
+    "221": 0x2ECC71,
+    "249": 0x27AE60,
+    # their side: reds and oranges
+    "357": 0xE74C3C,
+    "283": 0xE67E22,
+    "701": 0xC0392B,
+    # earlier seasons
     "756": 0xE67E22,
     "341": 0x9B59B6,
     "320": 0x2ECC71,
@@ -84,16 +99,23 @@ SEASON_CONFIG = {
         ],
     },
 
+    "sos8": {
+        "label": "SoS8",
+        "start": date(2026, 10, 16),
+        "end":   date(2026, 11, 23),   # reference only — nothing reads it yet
+        "home":  "375",
+        "matchups": [
+            (["375", "509"], ["357"]),          # NVR + -I-  vs  YSS
+            (["221", "249"], ["283", "701"]),   # 21SW + WB  vs  RFF + HOT
+        ],
+    },
+
     # ---- Next season: copy the block above, change the values ----------------
-    # "sos8": {
-    #     "label": "SoS8",
-    #     "start": date(2026, 11, 15),
-    #     "home":  "375",
-    #     "matchups": [
-    #         (["375"], ["412"]),
-    #     ],
-    # },
 }
+
+# The current season's start date. Merits exports should use it as their start
+# date so they stay cumulative; ingest warns when one doesn't.
+SEASON_START = SEASON_CONFIG[DEFAULT_SEASON]["start"]
 
 
 def season_cfg(season):
@@ -807,7 +829,8 @@ async def refresh_season_cache():
     for season_key in SEASON_SHEETS:
         try:
             data = await _load_season_from_db(season_key)
-            if data is None:
+            # Seasons without a Google Sheet (None) live only in the database
+            if data is None and SEASON_SHEETS.get(season_key):
                 data = await _load_season_from_sheets(season_key)
                 await asyncio.sleep(2)  # be polite to the Sheets API
             if data:
@@ -1146,13 +1169,10 @@ def strip_excluded(table, id_col="lord_id"):
 # 1. CONFIG
 # -----------------------------------------------------------------------------
  
-DATASET_375 = "s375"
 ID_COLUMN_375 = "Character ID"
- 
-# The date your season started. Every export should use this as its start date
-# so the files stay cumulative and comparable. Ingest warns if one doesn't.
-SEASON_START = date(2026, 8, 28)
- 
+
+# SEASON_START now comes from SEASON_CONFIG near the top of the file.
+
 # -----------------------------------------------------------------------------
 # 3. CACHE
 # -----------------------------------------------------------------------------
@@ -1164,9 +1184,9 @@ async def load_375_cache():
     Falls back to the live Google Sheet if nothing is stored yet.
     """
     try:
-        data = await db.materialize_period(DATASET_375, ID_COLUMN_375)
+        data = await db.materialize_period(merits_dataset("375"), ID_COLUMN_375)
         if data:
-            dates = await db.get_latest_dates(DATASET_375, n=1)
+            dates = await db.get_latest_dates(merits_dataset("375"), n=1)
             bot_cache["375_data"] = data
             bot_cache["375_date"] = dates[0] if dates else None
             return
@@ -1209,13 +1229,13 @@ async def get_375_window(window=None):
     """
     parsed = parse_window(window) if window else None
  
-    dates = await db.get_latest_dates(DATASET_375, n=1)
+    dates = await db.get_latest_dates(merits_dataset("375"), n=1)
     if not dates:
         return None, "No 375 exports stored yet."
     end_date = dates[0]
  
     if parsed is None or parsed[0] == "season":
-        data = await db.materialize_period(DATASET_375, ID_COLUMN_375, end_date=end_date)
+        data = await db.materialize_period(merits_dataset("375"), ID_COLUMN_375, end_date=end_date)
         return data, "Season to date"
  
     if parsed[0] == "days":
@@ -1225,14 +1245,14 @@ async def get_375_window(window=None):
         target = parsed[1]
         label = f"Since {target}"
  
-    base_date = await db.nearest_date_on_or_before(DATASET_375, target)
+    base_date = await db.nearest_date_on_or_before(merits_dataset("375"), target)
  
     if base_date is None or base_date == end_date:
-        data = await db.materialize_period(DATASET_375, ID_COLUMN_375, end_date=end_date)
+        data = await db.materialize_period(merits_dataset("375"), ID_COLUMN_375, end_date=end_date)
         return data, "Season to date (not enough 375 history for that window)"
  
     data = await db.materialize_period(
-        DATASET_375, ID_COLUMN_375, base_date=base_date, end_date=end_date
+        merits_dataset("375"), ID_COLUMN_375, base_date=base_date, end_date=end_date
     )
     return data, f"{label} ({base_date} → {end_date})"
  
@@ -1314,22 +1334,126 @@ async def before_utc_update():
 
 ID_COLUMN_MERITS = "Character ID"
 
-def merits_dataset(server):
+# Exports uploaded before datasets were season-scoped are stored as plain
+# s375 / s357 / s5. They belong to this season.
+LEGACY_MERITS_SEASON = "sos2"
+
+
+def merits_dataset(server, season=None):
     """
-    Dataset key for a server's merits export, e.g. 375 -> 's375'.
-    Keeps the 's' prefix so the 375 data you already ingested still matches.
+    Dataset key for a server's merits export in a given season.
+
+        sos2 (legacy) -> s375
+        sos8          -> sos8_s375
+
+    Keeping seasons separate stops a window from subtracting one season's
+    export from another's.
     """
-    return f"s{server}"
+    season = (season or DEFAULT_SEASON).lower()
+    if season == LEGACY_MERITS_SEASON:
+        return f"s{server}"
+    return f"{season}_s{server}"
+
+
+# A file exactly as the in-game tool names it: 375_2026-10-16_2026-10-20.xlsx
+EXPORT_FILENAME_RE = re.compile(r"^(\d+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.(xlsx|csv)$", re.I)
+
+# Webhook posts in this channel are ingested automatically. The daily export
+# script on the PC posts here; nobody needs to type !ingestmerits.
+AUTO_INGEST_CHANNEL_ID = SCAN_INGEST_CHANNEL_ID
+
+
+async def ingest_merits_file(attachment, server=None, dates_given=(), ingested_by=None):
+    """
+    Store one merits export. The server comes from `server`, else the number
+    the tool puts at the start of the filename, else our own server.
+
+    Returns (server, period_start, period_end, result, warnings).
+    Raises ValueError with a readable message on bad input.
+    """
+    if server is None:
+        m = re.match(r"(\d+)_", attachment.filename)
+        server = m.group(1) if m else lb.DEFAULT_SERVER
+
+    file_start, file_end = db.date_range_from_filename(attachment.filename)
+    if len(dates_given) >= 2:
+        period_start, period_end = dates_given[0], dates_given[1]
+    elif len(dates_given) == 1:
+        period_start, period_end = (file_start or SEASON_START), dates_given[0]
+    else:
+        period_start = file_start or SEASON_START
+        period_end = file_end or datetime.now(UTC).date()
+
+    if period_end < period_start:
+        raise ValueError("The end date is before the start date.")
+
+    raw = await attachment.read()
+    headers, rows = db.parse_scan_file(raw, attachment.filename)
+    result = await db.ingest_period(
+        season=merits_dataset(server),
+        period_start=period_start,
+        period_end=period_end,
+        headers=headers,
+        rows=rows,
+        id_column=ID_COLUMN_MERITS,
+        source_file=attachment.filename,
+        ingested_by=ingested_by,
+    )
+
+    warnings = []
+    if result["replaced"] is not None:
+        warnings.append(f"↻ Replaced the existing export for {period_end}.")
+    if period_start != SEASON_START:
+        warnings.append(
+            f"⚠️ Start date is **{period_start}**, expected **{SEASON_START}**. "
+            f"Windows need every export to share a start date."
+        )
+    return server, period_start, period_end, result, warnings
+
+
+async def ingest_merits_batch(channel, attachments, ingested_by):
+    """Ingest several exports and post one summary embed."""
+    lines, problems = [], []
+    refresh_375 = False
+    for att in attachments:
+        try:
+            server, start, end, result, warnings = await ingest_merits_file(
+                att, ingested_by=ingested_by
+            )
+        except Exception as e:
+            problems.append(f"❌ `{att.filename}` — {e}")
+            continue
+        refresh_375 = refresh_375 or server == lb.DEFAULT_SERVER
+        note = " · " + " ".join(w.split(" ", 1)[0] for w in warnings) if warnings else ""
+        lines.append(
+            f"✅ **{lb.server_label(server)}** · {start} → {end} · "
+            f"{result['rows']:,} players{note}"
+        )
+        problems.extend(f"{lb.server_label(server)}: {w}" for w in warnings
+                        if w.startswith("⚠️"))
+
+    embed = discord.Embed(
+        title=f"📥 Merits exports — {len(lines)}/{len(attachments)} stored",
+        description="\n".join(lines) or "*Nothing stored.*",
+        color=discord.Color.green() if not problems else discord.Color.orange(),
+    )
+    if problems:
+        embed.add_field(name="Problems", value="\n".join(problems)[:1024], inline=False)
+    embed.set_footer(text=f"Season {season_cfg(DEFAULT_SEASON)['label']} · ↻ = replaced an earlier upload")
+    await channel.send(embed=embed)
+
+    if refresh_375:
+        await load_375_cache()
 
 
 @bot.command(name="ingestmerits", aliases=["im", "ingest375"])
 @scan_admin()
 async def ingest_merits_cmd(ctx, *args):
     """
-    Upload a server's merits export (.xlsx or .csv).
+    Upload merits exports (.xlsx or .csv). Attach one file or several.
 
-        !ingestmerits                     375, dates from the filename
-        !ingestmerits 357                 for server 357
+        !ingestmerits                     server and dates from each filename
+        !ingestmerits 357                 force a server (one file only)
         !ingestmerits 357 2026-09-03      explicit end date
         !ingestmerits 357 2026-08-28 2026-09-03
 
@@ -1337,16 +1461,18 @@ async def ingest_merits_cmd(ctx, *args):
     cumulative and windows work.
     """
     async with ctx.typing():
-        if not ctx.message.attachments:
-            await ctx.send("❌ Attach the export file to the same message.")
+        attachments = ctx.message.attachments
+        if not attachments:
+            await ctx.send("❌ Attach the export file(s) to the same message.")
             return
 
-        attachment = ctx.message.attachments[0]
-
-        server = lb.DEFAULT_SERVER
+        server = None
         dates_given = []
         for a in args:
             srv = lb.parse_server(a)
+            # No count argument here, so a bare known number is a server
+            if srv is None and a.strip().isdigit() and a.strip() in lb.SERVER_NAMES:
+                srv = a.strip()
             if srv and srv != "all":
                 server = srv
                 continue
@@ -1356,30 +1482,19 @@ async def ingest_merits_cmd(ctx, *args):
                 await ctx.send(f"❌ Didn't understand `{a}`.")
                 return
 
-        file_start, file_end = db.date_range_from_filename(attachment.filename)
-        if len(dates_given) >= 2:
-            period_start, period_end = dates_given[0], dates_given[1]
-        elif len(dates_given) == 1:
-            period_start, period_end = (file_start or SEASON_START), dates_given[0]
-        else:
-            period_start = file_start or SEASON_START
-            period_end = file_end or datetime.now(UTC).date()
-
-        if period_end < period_start:
-            await ctx.send("❌ The end date is before the start date.")
+        if len(attachments) > 1:
+            if server or dates_given:
+                await ctx.send(
+                    "❌ With several files, the server and dates come from each "
+                    "filename. Drop the extra arguments, or upload one file at a time."
+                )
+                return
+            await ingest_merits_batch(ctx.channel, attachments, str(ctx.author))
             return
 
         try:
-            raw = await attachment.read()
-            headers, rows = db.parse_scan_file(raw, attachment.filename)
-            result = await db.ingest_period(
-                season=merits_dataset(server),
-                period_start=period_start,
-                period_end=period_end,
-                headers=headers,
-                rows=rows,
-                id_column=ID_COLUMN_MERITS,
-                source_file=attachment.filename,
+            server, period_start, period_end, result, warnings = await ingest_merits_file(
+                attachments[0], server=server, dates_given=dates_given,
                 ingested_by=str(ctx.author),
             )
         except Exception as e:
@@ -1393,15 +1508,6 @@ async def ingest_merits_cmd(ctx, *args):
         )
         embed.add_field(name="Players", value=f"{result['rows']:,}", inline=True)
         embed.add_field(name="Columns", value=str(result["columns"]), inline=True)
-
-        warnings = []
-        if result["replaced"] is not None:
-            warnings.append(f"↻ Replaced the existing export for {period_end}.")
-        if period_start != SEASON_START:
-            warnings.append(
-                f"⚠️ Start date is **{period_start}**, expected **{SEASON_START}**. "
-                f"Windows need every export to share a start date."
-            )
         if warnings:
             embed.add_field(name="Notes", value="\n".join(warnings), inline=False)
 
@@ -1412,18 +1518,40 @@ async def ingest_merits_cmd(ctx, *args):
             await load_375_cache()
 
 
+@bot.listen("on_message")
+async def _auto_ingest_merits(message):
+    """
+    Ingest merits exports posted by a webhook (the daily export script).
+
+    Bots ignore commands from webhooks, so the script can't type
+    !ingestmerits; this does the same job for files that are named exactly
+    as the in-game tool names them.
+    """
+    if message.webhook_id is None or message.channel.id != AUTO_INGEST_CHANNEL_ID:
+        return
+    exports = [a for a in message.attachments if EXPORT_FILENAME_RE.match(a.filename)]
+    if not exports:
+        return
+    try:
+        await ingest_merits_batch(
+            message.channel, exports, f"webhook:{message.author.name}"
+        )
+    except Exception as e:
+        await message.channel.send(f"❌ **Auto-ingest failed:** {e}")
+
+
 # -----------------------------------------------------------------------------
 # 2. WINDOW RESOLUTION for merits datasets
 # -----------------------------------------------------------------------------
 
-async def get_merits_window(server, window=None, include_excluded=False):
+async def get_merits_window(server, window=None, include_excluded=False, season=None):
     """Returns (table, label) for a server's merits data over a window."""
-    dataset = merits_dataset(server)
+    dataset = merits_dataset(server, season)
     parsed = lb.parse_window(window) if window else None
- 
+
     dates = await db.get_latest_dates(dataset, n=1)
     if not dates:
-        return None, f"No merits export stored for {lb.server_label(server)}."
+        return None, f"No merits export stored for {lb.server_label(server)} this season."
     newest = dates[0]
  
     # Season to date: the newest export already IS the season total
@@ -1626,7 +1754,7 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
             return
 
         server = opts["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
-        data, label = await get_merits_window(server, opts["window"])
+        data, label = await get_merits_window(server, opts["window"], season=opts["season"])
         if data is None:
             await ctx.send(f"❌ {label}")
             return
@@ -1662,7 +1790,7 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
             ctx,
             title=f"{emoji} {direction} {len(entries)} — {title}",
             subtitle=subtitle,
-            footer=f"Merits export · {merits_dataset(server)}",
+            footer=f"Merits export · {merits_dataset(server, opts['season'])}",
             color=lb.server_color(server),
             entries=entries,
             unit=unit,
@@ -1811,7 +1939,7 @@ async def toptraders(ctx, *args):
             return
 
         server = opts["server"] or lb.DEFAULT_SERVER
-        data, label = await get_merits_window(server, opts["window"])
+        data, label = await get_merits_window(server, opts["window"], season=opts["season"])
         if data is None:
             await ctx.send(f"❌ {label}")
             return
@@ -1840,7 +1968,7 @@ async def toptraders(ctx, *args):
                 f"**{lb.server_label(server)}** · {label}\n"
                 f"*Total merits minus enemy merits · {total:,} eligible*"
             ),
-            footer=f"Merits export · {merits_dataset(server)}",
+            footer=f"Merits export · {merits_dataset(server, opts['season'])}",
             color=lb.server_color(server),
             entries=entries,
             show_detail=detail,
@@ -3113,7 +3241,7 @@ async def farmcheck(ctx, farm_id: str):
 # Helper — merits-sheet profile for one player, with ranks
 # -----------------------------------------------------------------------------
 
-async def get_merits_profile(server, lord_id, window=None, min_power=50_000_000):
+async def get_merits_profile(server, lord_id, window=None, min_power=50_000_000, season=None):
     """
     Pull one player's merits-sheet values plus their rank for each stat within
     their own server.
@@ -3123,7 +3251,7 @@ async def get_merits_profile(server, lord_id, window=None, min_power=50_000_000)
 
     Returns (profile_dict, label) or (None, reason).
     """
-    data, label = await get_merits_window(server, window)
+    data, label = await get_merits_window(server, window, season=season)
     if data is None:
         return None, label
 
@@ -3449,7 +3577,7 @@ async def progress(ctx, lord_id: str, *args):
             # --- Merits sheet, for whichever server they're on ----------------
 
             profile, merits_label = await get_merits_profile(
-                player_server, target, window=window
+                player_server, target, window=window, season=season
             )
 
             if profile is None:
@@ -3851,7 +3979,7 @@ MERIT_STATS = [
 ]
 
 
-async def aggregate_merits(servers, window=None, min_power=MIN_POWER):
+async def aggregate_merits(servers, window=None, min_power=MIN_POWER, season=None):
     """Sum merits-sheet columns across servers. Returns (totals, label) or (None, reason)."""
     combined = {key: 0 for key, *_ in MERIT_STATS}
     combined.update({
@@ -3864,7 +3992,7 @@ async def aggregate_merits(servers, window=None, min_power=MIN_POWER):
     found = False
 
     for server in servers:
-        data, lbl = await get_merits_window(server, window)
+        data, lbl = await get_merits_window(server, window, season=season)
         if data is None:
             continue
         found = True
@@ -3972,14 +4100,45 @@ def side_detail(servers):
     return " & ".join(f"{lb.SERVER_NAMES.get(s, s)} ({s})" for s in servers)
 
 
-async def build_matchup_embed(team_a, team_b, win, window, season_label):
-    """Build one head-to-head embed. Used by both !matchups and !vs."""
-    a = aggregate_scan(win["latest"], win["prev"], team_a)
-    b = aggregate_scan(win["latest"], win["prev"], team_b)
- 
-    ma, label_a = await aggregate_merits(team_a, window)
-    mb, label_b = await aggregate_merits(team_b, window)
- 
+def _sum_totals(parts):
+    """Add up a list of stat dicts key by key."""
+    out = {}
+    for d in parts:
+        for k, v in d.items():
+            if isinstance(v, (int, float)):
+                out[k] = out.get(k, 0) + v
+    return out
+
+
+async def build_matchup_embed(team_a, team_b, win, window, season, season_label):
+    """
+    One head-to-head embed. Each side can be one kingdom or several.
+
+    Every kingdom is computed once, then summed per side, so the combined
+    totals and the per-kingdom breakdown always come from the same numbers.
+    """
+    servers = list(dict.fromkeys(team_a + team_b))
+
+    scan = {s: aggregate_scan(win["latest"], win["prev"], [s]) for s in servers}
+    merits = {}
+    merit_label = None
+    for s in servers:
+        m, lbl = await aggregate_merits([s], window, season=season)
+        merits[s] = m
+        if m is not None and merit_label is None:
+            merit_label = lbl
+
+    a = _sum_totals(scan[s] for s in team_a)
+    b = _sum_totals(scan[s] for s in team_b)
+    ma_parts = [merits[s] for s in team_a if merits[s]]
+    mb_parts = [merits[s] for s in team_b if merits[s]]
+    ma = _sum_totals(ma_parts) if ma_parts else None
+    mb = _sum_totals(mb_parts) if mb_parts else None
+
+    missing_scan = [s for s in servers if scan[s]["players"] == 0]
+    missing_merits = [s for s in servers if merits[s] is None]
+    combined_view = len(team_a) > 1 or len(team_b) > 1
+
     embed = discord.Embed(
         title=f"⚔️ {side_name(team_a)}  vs  {side_name(team_b)}",
         description=(
@@ -3988,7 +4147,7 @@ async def build_matchup_embed(team_a, team_b, win, window, season_label):
         ),
         color=lb.server_color(team_a[0]),
     )
- 
+
     # --- Power ---------------------------------------------------------------
     embed.add_field(
         name="⚡  P O W E R",
@@ -4001,17 +4160,45 @@ async def build_matchup_embed(team_a, team_b, win, window, season_label):
         ]),
         inline=False,
     )
- 
+
     # --- Combat --------------------------------------------------------------
     embed.add_field(
         name=f"📊  C O M B A T   —   {a['players']:,} vs {b['players']:,}",
         value=section([
             vs_row(emoji, label, a[key], b[key])
             for key, emoji, label, _ in SCAN_STATS
-        ], divider=bool(ma or mb)),
+        ], divider=bool(ma or mb or combined_view)),
         inline=False,
     )
- 
+
+    # --- Per-kingdom breakdown (only when a side has several kingdoms) -------
+    if combined_view:
+        def kingdom_line(s, icon):
+            t = scan[s]
+            if t["players"] == 0:
+                return f"{icon} **{lb.server_label(s)}** — *not in the scan*"
+            pc = t["power_change"]
+            pcs = f"+{lb.fmt(pc)}" if pc > 0 else lb.fmt(pc)
+            line = (
+                f"{icon} **{lb.server_label(s)}** · {t['players']} "
+                f"player{'s' if t['players'] != 1 else ''}\n"
+                f"⚡ `{pcs}` · ⚔️ `{lb.fmt(t['kills'])}` · "
+                f"💀 `{lb.fmt(t['dead'])}` · 🧠 `{lb.fmt(t['merits'])}`"
+            )
+            if merits[s]:
+                line += f" · 💧 `{lb.fmt(merits[s]['heal_mana'])}`"
+            return line
+
+        embed.add_field(
+            name="🧩  K I N G D O M S",
+            value=section(
+                [kingdom_line(s, "🟦") for s in team_a]
+                + [kingdom_line(s, "🟥") for s in team_b],
+                divider=bool(ma or mb),
+            ),
+            inline=False,
+        )
+
     # --- Merits sections -----------------------------------------------------
     if ma and mb:
         embed.add_field(
@@ -4025,7 +4212,6 @@ async def build_matchup_embed(team_a, team_b, win, window, season_label):
             ]),
             inline=False,
         )
- 
         embed.add_field(
             name="🛡️  T R O O P   M E R I T S",
             value=section([
@@ -4034,7 +4220,6 @@ async def build_matchup_embed(team_a, team_b, win, window, season_label):
             ]),
             inline=False,
         )
- 
         pct_a = (ma["enemy"] / ma["total"] * 100) if ma["total"] else 0
         pct_b = (mb["enemy"] / mb["total"] * 100) if mb["total"] else 0
         embed.add_field(
@@ -4046,13 +4231,13 @@ async def build_matchup_embed(team_a, team_b, win, window, season_label):
             ], divider=False),
             inline=False,
         )
- 
+
     elif ma or mb:
         got = ma or mb
-        have = side_name(team_a) if ma else side_name(team_b)
-        missing = side_name(team_b) if ma else side_name(team_a)
+        have_team = team_a if ma else team_b
+        missing_team = team_b if ma else team_a
         embed.add_field(
-            name=f"🧪  M E R I T S   —   {have} only",
+            name=f"🧪  M E R I T S   —   {side_name(have_team)} only",
             value=section([
                 f"💧 **Est. Healing Mana:** {got['heal_mana']:,}\n"
                 f"5️⃣ **T5 Healed:** {got['t5_healed']:,}\n"
@@ -4061,29 +4246,64 @@ async def build_matchup_embed(team_a, team_b, win, window, season_label):
                     f"{emoji} **{label}:** {got[key]:,}"
                     for key, emoji, label, _ in MERIT_STATS
                 ),
-                f"*No merits export for {missing}. "
+                f"*No merits export for {side_name(missing_team)}. "
                 f"Upload one with `!ingestmerits <server>`.*",
             ], divider=False),
             inline=False,
         )
- 
+
+    # --- Footer --------------------------------------------------------------
     footer = f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+    if missing_scan:
+        footer += ("\n⚠️ Not in the scan: "
+                   + ", ".join(lb.server_label(s) for s in missing_scan))
     if ma or mb:
-        footer += f"\n🧾 Merits: {label_a or label_b}"
+        footer += f"\n🧾 Merits: {merit_label}"
+        if missing_merits:
+            footer += ("\n⚠️ No merits export for "
+                       + ", ".join(lb.server_label(s) for s in missing_merits)
+                       + " — merit sections cover the others only.")
         footer += ("\n⚠️ Scan and merits data are captured at different times — "
                    "the two may differ slightly.")
     embed.set_footer(text=footer)
     embed.timestamp = datetime.now(UTC)
- 
     return embed
-    
+
+
 # -----------------------------------------------------------------------------
 # The command
 # -----------------------------------------------------------------------------
 
-@bot.command()
+def parse_team(token):
+    """'nvr+-i-' or '375+509' -> ['375', '509']; 'yss' -> ['357']; else None."""
+    parts = [p.strip() for p in re.split(r"[+&]", str(token)) if p.strip()]
+    if not parts:
+        return None
+    team = []
+    for p in parts:
+        srv = lb.parse_server(p)
+        # No count argument here, so a bare known number is always a server
+        if srv is None and p.isdigit() and p in lb.SERVER_NAMES:
+            srv = p
+        if srv is None or srv == "all":
+            return None
+        if srv not in team:
+            team.append(srv)
+    return team
+
+
+@bot.command(name="matchups", aliases=["matchup", "vs", "versus", "compare"])
 async def matchups(ctx, *args):
-    """War comparison. Defaults to our own pairing; `all` shows every one."""
+    """
+    War comparison, combined or kingdom by kingdom.
+
+        !matchups                   our pairing, combined (NVR + -I- vs YSS)
+        !matchups all               every pairing this season
+        !matchups rff               the pairing that includes RFF
+        !matchups nvr yss           just NVR vs YSS
+        !matchups -i- yss 1d        just -I- vs YSS, yesterday
+        !matchups nvr+-i- yss+rff   any custom sides, joined with +
+    """
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
         mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
         await ctx.send(f"❌ Commands are only allowed in {mentions}.")
@@ -4091,124 +4311,86 @@ async def matchups(ctx, *args):
 
     async with ctx.typing():
         try:
-            opts, unknown = lb.parse_args(
-                args, SEASON_SHEETS, DEFAULT_SEASON, default_server=None
-            )
+            season = DEFAULT_SEASON
+            window = None
+            show_all = False
+            teams, unknown = [], []
+
+            for token in args:
+                t = str(token).strip()
+                tl = t.lower()
+                if not tl:
+                    continue
+                if tl in ("all", "*", "everyone"):
+                    show_all = True
+                    continue
+                if tl in SEASON_SHEETS:
+                    season = tl
+                    continue
+                if lb.parse_window(tl) is not None:
+                    window = tl
+                    continue
+                team = parse_team(tl)
+                if team:
+                    teams.append(team)
+                    continue
+                unknown.append(t)
+
             if unknown:
-                await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
+                known = ", ".join(f"`{v}` ({k})" for k, v in lb.SERVER_NAMES.items())
+                await ctx.send(f"❌ Didn't understand `{unknown[0]}`.\nServers: {known}")
+                return
+            if len(teams) > 2:
+                await ctx.send(
+                    "❌ Name two sides at most. Join kingdoms with `+`, "
+                    "e.g. `!matchups nvr+-i- yss`."
+                )
                 return
 
-            season, window = opts["season"], opts["window"]
             cfg = season_cfg(season)
 
-            pairings = cfg["matchups"]
+            if len(teams) == 2:
+                team_a, team_b = teams
+                if set(team_a) & set(team_b):
+                    await ctx.send("❌ A kingdom can't be on both sides.")
+                    return
+                pairings = [(team_a, team_b)]
+            elif len(teams) == 1:
+                wanted = set(teams[0])
+                pairings = [p for p in cfg["matchups"] if wanted & set(p[0] + p[1])]
+                if not pairings:
+                    await ctx.send(
+                        f"❌ {side_name(teams[0])} isn't in any pairing this season. "
+                        f"Name an opponent too, e.g. `!matchups {teams[0][0]} 357`."
+                    )
+                    return
+            elif show_all:
+                pairings = cfg["matchups"]
+            else:
+                pairings = [p for p in cfg["matchups"] if cfg["home"] in p[0] + p[1]]
+
             if not pairings:
                 await ctx.send(
                     f"❌ No matchups configured for `{season}`. Add them to `SEASON_CONFIG`."
                 )
                 return
 
-                        # "all" shows every pairing; otherwise show one — the named server's,
-            # or our own by default.
-            show_all = any(
-                str(a).strip().lower() in ("all", "*", "everyone") for a in args
-            )
-
-            if not show_all:
-                target = str(opts["server"] or cfg["home"])
-                pairings = [p for p in pairings if target in p[0] + p[1]]
-                if not pairings:
-                    await ctx.send(
-                        f"❌ {lb.server_label(target)} isn't in any pairing this "
-                        f"season. Try `!matchups all`."
-                    )
-                    return
-
             win = await get_window_data(season, window)
             if win is None:
                 await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
                 return
 
-            for team_a, team_b in pairings:
+            for i, (team_a, team_b) in enumerate(pairings):
                 embed = await build_matchup_embed(
-                    team_a, team_b, win, window, cfg["label"]
+                    team_a, team_b, win, window, season, cfg["label"]
                 )
                 await ctx.send(embed=embed)
+                if i < len(pairings) - 1:
+                    await ctx.send("​\n" + "━" * 30 + "\n​")
 
-                if (team_a, team_b) != pairings[-1]:
-                    await ctx.send("\u200b\n" + "\u2501" * 30 + "\n\u200b")
-               
         except Exception as e:
             await ctx.send(f"❌ **Error:** {e}")
-            
-@bot.command(name="vs", aliases=["versus", "compare"])
-async def vs_cmd(ctx, *args):
-    """
-    Compare any two servers head-to-head.
- 
-        !vs 5 357              OMG vs YSS
-        !vs omg yss 7d         by tag, last 7 days
-        !vs 5 357 1d           yesterday
-        !vs 341 320 on:2026-09-02
-    """
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
-        return
- 
-    async with ctx.typing():
-        try:
-            servers = []
-            window = None
-            season = DEFAULT_SEASON
-            unknown = []
- 
-            for token in args:
-                t = str(token).strip().lower()
-                if t in SEASON_SHEETS:
-                    season = t
-                    continue
-                srv = lb.parse_server(t)
-                if srv and srv != "all":
-                    servers.append(srv)
-                    continue
-                if lb.parse_window(t) is not None:
-                    window = t
-                    continue
-                unknown.append(token)
- 
-            if unknown:
-                await ctx.send(
-                    f"❌ Didn't understand `{unknown[0]}`.\n"
-                    f"Servers: {', '.join(lb.SERVER_NAMES)} (or tags like `omg`, `yss`)"
-                )
-                return
- 
-            if len(servers) < 2:
-                await ctx.send(
-                    "❌ Name two servers, e.g. `!vs 5 357` or `!vs omg yss 7d`.\n"
-                    f"Known: {', '.join(f'{k} ({v})' for k, v in lb.SERVER_NAMES.items())}"
-                )
-                return
- 
-            if servers[0] == servers[1]:
-                await ctx.send("❌ Those are the same server.")
-                return
- 
-            team_a, team_b = [servers[0]], [servers[1]]
- 
-            win = await get_window_data(season, window)
-            if win is None:
-                await ctx.send(f"❌ Not enough scan history. Try `!scans {season}`.")
-                return
- 
-            embed = await build_matchup_embed(
-                team_a, team_b, win, window, season_cfg(season)["label"]
-            )
-            await ctx.send(embed=embed)
- 
-        except Exception as e:
-            await ctx.send(f"❌ **Error:** {e}")
+
 
 import os
 TOKEN = os.getenv("TOKEN")
@@ -5818,14 +6000,16 @@ def _help_embed(key, is_admin=False):
 
     elif key == "war":
         embed.description = (
-            "**`!matchups`**\n"
-            "Head-to-head between paired servers: power change, combat stats, "
-            "RSS healing spend, army composition and merit quality.\n\n"
+            "**`!matchups`**  ·  aliases `!vs`, `!compare`\n"
+            "Head-to-head: power change, combat, RSS healing spend, troop "
+            "merits and merit quality. Sides with several kingdoms also get a "
+            "per-kingdom breakdown.\n\n"
             "```\n"
-            "!matchups           NVR vs YSS\n"
-            "!matchups all       every pairing\n"
-            "!matchups 1d        yesterday — power loss\n"
-            "!matchups 341       a different pairing\n"
+            "!matchups                  NVR + -I- vs YSS\n"
+            "!matchups all              every pairing\n"
+            "!matchups nvr yss          one kingdom each\n"
+            "!matchups -i- yss 1d       yesterday\n"
+            "!matchups nvr+-i- yss+rff  custom sides\n"
             "```\n"
             "**`!groupleaderboard`**  ·  aliases `!gl`, `!grouplb`\n"
             "Sun vs Moon player rankings.\n\n"
@@ -5842,9 +6026,9 @@ def _help_embed(key, is_admin=False):
             "Most commands take the same arguments, **in any order**.\n\n"
             "**🌐 Server** — defaults to 375\n"
             "```\n"
-            "375  357  756  341  320      by number\n"
+            "375  509  357  283  701      by number\n"
             "s5                            single-digit servers\n"
-            "nvr  yss  sab                 by tag\n"
+            "nvr  -i-  yss  rff  hot       by tag\n"
             "all                           every server\n"
             "```\n"
             "**🔢 Count** — defaults to 10, max 100\n"
@@ -5884,17 +6068,18 @@ def _help_embed(key, is_admin=False):
         embed.description = (
             "**📥 Daily uploads** — attach the file to the message\n"
             "```\n"
-            "!ingest sos2              the scan CSV\n"
-            "!ingestmerits             375 merits export\n"
-            "!ingestmerits 357         a rival's export\n"
+            "!ingest sos8              the scan CSV\n"
+            "!ingestmerits             merits export — server read\n"
+            "                          from the filename\n"
+            "!ingestmerits 357         force a server\n"
             "```\n"
             "Dates are read from the filename. Re-uploading the same date "
             "replaces it, so a bad upload is safe to redo.\n\n"
             "**🗂️ Managing stored data**\n"
             "```\n"
-            "!scans sos2               list stored scan dates\n"
-            "!scans s375               list merits exports\n"
-            "!unscan sos2 2026-09-01   delete one day\n"
+            "!scans sos8               list stored scan dates\n"
+            "!scans sos8_s375          list 375 merits exports\n"
+            "!unscan sos8 2026-10-20   delete one day\n"
             "!backfill sos2            import old sheet tabs\n"
             "!resync                   force a cache refresh\n"
             "```\n"
@@ -6015,11 +6200,12 @@ COMMAND_HELP = {
     "topreal": ("🎯 !topreal [server] [count] [window]",
                 "Merits earned against actual enemies."),
     "topinf": ("⚔️ !topinf [server] [count] [window]", "Infantry merits."),
-    "matchups": ("🆚 !matchups [server] [window]",
-                 "Head-to-head war comparison.\n`!matchups 1d`"),
+    "matchups": ("🆚 !matchups [side] [side] [window]",
+                 "Head-to-head war comparison, combined or per kingdom.\n"
+                 "`!matchups` · `!matchups nvr yss 1d` · `!matchups nvr+-i- yss`"),
     "groupleaderboard": ("🏆 !gl [window]", "Sun vs Moon rankings."),
     "excluded": ("🚫 !excluded", "Accounts excluded from all stats."),
-    "scans": ("🗂️ !scans <dataset>", "Stored dates.\n`!scans sos2` · `!scans s375`"),
+    "scans": ("🗂️ !scans <dataset>", "Stored dates.\n`!scans sos8` · `!scans sos8_s375`"),
 }
 
 
