@@ -1355,14 +1355,105 @@ def merits_dataset(server, season=None):
     return f"{season}_s{server}"
 
 
+# A file exactly as the in-game tool names it: 375_2026-10-16_2026-10-20.xlsx
+EXPORT_FILENAME_RE = re.compile(r"^(\d+)_(\d{4}-\d{2}-\d{2})_(\d{4}-\d{2}-\d{2})\.(xlsx|csv)$", re.I)
+
+# Webhook posts in this channel are ingested automatically. The daily export
+# script on the PC posts here; nobody needs to type !ingestmerits.
+AUTO_INGEST_CHANNEL_ID = SCAN_INGEST_CHANNEL_ID
+
+
+async def ingest_merits_file(attachment, server=None, dates_given=(), ingested_by=None):
+    """
+    Store one merits export. The server comes from `server`, else the number
+    the tool puts at the start of the filename, else our own server.
+
+    Returns (server, period_start, period_end, result, warnings).
+    Raises ValueError with a readable message on bad input.
+    """
+    if server is None:
+        m = re.match(r"(\d+)_", attachment.filename)
+        server = m.group(1) if m else lb.DEFAULT_SERVER
+
+    file_start, file_end = db.date_range_from_filename(attachment.filename)
+    if len(dates_given) >= 2:
+        period_start, period_end = dates_given[0], dates_given[1]
+    elif len(dates_given) == 1:
+        period_start, period_end = (file_start or SEASON_START), dates_given[0]
+    else:
+        period_start = file_start or SEASON_START
+        period_end = file_end or datetime.now(UTC).date()
+
+    if period_end < period_start:
+        raise ValueError("The end date is before the start date.")
+
+    raw = await attachment.read()
+    headers, rows = db.parse_scan_file(raw, attachment.filename)
+    result = await db.ingest_period(
+        season=merits_dataset(server),
+        period_start=period_start,
+        period_end=period_end,
+        headers=headers,
+        rows=rows,
+        id_column=ID_COLUMN_MERITS,
+        source_file=attachment.filename,
+        ingested_by=ingested_by,
+    )
+
+    warnings = []
+    if result["replaced"] is not None:
+        warnings.append(f"↻ Replaced the existing export for {period_end}.")
+    if period_start != SEASON_START:
+        warnings.append(
+            f"⚠️ Start date is **{period_start}**, expected **{SEASON_START}**. "
+            f"Windows need every export to share a start date."
+        )
+    return server, period_start, period_end, result, warnings
+
+
+async def ingest_merits_batch(channel, attachments, ingested_by):
+    """Ingest several exports and post one summary embed."""
+    lines, problems = [], []
+    refresh_375 = False
+    for att in attachments:
+        try:
+            server, start, end, result, warnings = await ingest_merits_file(
+                att, ingested_by=ingested_by
+            )
+        except Exception as e:
+            problems.append(f"❌ `{att.filename}` — {e}")
+            continue
+        refresh_375 = refresh_375 or server == lb.DEFAULT_SERVER
+        note = " · " + " ".join(w.split(" ", 1)[0] for w in warnings) if warnings else ""
+        lines.append(
+            f"✅ **{lb.server_label(server)}** · {start} → {end} · "
+            f"{result['rows']:,} players{note}"
+        )
+        problems.extend(f"{lb.server_label(server)}: {w}" for w in warnings
+                        if w.startswith("⚠️"))
+
+    embed = discord.Embed(
+        title=f"📥 Merits exports — {len(lines)}/{len(attachments)} stored",
+        description="\n".join(lines) or "*Nothing stored.*",
+        color=discord.Color.green() if not problems else discord.Color.orange(),
+    )
+    if problems:
+        embed.add_field(name="Problems", value="\n".join(problems)[:1024], inline=False)
+    embed.set_footer(text=f"Season {season_cfg(DEFAULT_SEASON)['label']} · ↻ = replaced an earlier upload")
+    await channel.send(embed=embed)
+
+    if refresh_375:
+        await load_375_cache()
+
+
 @bot.command(name="ingestmerits", aliases=["im", "ingest375"])
 @scan_admin()
 async def ingest_merits_cmd(ctx, *args):
     """
-    Upload a server's merits export (.xlsx or .csv).
+    Upload merits exports (.xlsx or .csv). Attach one file or several.
 
-        !ingestmerits                     375, dates from the filename
-        !ingestmerits 357                 for server 357
+        !ingestmerits                     server and dates from each filename
+        !ingestmerits 357                 force a server (one file only)
         !ingestmerits 357 2026-09-03      explicit end date
         !ingestmerits 357 2026-08-28 2026-09-03
 
@@ -1370,17 +1461,12 @@ async def ingest_merits_cmd(ctx, *args):
     cumulative and windows work.
     """
     async with ctx.typing():
-        if not ctx.message.attachments:
-            await ctx.send("❌ Attach the export file to the same message.")
+        attachments = ctx.message.attachments
+        if not attachments:
+            await ctx.send("❌ Attach the export file(s) to the same message.")
             return
 
-        attachment = ctx.message.attachments[0]
-
-        # Default: the server number the in-game tool puts at the start of the
-        # filename (509_2026-10-16_2026-10-20.xlsx -> 509), else our own.
-        m = re.match(r"(\d+)_", attachment.filename)
-        server = m.group(1) if m else lb.DEFAULT_SERVER
-
+        server = None
         dates_given = []
         for a in args:
             srv = lb.parse_server(a)
@@ -1396,30 +1482,19 @@ async def ingest_merits_cmd(ctx, *args):
                 await ctx.send(f"❌ Didn't understand `{a}`.")
                 return
 
-        file_start, file_end = db.date_range_from_filename(attachment.filename)
-        if len(dates_given) >= 2:
-            period_start, period_end = dates_given[0], dates_given[1]
-        elif len(dates_given) == 1:
-            period_start, period_end = (file_start or SEASON_START), dates_given[0]
-        else:
-            period_start = file_start or SEASON_START
-            period_end = file_end or datetime.now(UTC).date()
-
-        if period_end < period_start:
-            await ctx.send("❌ The end date is before the start date.")
+        if len(attachments) > 1:
+            if server or dates_given:
+                await ctx.send(
+                    "❌ With several files, the server and dates come from each "
+                    "filename. Drop the extra arguments, or upload one file at a time."
+                )
+                return
+            await ingest_merits_batch(ctx.channel, attachments, str(ctx.author))
             return
 
         try:
-            raw = await attachment.read()
-            headers, rows = db.parse_scan_file(raw, attachment.filename)
-            result = await db.ingest_period(
-                season=merits_dataset(server),
-                period_start=period_start,
-                period_end=period_end,
-                headers=headers,
-                rows=rows,
-                id_column=ID_COLUMN_MERITS,
-                source_file=attachment.filename,
+            server, period_start, period_end, result, warnings = await ingest_merits_file(
+                attachments[0], server=server, dates_given=dates_given,
                 ingested_by=str(ctx.author),
             )
         except Exception as e:
@@ -1433,15 +1508,6 @@ async def ingest_merits_cmd(ctx, *args):
         )
         embed.add_field(name="Players", value=f"{result['rows']:,}", inline=True)
         embed.add_field(name="Columns", value=str(result["columns"]), inline=True)
-
-        warnings = []
-        if result["replaced"] is not None:
-            warnings.append(f"↻ Replaced the existing export for {period_end}.")
-        if period_start != SEASON_START:
-            warnings.append(
-                f"⚠️ Start date is **{period_start}**, expected **{SEASON_START}**. "
-                f"Windows need every export to share a start date."
-            )
         if warnings:
             embed.add_field(name="Notes", value="\n".join(warnings), inline=False)
 
@@ -1450,6 +1516,28 @@ async def ingest_merits_cmd(ctx, *args):
 
         if server == lb.DEFAULT_SERVER:
             await load_375_cache()
+
+
+@bot.listen("on_message")
+async def _auto_ingest_merits(message):
+    """
+    Ingest merits exports posted by a webhook (the daily export script).
+
+    Bots ignore commands from webhooks, so the script can't type
+    !ingestmerits; this does the same job for files that are named exactly
+    as the in-game tool names them.
+    """
+    if message.webhook_id is None or message.channel.id != AUTO_INGEST_CHANNEL_ID:
+        return
+    exports = [a for a in message.attachments if EXPORT_FILENAME_RE.match(a.filename)]
+    if not exports:
+        return
+    try:
+        await ingest_merits_batch(
+            message.channel, exports, f"webhook:{message.author.name}"
+        )
+    except Exception as e:
+        await message.channel.send(f"❌ **Auto-ingest failed:** {e}")
 
 
 # -----------------------------------------------------------------------------
