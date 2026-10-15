@@ -1580,6 +1580,76 @@ async def get_merits_window(server, window=None, include_excluded=False, season=
  
     return data, label
 
+
+# -----------------------------------------------------------------------------
+# Merits come from the daily merits exports (always current). Deads, healed,
+# kills and mana still come from the scans. These helpers let scan-based
+# commands swap in export merits, falling back to the scan when a server has
+# no export.
+# -----------------------------------------------------------------------------
+
+async def export_rows(season, window=None, servers=None):
+    """
+    lord_id -> {column: value} from the merits exports over the window
+    (season to date when window is None).
+
+    Returns (rows, label), or (None, reason) when none of the servers has an
+    export, so callers can fall back to scan data. A player missing from an
+    existing export (below 15M power, or not in the top 800 on both days)
+    simply isn't in the dict.
+    """
+    servers = servers or [home_server(season)]
+    out, label, reason = {}, None, None
+    for server in servers:
+        data, lbl = await get_merits_window(server, window, season=season)
+        if data is None:
+            reason = reason or lbl
+            continue
+        label = label or lbl
+        headers, rows = lb.as_dicts(data)
+        c_id = lb.find_col(headers, ID_COLUMN_MERITS)
+        for r in rows:
+            out[str(r.get(c_id, "")).strip()] = r
+    return (out, label) if label else (None, reason or "no merits export stored")
+
+
+def export_value(rows, lord_id, column):
+    """One number from export_rows() output; 0 when the player isn't listed."""
+    r = rows.get(str(lord_id).strip()) if rows else None
+    if not r:
+        return 0
+    col = lb.find_col(list(r.keys()), column)
+    return lb.to_int(r.get(col, 0)) if col else 0
+
+
+async def merits_tables(servers, window, season):
+    """
+    Stack several servers' merits exports into one table, with a Tag column
+    (the server's tag, e.g. NVR) and a Server column added to every row.
+
+    Returns (table, servers_used, label); table is None when none had data.
+    """
+    headers, rows, used, label = None, [], [], None
+    for server in servers:
+        data, lbl = await get_merits_window(server, window, season=season)
+        if not data:
+            if len(servers) == 1:
+                label = lbl
+            continue
+        h = [str(x).strip() for x in data[0]]
+        if headers is None:
+            headers = h + ["Tag", "Server"]
+        idx = {name: i for i, name in enumerate(h)}
+        tag = lb.SERVER_NAMES.get(server, server)
+        for r in data[1:]:
+            rows.append([r[idx[c]] if c in idx and idx[c] < len(r) else ""
+                         for c in headers[:-2]] + [tag, server])
+        used.append(server)
+        label = label or lbl
+    if headers is None:
+        return None, [], label or "No merits exports stored this season."
+    return [headers] + rows, used, label
+
 # -----------------------------------------------------------------------------
 # 3. SCAN LEADERBOARDS — one engine, thin wrappers
 # -----------------------------------------------------------------------------
@@ -1687,16 +1757,17 @@ async def lowdeads(ctx, *args):
 
 @bot.command(aliases=["tm"])
 async def topmerits(ctx, *args):
-    """!topmerits [server] [count] [window] — e.g. !topmerits 357 50"""
-    await run_scan_leaderboard(ctx, args, title="Merits", emoji="🧠",
-                               value="merits", top=True)
+    """!topmerits [server] [count] [window] — e.g. !topmerits 357 50. From the daily export."""
+    await run_merits_leaderboard(ctx, args, title="Merits", emoji="🧠",
+                                 value="Total Merits", top=True,
+                                 min_power=25_000_000)
 
 
 @bot.command(aliases=["lm"])
 async def lowmerits(ctx, *args):
-    await run_scan_leaderboard(ctx, args, title="Merits", emoji="🔻",
-                               value="merits", top=False,
-                               min_power=50_000_000)
+    await run_merits_leaderboard(ctx, args, title="Merits", emoji="🔻",
+                                 value="Total Merits", top=False,
+                                 min_power=50_000_000)
 
 
 @bot.command(aliases=["tk"])
@@ -1725,14 +1796,14 @@ async def topt5(ctx, *args):
 
 @bot.command()
 async def topefficiency(ctx, *args):
-    """Merits per million power — who punches above their weight."""
+    """Merits per million power — who punches above their weight. From the daily export."""
     def ratio(get):
-        power = get("highest_power")
-        return round(get("merits") / (power / 1_000_000)) if power else 0
+        power = get("Historical Highest Power")
+        return round(get("Total Merits") / (power / 1_000_000)) if power else 0
 
-    await run_scan_leaderboard(ctx, args, title="Merits per 1M Power",
-                               emoji="📊", value=ratio, top=True,
-                               min_power=50_000_000)
+    await run_merits_leaderboard(ctx, args, title="Merits per 1M Power",
+                                 emoji="📊", value=ratio, top=True,
+                                 min_power=50_000_000)
 
 
 # -----------------------------------------------------------------------------
@@ -1753,8 +1824,9 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
             await ctx.send(f"❌ Didn't understand `{unknown[0]}`.")
             return
 
-        server = opts["server"] or lb.DEFAULT_SERVER   # this dataset is per-server
-        data, label = await get_merits_window(server, opts["window"], season=opts["season"])
+        server = opts["server"]          # None means "all"
+        servers = [server] if server else list(lb.SERVER_NAMES)
+        data, used, label = await merits_tables(servers, opts["window"], opts["season"])
         if data is None:
             await ctx.send(f"❌ {label}")
             return
@@ -1765,6 +1837,7 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
                 value,
                 id_col="Character ID",
                 name_col="Character Name",
+                alliance_col="Tag",
                 power_col="Historical Highest Power",
                 server_col=None,
                 min_power=min_power,
@@ -1781,8 +1854,10 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
             return
 
         direction = "Top" if top else "Lowest"
+        scope = (lb.server_label(server) if server else
+                 "All servers (" + ", ".join(lb.SERVER_NAMES.get(x, x) for x in used) + ")")
         subtitle = (
-            f"**{lb.server_label(server)}** · {label}\n"
+            f"**{scope}** · {label}\n"
             f"*≥{lb.fmt(min_power)} power · {total:,} players eligible*"
         )
 
@@ -1790,8 +1865,9 @@ async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
             ctx,
             title=f"{emoji} {direction} {len(entries)} — {title}",
             subtitle=subtitle,
-            footer=f"Merits export · {merits_dataset(server, opts['season'])}",
-            color=lb.server_color(server),
+            footer=("Merits export · " + (merits_dataset(server, opts["season"]) if server
+                                          else f"{len(used)} servers")),
+            color=lb.server_color(server) if server else 0x2F3136,
             entries=entries,
             unit=unit,
             show_detail=detail,
@@ -2354,6 +2430,9 @@ async def groupstats(ctx, *args):
             "Moon": {"power": 0, "kills": 0, "deads": 0, "heals": 0, "merits": 0, "players": []}
         }
 
+        # Merits from the daily export (always current); scan only as fallback
+        em, _ = await export_rows(season, window)
+
         for row in data_latest[1:]:
             if len(row) <= max_needed_idx: continue
             lid = (row[id_idx] or "").strip()
@@ -2367,7 +2446,8 @@ async def groupstats(ctx, *args):
             kills_gain  = max(0, to_int(row[kills_idx]) - to_int(prev_row[kills_idx]))
             deads_gain  = max(0, to_int(row[dead_idx]) - to_int(prev_row[dead_idx]))
             heals_gain  = max(0, to_int(row[heal_idx]) - to_int(prev_row[heal_idx]))
-            merits_gain = max(0, to_int(row[merits_idx]) - to_int(prev_row[merits_idx]))
+            merits_gain = (export_value(em, lid, "Total Merits") if em is not None else
+                           max(0, to_int(row[merits_idx]) - to_int(prev_row[merits_idx])))
 
             p_gain = {
                 "name": row[name_idx],
@@ -2431,7 +2511,9 @@ async def groupstats(ctx, *args):
         # Create Single Embed
         embed = discord.Embed(
             title="📊 Group Stats - Sun vs Moon",
-            description=f"**Comparing:** `{prev_title}` ➔ `{latest_title}`\n" + "▬" * 15,
+            description=(f"**Comparing:** `{prev_title}` ➔ `{latest_title}`\n"
+                         + ("*Merits from the daily export*\n" if em is not None else "")
+                         + "▬" * 15),
             color=0x2f3136
         )
 
@@ -2555,16 +2637,18 @@ async def groupleaderboard(ctx, *args):
                 if len(row) > max_needed_idx and str(row[id_idx]).strip()
             }
 
-            data_375 = bot_cache["375_data"]
-            headers_375 = data_375[0]
-
-            id_col_375 = headers_375.index("Character ID")
-            inf_col_375 = headers_375.index("Infantry Only")
+            # Merits and infantry from the daily export, over the same window
+            em, _ = await export_rows(season, window)
 
             inf_map = {}
-            for r in data_375[1:]:
-                if len(r) > max(id_col_375, inf_col_375):
-                    inf_map[str(r[id_col_375]).strip()] = to_int(r[inf_col_375])
+            if em is None:
+                data_375 = bot_cache["375_data"]
+                headers_375 = data_375[0]
+                id_col_375 = headers_375.index("Character ID")
+                inf_col_375 = headers_375.index("Infantry Only")
+                for r in data_375[1:]:
+                    if len(r) > max(id_col_375, inf_col_375):
+                        inf_map[str(r[id_col_375]).strip()] = to_int(r[inf_col_375])
 
             sun_players = []
             moon_players = []
@@ -2582,9 +2666,13 @@ async def groupleaderboard(ctx, *args):
                 if prev_row is None:
                     continue
 
-                merits_gain = max(0, to_int(row[merits_idx]) - to_int(prev_row[merits_idx]))
+                if em is not None:
+                    merits_gain = export_value(em, lid, "Total Merits")
+                    inf_val = export_value(em, lid, "Infantry Only")
+                else:
+                    merits_gain = max(0, to_int(row[merits_idx]) - to_int(prev_row[merits_idx]))
+                    inf_val = inf_map.get(lid, 0)
                 deads_gain  = max(0, to_int(row[dead_idx]) - to_int(prev_row[dead_idx]))
-                inf_val = inf_map.get(lid, 0)
 
                 score = (merits_gain * 1) + (inf_val * 2) + (deads_gain * 5)
 
@@ -2797,6 +2885,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
             merits_idx = headers.index("merits")
 
             prev_map = {row[id_idx].strip(): row for row in data_prev[1:] if len(row) > merits_idx}
+            em, _ = await export_rows(season)   # merits from the daily export
 
             # 3. LOAD SERVER 375 DATA FROM CACHE (For Magic)
             data_375 = bot_cache["375_data"]
@@ -2833,7 +2922,8 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
                     prev_row = prev_map.get(lid)
                     if not prev_row: continue
                     
-                    merit_gain = to_int(row[merits_idx]) - to_int(prev_row[merits_idx])
+                    merit_gain = (export_value(em, lid, "Total Merits") if em is not None
+                                  else to_int(row[merits_idx]) - to_int(prev_row[merits_idx]))
                     magic_total = magic_map.get(lid, 0)
                     
                     # Asymmetric Scoring Logic
@@ -2950,6 +3040,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
             merits_idx = headers.index("merits")
 
             prev_map = {row[id_idx].strip(): row for row in data_prev[1:] if len(row) > merits_idx}
+            em, _ = await export_rows(season)   # merits from the daily export
 
             # 3. LOAD SERVER 375 DATA FROM CACHE (For Infantry)
             data_375 = bot_cache["375_data"]
@@ -2976,7 +3067,9 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
                     if not prev_row: continue
                     
                     # Math: Merit Gain (1x) + Infantry Total (2x)
-                    merit_gain = int(str(row[merits_idx]).replace(",", "").strip() or 0) - int(str(prev_row[merits_idx]).replace(",", "").strip() or 0)
+                    merit_gain = (export_value(em, lid, "Total Merits") if em is not None
+                                  else int(str(row[merits_idx]).replace(",", "").strip() or 0)
+                                       - int(str(prev_row[merits_idx]).replace(",", "").strip() or 0))
                     inf_total = inf_map.get(lid, 0)
                     
                     score = merit_gain + (inf_total * 2)
@@ -3305,6 +3398,8 @@ async def get_merits_profile(server, lord_id, window=None, min_power=50_000_000,
         "other":     stat("Other Merits"),
         "gathering": stat("Gathering"),
         "total":     stat("Total Merits"),
+        "ratio":     stat(lambda get: (get("Total Merits") / get("Historical Highest Power") * 100)
+                          if get("Historical Highest Power") else 0),
         "enemy":     stat("Enemy Merits"),
         "traded":    stat(traded),
         "t4_heal":   stat("T4 Healed"),
@@ -3521,6 +3616,22 @@ async def progress(ctx, lord_id: str, *args):
             else:
                 req_line = f"🔴 **{req_pct:.0f}%** of {lb.fmt(req)}"
 
+            # Merits come from the daily merits export when this server has
+            # one (always current); the scan's merits are only a fallback.
+            profile, merits_label = await get_merits_profile(
+                player_server, target, window=window, season=season
+            )
+            season_profile = profile
+            if window and profile is not None:
+                season_profile, _ = await get_merits_profile(
+                    player_server, target, window=None, season=season
+                )
+            merits_from_export = profile is not None and season_profile is not None
+            if merits_from_export:
+                merits_now, r_merits, _ = season_profile["total"]
+                merits_gain, rm_gain, _ = profile["total"]
+                merit_ratio, r_ratio, _ = season_profile["ratio"]
+
             def rk(r):
                 return f" `#{r}`" if r else ""
 
@@ -3548,7 +3659,7 @@ async def progress(ctx, lord_id: str, *args):
                 value=f"{power_now:,}{rk(r_power)}" + (f"\n**+{lb.fmt(power_gain)}**" if power_gain else ""),
                 inline=False,
             )
-            embed.add_field(name="🧠 Merits",
+            embed.add_field(name="🧠 Merits" + ("" if merits_from_export else " (scan)"),
                             value=stat_field(merits_now, merits_gain, r_merits, rm_gain),
                             inline=True)
             embed.add_field(name="📊 Merit Ratio",
@@ -3575,10 +3686,7 @@ async def progress(ctx, lord_id: str, *args):
             )
 
             # --- Merits sheet, for whichever server they're on ----------------
-
-            profile, merits_label = await get_merits_profile(
-                player_server, target, window=window, season=season
-            )
+            # (profile was fetched above, where the merits field needs it)
 
             if profile is None:
                 embed.add_field(
@@ -4128,6 +4236,13 @@ async def build_matchup_embed(team_a, team_b, win, window, season, season_label)
         if m is not None and merit_label is None:
             merit_label = lbl
 
+    # Merits come from each kingdom's daily export when it has one; the scan
+    # is only the fallback. Deads, healed and kills stay on the scan.
+    for s in servers:
+        if merits[s]:
+            scan[s]["merits"] = merits[s]["total"]
+    merits_from_scan = [s for s in servers if not merits[s] and scan[s]["players"]]
+
     a = _sum_totals(scan[s] for s in team_a)
     b = _sum_totals(scan[s] for s in team_b)
     ma_parts = [merits[s] for s in team_a if merits[s]]
@@ -4257,6 +4372,10 @@ async def build_matchup_embed(team_a, team_b, win, window, season, season_label)
     if missing_scan:
         footer += ("\n⚠️ Not in the scan: "
                    + ", ".join(lb.server_label(s) for s in missing_scan))
+    if merits_from_scan:
+        footer += ("\n🧠 Merits from the scan for "
+                   + ", ".join(lb.server_label(s) for s in merits_from_scan)
+                   + " (no export)")
     if ma or mb:
         footer += f"\n🧾 Merits: {merit_label}"
         if missing_merits:
@@ -5958,26 +6077,28 @@ def _help_embed(key, is_admin=False):
 
     elif key == "scans":
         embed.description = (
-            "Built from the daily scans. Cover **all six servers**, so you can "
-            "look at rivals as easily as your own.\n\n"
-            "**Top**\n"
-            "`!topmerits` `!topdeads` `!topkills` `!topheal` `!topmana`\n"
-            "`!topt5` — T5 kills\n"
+            "**Merits** come from the daily export, updated twice a day. "
+            "**Deads, kills, healed and mana** come from the scans, so they're as "
+            "fresh as the last scan.\n\n"
+            "**Merits** (daily export)\n"
+            "`!topmerits` `!lowmerits`\n"
             "`!topefficiency` — merits per 1M power\n\n"
-            "**Bottom**\n"
-            "`!lowdeads` `!lowmerits`\n\n"
+            "**From the scans**\n"
+            "`!topdeads` `!lowdeads` `!topkills` `!topheal` `!topmana`\n"
+            "`!topt5` — T5 kills\n\n"
             "```\n"
             "!topmerits              top 10, server 375\n"
             "!topmerits 357 50       top 50 on YSS\n"
+            "!topmerits all 20       every server with an export\n"
             "!topdeads 357 25 7d     last 7 days\n"
-            "!topmerits all 20       every server\n"
             "```\n"
             "*Short aliases: `!tm` `!td` `!ld` `!lm` `!tk` `!th`*"
         )
 
     elif key == "merits":
         embed.description = (
-            "Built from the merits export. Filtered to **≥50M power**.\n\n"
+            "Built from the daily merits export. Filtered to **≥50M power**. "
+            "Add `all` to rank every server that has an export.\n\n"
             "**Troop types**\n"
             "`!topinf` / `!lowinf` — Infantry\n"
             "`!topcav` / `!lowcav` — Cavalry\n"
