@@ -136,19 +136,17 @@ def season_start(season=None):
 def home_server(season=None):
     return season_cfg(season or DEFAULT_SEASON)["home"]
 
-# Season dead requirement, by highest power
-DEAD_REQUIREMENTS = [
-    (200_000_000, 5_600_000),   # 200M+
-    (150_000_000, 3_100_000),   # 150–200M
-    (0,           1_600_000),   # below 150M
-]
+# Season dead requirement, by highest power. Empty = no requirement this
+# season: !deadcheck and the % lines are switched off. SoS2 used:
+#     (200_000_000, 5_600_000), (150_000_000, 3_100_000), (0, 1_600_000)
+DEAD_REQUIREMENTS = []
 
 
 def dead_requirement(highest_power):
     for threshold, req in DEAD_REQUIREMENTS:
         if highest_power >= threshold:
             return req
-    return DEAD_REQUIREMENTS[-1][1]
+    return DEAD_REQUIREMENTS[-1][1] if DEAD_REQUIREMENTS else None
 
 # Global memory bank for background tasks
 bot_cache = {
@@ -1744,7 +1742,7 @@ async def topdeads(ctx, *args):
     """!topdeads [server] [count] [window] — e.g. !topdeads 357 50 7d"""
     await run_scan_leaderboard(ctx, args, title="Dead Units", emoji="💀",
                                value="units_dead", top=True,
-                               detail=_dead_req_detail)
+                               detail=_dead_req_detail if DEAD_REQUIREMENTS else None)
 
 
 @bot.command(aliases=["ld"])
@@ -1752,7 +1750,7 @@ async def lowdeads(ctx, *args):
     await run_scan_leaderboard(ctx, args, title="Dead Units", emoji="🔻",
                                value="units_dead", top=False,
                                min_power=50_000_000,
-                               detail=_dead_req_detail)
+                               detail=_dead_req_detail if DEAD_REQUIREMENTS else None)
 
 
 @bot.command(aliases=["tm"])
@@ -2149,6 +2147,10 @@ async def deadcheck(ctx, *args, min_power=50_000_000):
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
         mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
         await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    if not DEAD_REQUIREMENTS:
+        await ctx.send("ℹ️ There's no dead requirement this season.")
         return
 
     async with ctx.typing():
@@ -3424,19 +3426,25 @@ def _stat_line(emoji, name, stat):
 # -----------------------------------------------------------------------------
 
 @bot.command(aliases=['stats'])
-async def progress(ctx, lord_id: str, *args):
+async def progress(ctx, *args):
     """
     Full progress report.
 
-        !progress 11659353              season to date
+        !progress                       your linked account (!link once)
+        !progress 7d                    your account, last 7 days
+        !progress @member               someone's linked account
+        !progress 11659353              any account by Lord ID
         !progress 11659353 7d           last 7 days
         !progress 11659353 sos4         a different season
-        !progress 11659353 sos4 7d
         !progress 11659353 2026-08-30   since a specific date
     """
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
         mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
         await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
+    lord_id, args = await resolve_lord_id(ctx, args)
+    if lord_id is None:
         return
 
     async with ctx.typing():
@@ -3590,7 +3598,7 @@ async def progress(ctx, lord_id: str, *args):
 
             # Requirement progress always measures the SEASON, not the window
             season_dead_gain = dead_gain
-            if window:
+            if window and DEAD_REQUIREMENTS:
                 sw = await get_window_data(season, None)
                 if sw:
                     sh = sw["latest"][0]
@@ -3609,7 +3617,9 @@ async def progress(ctx, lord_id: str, *args):
 
             req = dead_requirement(power_now)
             req_pct = (season_dead_gain / req * 100) if req else 0
-            if req_pct >= 100:
+            if not req:
+                req_line = None
+            elif req_pct >= 100:
                 req_line = f"✅ **{req_pct:.0f}%** of {lb.fmt(req)}"
             elif req_pct >= 75:
                 req_line = f"🟡 **{req_pct:.0f}%** of {lb.fmt(req)}"
@@ -3673,7 +3683,7 @@ async def progress(ctx, lord_id: str, *args):
                             inline=True)
             embed.add_field(name="💀 Deads",
                             value=stat_field(val(row_latest, dead_idx), dead_gain, rt_dead, r_dead)
-                                  + f"\n{req_line}",
+                                  + (f"\n{req_line}" if req_line else ""),
                             inline=True)
             embed.add_field(name="❤️ Healed",
                             value=stat_field(val(row_latest, healed_idx), heal_gain, rt_heal, r_heal),
@@ -3736,7 +3746,8 @@ async def progress(ctx, lord_id: str, *args):
                 )
                 embed.set_footer(
                     text=(
-                        f"📅 Scans: {win['prev_title']} → {win['latest_title']}\n"
+                        f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+                        f"{scan_age_note(win['latest_title'])}\n"
                         f"⚠️ Scan and merits breakdown data are captured at different times — "
                         f"the two halves may differ slightly.\n"
                         f"🧾 Merits: {merits_label} · ranked among {profile['pool']} "
@@ -3748,7 +3759,8 @@ async def progress(ctx, lord_id: str, *args):
             if profile is None:
                 embed.set_footer(
                     text=(
-                        f"📅 Scans: {win['prev_title']} → {win['latest_title']}\n"
+                        f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+                        f"{scan_age_note(win['latest_title'])}\n"
                         f"🔍 Try: !progress {target} 7d"
                     )
                 )
@@ -4368,7 +4380,8 @@ async def build_matchup_embed(team_a, team_b, win, window, season, season_label)
         )
 
     # --- Footer --------------------------------------------------------------
-    footer = f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+    footer = (f"📅 Scans: {win['prev_title']} → {win['latest_title']}"
+              f"{scan_age_note(win['latest_title'])}")
     if missing_scan:
         footer += ("\n⚠️ Not in the scan: "
                    + ", ".join(lb.server_label(s) for s in missing_scan))
@@ -4530,11 +4543,385 @@ def role_check():
     return commands.check(predicate)
 
 
+# =============================================================================
+# AUTOMATION — freshness notes, reminders, !link, daily report
+# =============================================================================
+
+REPORT_HOUR_UTC = 10          # daily report goes out at 10:00 UTC
+REMINDER_HOUR_UTC = 15        # reminders checked from 15:00 UTC (after the 14:30 export)
+LORD_ID_RE = re.compile(r"^\d{5,12}$")
+
+
+def scan_age_note(latest_title):
+    """Footer warning when the newest scan is more than a day old."""
+    try:
+        d = date.fromisoformat(str(latest_title))
+    except ValueError:
+        return ""
+    days = (datetime.now(UTC).date() - d).days
+    if days <= 1:
+        return ""
+    return (f"\n⚠️ Newest scan is {days} days old — deads, kills, healed and "
+            f"mana may be behind (merits are current).")
+
+
+def _season_running(today=None):
+    cfg = SEASON_CONFIG.get(DEFAULT_SEASON, {})
+    start, end = cfg.get("start"), cfg.get("end")
+    today = today or datetime.now(UTC).date()
+    if not start or today < start:
+        return False
+    return not end or today <= end + timedelta(days=2)
+
+
+# -----------------------------------------------------------------------------
+# Reminders + scheduled report (one loop, hourly)
+# -----------------------------------------------------------------------------
+
+@tasks.loop(minutes=30)
+async def automation_loop():
+    try:
+        now = datetime.now(UTC)
+        today = now.date()
+        if not _season_running(today):
+            return
+
+        if now.hour >= REPORT_HOUR_UTC:
+            await post_daily_report_once(today)
+
+        if now.hour < REMINDER_HOUR_UTC:
+            return
+        channel = bot.get_channel(SCAN_INGEST_CHANNEL_ID)
+        if channel is None:
+            return
+        ping = f"<@&{SCAN_ADMIN_ROLE_ID}>"
+        start = season_start()
+
+        # Scans: remind when there was no scan yesterday or today
+        dates = await db.get_latest_dates(DEFAULT_SEASON, n=1)
+        last_scan = dates[0] if dates else None
+        if (today > start and (last_scan is None or last_scan < today - timedelta(days=1))
+                and await db.get_state("reminded_scan") != today.isoformat()):
+            when = (f"{(today - last_scan).days} days ago ({last_scan})"
+                    if last_scan else "never this season")
+            await channel.send(
+                f"{ping} 📸 **Scan reminder** — the last scan was {when}. Deads, kills, "
+                f"healed and mana stay behind until the next `!ingest {DEFAULT_SEASON}`."
+            )
+            await db.set_state("reminded_scan", today.isoformat())
+
+        # Exports: by now yesterday's export should have arrived
+        expected = today - timedelta(days=1)
+        dates = await db.get_latest_dates(merits_dataset(home_server()), n=1)
+        last_export = dates[0] if dates else None
+        if (expected >= start and (last_export is None or last_export < expected)
+                and await db.get_state("reminded_export") != today.isoformat()):
+            await channel.send(
+                f"{ping} 📦 **No merits export for {expected}** — the export script "
+                f"hasn't posted. Is the PC on? Check `run_output.txt` in `C:\\codexport`."
+            )
+            await db.set_state("reminded_export", today.isoformat())
+    except Exception as e:
+        print(f"⚠️ automation_loop: {e}")
+
+
+@automation_loop.before_loop
+async def _automation_wait():
+    await bot.wait_until_ready()
+
+
+# -----------------------------------------------------------------------------
+# !link — remember a member's Lord ID
+# -----------------------------------------------------------------------------
+
+async def find_player(lord_id):
+    """(name, server) for a Lord ID, from the latest scan or our export."""
+    lid = str(lord_id).strip()
+    cached = bot_cache["seasons"].get(DEFAULT_SEASON)
+    if cached:
+        headers = cached["latest"][0]
+        c_id = lb.find_col(headers, "lord_id")
+        c_name = lb.find_col(headers, "name")
+        c_srv = lb.find_col(headers, "home_server")
+        if c_id:
+            i_id = headers.index(c_id)
+            for r in cached["latest"][1:]:
+                if i_id < len(r) and str(r[i_id]).strip() == lid:
+                    name = r[headers.index(c_name)] if c_name else "?"
+                    srv = "".join(ch for ch in str(r[headers.index(c_srv)]) if ch.isdigit()) if c_srv else ""
+                    return str(name).strip(), srv
+    for server in season_servers():
+        rows, _ = await export_rows(DEFAULT_SEASON, None, [server])
+        if rows and lid in rows:
+            r = rows[lid]
+            col = lb.find_col(list(r.keys()), "Character Name")
+            return str(r.get(col, "?")).strip(), server
+    return None
+
+
+def season_servers(season=None):
+    """Every kingdom in this season's pairings, our home first."""
+    cfg = season_cfg(season or DEFAULT_SEASON)
+    out = [cfg["home"]]
+    for a, b in cfg["matchups"]:
+        for s in a + b:
+            if s not in out:
+                out.append(s)
+    return out
+
+
+async def resolve_lord_id(ctx, args):
+    """
+    Work out whose stats a command is for, from loose arguments:
+        123456789   that ID          @member   their linked ID
+        (nothing)   the caller's linked ID
+    Returns (lord_id or None, remaining args). Sends the reason when None.
+    """
+    args = list(args)
+    if args:
+        m = re.fullmatch(r"<@!?(\d+)>", str(args[0]).strip())
+        if m:
+            linked = await db.get_link(int(m.group(1)))
+            if not linked:
+                await ctx.send("❌ That member hasn't linked a Lord ID yet (`!link <id>`).")
+                return None, args[1:]
+            return linked, args[1:]
+        if LORD_ID_RE.match(str(args[0]).strip()):
+            return str(args[0]).strip(), args[1:]
+    linked = await db.get_link(ctx.author.id)
+    if not linked:
+        await ctx.send(
+            "❓ Which account? Add a Lord ID, e.g. `!progress 11659353`, or link yours "
+            "once with `!link 11659353` and then just type `!progress`."
+        )
+        return None, args
+    return linked, args
+
+
+@bot.command(name="link")
+async def link_cmd(ctx, lord_id: str = None):
+    """!link <lord_id> — remember your account, then !progress works without an ID."""
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+    if not lord_id or not LORD_ID_RE.match(lord_id.strip()):
+        current = await db.get_link(ctx.author.id)
+        await ctx.send(
+            ("🔗 You're linked to `" + current + "`. " if current else "")
+            + "Usage: `!link 11659353` (your Lord ID from your in-game profile)."
+        )
+        return
+    found = await find_player(lord_id)
+    if not found:
+        await ctx.send(
+            f"❌ `{lord_id}` isn't in the latest scan or export. Check the number — "
+            f"it's the Lord ID on your in-game profile."
+        )
+        return
+    name, server = found
+    await db.set_link(ctx.author.id, lord_id.strip())
+    tag = lb.SERVER_NAMES.get(server, "")
+    await ctx.send(
+        f"🔗 Linked to **{('[' + tag + '] ') if tag else ''}{name}** (`{lord_id.strip()}`). "
+        f"Now just type `!progress`, or `!progress 7d`."
+    )
+
+
+@bot.command(name="unlink")
+async def unlink_cmd(ctx):
+    removed = await db.remove_link(ctx.author.id)
+    await ctx.send("🔓 Unlinked." if removed else "ℹ️ You weren't linked.")
+
+
+# -----------------------------------------------------------------------------
+# Daily report — merits and power from the daily exports
+# -----------------------------------------------------------------------------
+
+async def export_power_change(server, window, season):
+    """
+    lord_id -> (name, current-power change) between the window's two exports.
+    Returns (dict, None) or (None, reason) when there aren't two exports yet.
+    """
+    dataset = merits_dataset(server, season)
+    base_date, end_date, label = await resolve_window_dates(dataset, window)
+    if base_date is None:
+        return None, label
+    latest = strip_excluded(await db.get_scan(dataset, end_date), ID_COLUMN_MERITS)
+    base = strip_excluded(await db.get_scan(dataset, base_date), ID_COLUMN_MERITS)
+    if not latest or not base:
+        return None, "export missing"
+    out = {}
+    hl, rows_l = lb.as_dicts(latest)
+    hb, rows_b = lb.as_dicts(base)
+    cid_l, cid_b = lb.find_col(hl, ID_COLUMN_MERITS), lb.find_col(hb, ID_COLUMN_MERITS)
+    cp_l, cp_b = lb.find_col(hl, "Current Power"), lb.find_col(hb, "Current Power")
+    name_col = lb.find_col(hl, "Character Name")
+    before = {str(r.get(cid_b, "")).strip(): lb.to_int(r.get(cp_b, 0)) for r in rows_b}
+    for r in rows_l:
+        lid = str(r.get(cid_l, "")).strip()
+        if lid in before:
+            out[lid] = (str(r.get(name_col, "?")).strip(),
+                        lb.to_int(r.get(cp_l, 0)) - before[lid], server)
+    return out, None
+
+
+async def build_daily_report(season=None):
+    """One embed summarising the newest export day. (embed, None) or (None, reason)."""
+    season = season or DEFAULT_SEASON
+    cfg = season_cfg(season)
+    home = cfg["home"]
+    dates = await db.get_latest_dates(merits_dataset(home, season), n=1)
+    if not dates:
+        return None, "No merits export yet this season."
+    day = dates[0]
+
+    embed = discord.Embed(
+        title=f"📰 Daily report — {day:%A %d %B}",
+        description=(f"What happened on **{day:%d %b}** (00:00–23:59 UTC) · "
+                     f"`{cfg['label']}` · *≥50M power*"),
+        color=lb.server_color(home),
+    )
+
+    our_team = next((a if home in a else b for a, b in cfg["matchups"]
+                     if home in a + b), [home])
+
+    # --- each pairing: yesterday + season so far -----------------------------
+    for team_a, team_b in cfg["matchups"]:
+        ma, _ = await aggregate_merits(team_a, "1d", season=season)
+        mb, _ = await aggregate_merits(team_b, "1d", season=season)
+        sa, _ = await aggregate_merits(team_a, None, season=season)
+        sb, _ = await aggregate_merits(team_b, None, season=season)
+
+        rows = []
+        if ma and mb:
+            rows.append(vs_row("🧠", "Merits that day", ma["total"], mb["total"]))
+        pa = pb = None
+        for team, which in ((team_a, "a"), (team_b, "b")):
+            total, ok = 0, False
+            for s in team:
+                ch, _ = await export_power_change(s, "1d", season)
+                if ch is not None:
+                    ok = True
+                    total += sum(v[1] for v in ch.values())
+            if which == "a":
+                pa = total if ok else None
+            else:
+                pb = total if ok else None
+        if pa is not None and pb is not None:
+            rows.append(vs_row_power("📉", "Power change that day", pa, pb))
+        if sa and sb:
+            rows.append(vs_row("🏁", "Merits this season", sa["total"], sb["total"]))
+        missing = [s for s in team_a + team_b
+                   if not await db.get_latest_dates(merits_dataset(s, season), n=1)]
+        if missing:
+            rows.append("*No export yet for " + ", ".join(lb.server_label(s) for s in missing) + "*")
+        if rows:
+            embed.add_field(
+                name=f"⚔️  {side_name(team_a)}  vs  {side_name(team_b)}",
+                value=section(rows),
+                inline=False,
+            )
+
+    # --- our side: top merits that day ------------------------------------------
+    data, used, _ = await merits_tables(our_team, "1d", season)
+    if data:
+        entries, _ = lb.rank_table(
+            data, "Total Merits", id_col="Character ID", name_col="Character Name",
+            alliance_col="Tag", power_col="Historical Highest Power",
+            server_col=None, min_power=25_000_000, top=True, limit=5, drop_zero=True,
+        )
+        if entries:
+            embed.add_field(
+                name=f"🏆  Top merits that day — {side_name(our_team)}",
+                value="\n".join(
+                    f"{lb.rank_icon(i)} `[{e['alliance']}]` **{e['name']}** — `{lb.fmt(e['value'])}`"
+                    for i, e in enumerate(entries, 1)
+                ),
+                inline=False,
+            )
+
+    # --- our side: biggest power losses that day -------------------------------
+    losses = []
+    for s in our_team:
+        ch, _ = await export_power_change(s, "1d", season)
+        if ch:
+            losses += [(v[1], v[0], v[2]) for v in ch.values() if v[1] < 0]
+    losses.sort()
+    if losses:
+        embed.add_field(
+            name=f"📉  Biggest power losses — {side_name(our_team)}",
+            value="\n".join(
+                f"{lb.rank_icon(i)} `[{lb.SERVER_NAMES.get(srv, srv)}]` **{name}** — `{lb.fmt(chg)}`"
+                for i, (chg, name, srv) in enumerate(losses[:5], 1)
+            ),
+            inline=False,
+        )
+
+    embed.set_footer(text=f"Merits and power from the daily export · data through {day}\n"
+                          f"!report shows this any time · !matchups for the full picture")
+    embed.timestamp = datetime.now(UTC)
+    return embed, None
+
+
+async def post_daily_report_once(today):
+    """Post the scheduled report once per day, if a channel is set."""
+    if await db.get_state("report_last_posted") == today.isoformat():
+        return
+    channel_id = await db.get_state("report_channel")
+    if not channel_id:
+        return
+    channel = bot.get_channel(int(channel_id))
+    if channel is None:
+        return
+    embed, _ = await build_daily_report()
+    if embed is None:
+        return
+    await channel.send(embed=embed)
+    await db.set_state("report_last_posted", today.isoformat())
+
+
+@bot.command(name="report", aliases=["daily"])
+async def report_cmd(ctx):
+    """Today's daily report, on demand."""
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+    async with ctx.typing():
+        embed, reason = await build_daily_report()
+        await ctx.send(embed=embed) if embed else await ctx.send(f"❌ {reason}")
+
+
+@bot.command(name="reportchannel")
+@scan_admin()
+async def reportchannel_cmd(ctx, channel: str = None):
+    """!reportchannel #channel — where the 10:00 UTC daily report goes. 'off' stops it."""
+    if channel and channel.lower() == "off":
+        await db.set_state("report_channel", None)
+        await ctx.send("🔕 Daily report switched off.")
+        return
+    m = re.fullmatch(r"<#(\d+)>", channel or "")
+    if not m:
+        current = await db.get_state("report_channel")
+        await ctx.send(
+            (f"📰 Daily report goes to <#{current}> at {REPORT_HOUR_UTC}:00 UTC. "
+             if current else "📰 No report channel set. ")
+            + "Set it with `!reportchannel #channel`, or `!reportchannel off`."
+        )
+        return
+    await db.set_state("report_channel", m.group(1))
+    await ctx.send(f"✅ Daily report will post in <#{m.group(1)}> every day at "
+                   f"{REPORT_HOUR_UTC}:00 UTC.")
+
+
+
 @bot.event
 async def on_ready():
     await db.init_db() 
     await db.upgrade_schema()
     await db.ensure_exclusions_table()
+    await db.ensure_state_tables()
     await refresh_exclusions()
     await bot.load_extension("spydetect")
     await bot.load_extension("dashboard")
@@ -4546,6 +4933,10 @@ async def on_ready():
     # Start the UTC channel updater loop
     if not update_utc_channels.is_running():
         update_utc_channels.start()
+
+    # Reminders and the daily report
+    if not automation_loop.is_running():
+        automation_loop.start()
 
 
 
@@ -6058,14 +6449,19 @@ def _help_embed(key, is_admin=False):
 
     if key == "player":
         embed.description = (
-            "**`!progress <lord_id>`**  ·  alias `!stats`\n"
+            "**`!link <lord_id>`** — do this once. After that `!progress` "
+            "needs no ID. `!unlink` to undo.\n\n"
+            "**`!progress [lord_id]`**  ·  alias `!stats`\n"
             "Full profile: power, merits, kills, deads, healing, mana. Each "
             "stat shows the **total** on top and the **gain** for your chosen "
             "window underneath, both with server ranks. Troop-type merits, RSS "
             "healing and build stats appear too if a merits export exists for "
             "that player's server.\n\n"
             "```\n"
-            "!progress 11659353                      season to date\n"
+            "!progress                               you (after !link)\n"
+            "!progress 7d                            you, last 7 days\n"
+            "!progress @member                       a linked member\n"
+            "!progress 11659353                      any account\n"
             "!progress 11659353 7d                   last 7 days\n"
             "!progress 11659353 on:2026-09-02        that day only\n"
             "!progress 11659353 2026-09-01..2026-09-04\n"
@@ -6132,6 +6528,10 @@ def _help_embed(key, is_admin=False):
             "!matchups -i- yss 1d       yesterday\n"
             "!matchups nvr+-i- yss+rff  custom sides\n"
             "```\n"
+            "**`!report`**\n"
+            "The daily report: yesterday's merits and power change for each "
+            "pairing, plus our top merits and biggest power losses. Posted "
+            "automatically every day at 10:00 UTC.\n\n"
             "**`!groupleaderboard`**  ·  aliases `!gl`, `!grouplb`\n"
             "Sun vs Moon player rankings.\n\n"
             "**`!groupstats`**\n"
@@ -6204,6 +6604,13 @@ def _help_embed(key, is_admin=False):
             "!backfill sos2            import old sheet tabs\n"
             "!resync                   force a cache refresh\n"
             "```\n"
+            "**📰 Daily report & reminders**\n"
+            "```\n"
+            "!reportchannel #channel   where the 10:00 UTC report goes\n"
+            "!reportchannel off        stop it\n"
+            "```\n"
+            "The bot pings this role here after 15:00 UTC if there was no scan "
+            "yesterday or today, or if yesterday's merits export is missing.\n\n"
             "**🚫 Exclusions** — dead accounts, removed from every stat\n"
             "```\n"
             "!exclude 12345678 dead since July\n"
@@ -6296,10 +6703,12 @@ class HelpView(discord.ui.View):
 # -----------------------------------------------------------------------------
 
 COMMAND_HELP = {
-    "progress": ("📊 !progress <lord_id> [window] [season]",
+    "link": ("🔗 !link <lord_id>", "Remember your account so `!progress` needs no ID. `!unlink` to undo."),
+    "report": ("📰 !report", "Yesterday's war summary. Posted automatically at 10:00 UTC."),
+    "progress": ("📊 !progress [lord_id] [window] [season]",
                  "Full profile with totals, window gains, ranks and merit "
-                 "breakdown.\n"
-                 "`!progress 11659353 7d`\n"
+                 "breakdown. No ID needed after `!link`.\n"
+                 "`!progress` · `!progress 7d` · `!progress 11659353 7d`\n"
                  "`!progress 11659353 on:2026-09-02`"),
     "mana": ("💧 !mana <lord_id> [season]",
              "Mana gathered this season, with rank."),
