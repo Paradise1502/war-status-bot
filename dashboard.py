@@ -25,8 +25,8 @@ from discord.ui import Button, Modal, TextInput, View
 
 # ── CONFIGURATION ────────────────────────────────────────────
 ALLIANCES = [
-    "[NVR!] Main", "[NVR-] Shell", "[NVR1] Shell", "[NVR2] Shell", "[NVR3] Shell",
-    "[NVR4] Shell", "[NVR5] Shell", "[NVR6] Shell", "[MFD] Shell", "[NxW] Shell",
+    "[NVR!] Main", "[NVR-] Shell", "[NVR2] Shell", "[NVR3] Shell", "[NVR4] Shell",
+    "[NVR5] Shell", "[NVR6] Shell", "[MFD] Shell", "[NxW] Shell", "[UHA] Shell",
     "[NOIR] Shell", "[-GG-] Shell",
 ]
 
