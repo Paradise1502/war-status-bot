@@ -868,6 +868,21 @@ async def _load_season_from_db(season_key):
         "source":       "database",
     }
 
+async def season_not_ready_msg(season):
+    """Why a season has no season-to-date data yet, instead of a generic 'syncing'."""
+    try:
+        dates = await db.get_latest_dates(season, n=1)
+    except Exception:
+        dates = None
+    if not dates:
+        return f"📭 No scans for **{season.upper()}** yet. Upload one with `!ingest`."
+    oldest = await db.get_oldest_date(season)
+    if oldest == dates[0]:
+        return (f"📭 Only one **{season.upper()}** scan so far ({dates[0].isoformat()}). "
+                f"Gains need two scans, so this works after the next scan is uploaded.")
+    return "⏳ The bot is still loading the latest scans. Try again in a minute."
+
+
 async def refresh_season_cache():
     """
     Prefer the database. Fall back to Google Sheets for any season that isn't
@@ -2299,7 +2314,7 @@ async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
 
         # CACHE CHECK
         if season not in bot_cache["seasons"]:
-            await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+            await ctx.send(await season_not_ready_msg(season))
             return
 
         # Load from bot memory (Requires update to background task, see below)
@@ -2741,7 +2756,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
 
             # 1. CACHE CHECK: Ensure background task has synced both sheets
             if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
-                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+                await ctx.send(await season_not_ready_msg(season))
                 return
 
             # 2. LOAD DATA DIRECTLY FROM CACHE
@@ -2896,7 +2911,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
 
             # 1. CACHE CHECK: Ensure background task has synced both sheets
             if season not in bot_cache["seasons"] or bot_cache.get("375_data") is None:
-                await ctx.send("⏳ The bot is currently syncing with Google Sheets. Please try again in a few seconds!")
+                await ctx.send(await season_not_ready_msg(season))
                 return
 
             # 2. LOAD DATA DIRECTLY FROM CACHE
