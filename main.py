@@ -4818,9 +4818,10 @@ async def on_ready():
     await db.ensure_exclusions_table()
     await db.ensure_state_tables()
     await refresh_exclusions()
-    await bot.load_extension("spydetect")
-    await bot.load_extension("dashboard")
-    await bot.load_extension("activity_checks")
+    # on_ready runs again after every reconnect – only load each extension once
+    for ext in ("spydetect", "dashboard", "activity_checks"):
+        if ext not in bot.extensions:
+            await bot.load_extension(ext)
     print(f"✅ Bot is online as {bot.user}")
     if not fetch_sheets_background.is_running():
         fetch_sheets_background.start()
