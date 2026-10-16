@@ -142,6 +142,55 @@ def home_server(season=None):
 DEAD_REQUIREMENTS = []
 
 
+# Sun / Moon teams for !groupstats, !groupleaderboard. SoS8 roster, built
+# 16 Oct 2026 from NVR! members >=50M power: last season's teams kept, leavers
+# removed, 23 recruits split so both teams have 80 players and equal power.
+TEAM_ROSTER = {
+    # --- Sun (80) ---
+    "1038031": "Sun", "1268188": "Sun", "3668102": "Sun", "11403527": "Sun",
+    "1652362": "Sun", "11288601": "Sun", "11537218": "Sun", "4562030": "Sun",
+    "1185328": "Sun", "14920281": "Sun", "8617664": "Sun", "7001580": "Sun",
+    "3830433": "Sun", "4982945": "Sun", "11371644": "Sun", "3452794": "Sun",
+    "1890389": "Sun", "1301820": "Sun", "1799282": "Sun", "3521913": "Sun",
+    "2753089": "Sun", "3383792": "Sun", "12907861": "Sun", "1191528": "Sun",
+    "14893533": "Sun", "14625955": "Sun", "2217685": "Sun", "11589778": "Sun",
+    "2751627": "Sun", "1903216": "Sun", "11312335": "Sun", "1442822": "Sun",
+    "12861502": "Sun", "15719441": "Sun", "8365897": "Sun", "1327811": "Sun",
+    "2404030": "Sun", "3005418": "Sun", "12913373": "Sun", "6554196": "Sun",
+    "3665158": "Sun", "8167052": "Sun", "12867862": "Sun", "5798781": "Sun",
+    "1475373": "Sun", "8344083": "Sun", "12513340": "Sun", "7871135": "Sun",
+    "12909862": "Sun", "12391559": "Sun", "10026132": "Sun", "12049853": "Sun",
+    "15406991": "Sun", "1201472": "Sun", "14892554": "Sun", "11648388": "Sun",
+    "1159399": "Sun", "12426797": "Sun", "12049278": "Sun", "11599446": "Sun",
+    "19300504": "Sun", "15996144": "Sun", "12600393": "Sun", "11042149": "Sun",
+    "1930701": "Sun", "3446240": "Sun", "9556439": "Sun", "20898300": "Sun",
+    "11939697": "Sun", "12451416": "Sun", "11306195": "Sun", "11434627": "Sun",
+    "3453241": "Sun", "16457327": "Sun", "14249731": "Sun", "15988260": "Sun",
+    "13255722": "Sun", "18032877": "Sun", "15500649": "Sun", "12411922": "Sun",
+    # --- Moon (80) ---
+    "1209648": "Moon", "2554608": "Moon", "14685384": "Moon", "8981467": "Moon",
+    "3021274": "Moon", "2360876": "Moon", "2771301": "Moon", "2069785": "Moon",
+    "15384392": "Moon", "4019235": "Moon", "5752614": "Moon", "2176073": "Moon",
+    "2411806": "Moon", "1890674": "Moon", "5605513": "Moon", "3569766": "Moon",
+    "767323": "Moon", "3730372": "Moon", "4862278": "Moon", "1178290": "Moon",
+    "3041269": "Moon", "17409364": "Moon", "1177445": "Moon", "3600529": "Moon",
+    "6409636": "Moon", "14239577": "Moon", "1355903": "Moon", "12121490": "Moon",
+    "11372964": "Moon", "14721147": "Moon", "16633476": "Moon", "1421566": "Moon",
+    "16007668": "Moon", "1379913": "Moon", "93496": "Moon", "11659353": "Moon",
+    "16322115": "Moon", "11487055": "Moon", "3884083": "Moon", "3154267": "Moon",
+    "1480794": "Moon", "1358230": "Moon", "15168167": "Moon", "11095809": "Moon",
+    "3409065": "Moon", "9076185": "Moon", "12239902": "Moon", "11018782": "Moon",
+    "7979635": "Moon", "921581": "Moon", "8654500": "Moon", "15203473": "Moon",
+    "3937721": "Moon", "7514081": "Moon", "20773329": "Moon", "2102190": "Moon",
+    "11498431": "Moon", "2355170": "Moon", "124604": "Moon", "2899559": "Moon",
+    "1955276": "Moon", "11516385": "Moon", "16497032": "Moon", "7298996": "Moon",
+    "12993192": "Moon", "11529501": "Moon", "15985931": "Moon", "12581309": "Moon",
+    "3763091": "Moon", "20781093": "Moon", "12672252": "Moon", "1191427": "Moon",
+    "3571729": "Moon", "1434504": "Moon", "3550420": "Moon", "11597010": "Moon",
+    "11491223": "Moon", "11042696": "Moon", "16024377": "Moon", "5751068": "Moon",
+}
+
+
 def dead_requirement(highest_power):
     for threshold, req in DEAD_REQUIREMENTS:
         if highest_power >= threshold:
@@ -2334,49 +2383,6 @@ async def groupstats(ctx, *args):
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
-    TEAM_ROSTER = {
-        "1038031": "Sun", "1209648": "Moon", "2554608": "Moon", "1268188": "Sun",
-        "2283588": "Moon", "3668102": "Sun", "11403527": "Sun", "14685384": "Moon",
-        "3238703": "Moon", "1652362": "Sun", "11288601": "Sun", "2771301": "Moon",
-        "2069785": "Moon", "11537218": "Sun", "11399110": "Sun", "2360876": "Moon",
-        "8981467": "Moon", "4562030": "Sun", "1185328": "Sun", "4019235": "Moon",
-        "15384392": "Moon", "14920281": "Sun", "7504081": "Sun", "2176073": "Moon",
-        "2411806": "Moon", "4982945": "Sun", "11371644": "Sun", "5605513": "Moon",
-        "3569766": "Moon", "3452794": "Sun", "1301820": "Sun", "1178290": "Moon",
-        "3600529": "Moon", "4781116": "Sun", "3730372": "Moon", "1355903": "Moon",
-        "17409364": "Moon", "12907861": "Sun", "8617664": "Sun", "6409636": "Moon",
-        "11372964": "Moon", "14893533": "Sun", "4112915": "Sun", "14721147": "Moon",
-        "16633476": "Moon", "3383792": "Sun", "3521913": "Sun", "14721627": "Moon",
-        "1890674": "Moon", "1191528": "Sun", "11589778": "Sun", "15529642": "Moon",
-        "12121490": "Moon", "14625955": "Sun", "1903216": "Sun", "1421566": "Moon",
-        "1379913": "Moon", "2217685": "Sun", "1442822": "Sun", "11769711": "Moon",
-        "16322115": "Moon", "15719441": "Sun", "11312335": "Sun", "93496": "Moon",
-        "16007668": "Moon", "1327811": "Sun", "4942439": "Sun", "11487055": "Moon",
-        "11659353": "Moon", "3005418": "Sun", "8365897": "Sun", "3154267": "Moon",
-        "3884083": "Moon", "12913373": "Sun", "8167052": "Sun", "1358230": "Moon",
-        "15168167": "Moon", "8344083": "Sun", "12867862": "Sun", "5710153": "Moon",
-        "1475373": "Sun", "1896011": "Sun", "3665158": "Sun", "8498158": "Moon",
-        "1480794": "Moon", "7871135": "Sun", "14855893": "Sun", "12239902": "Moon",
-        "921581": "Moon", "10026132": "Sun", "12391559": "Sun", "11018782": "Moon",
-        "11409242": "Moon", "12861502": "Sun", "3911741": "Sun", "8654500": "Moon",
-        "15406991": "Sun", "1201472": "Sun", "2102190": "Moon", "2355170": "Moon",
-        "12426797": "Sun", "12049853": "Sun", "15203473": "Moon", "2899559": "Moon",
-        "1159399": "Sun", "12049278": "Sun", "7514081": "Moon", "1955276": "Moon",
-        "11599446": "Sun", "14892554": "Sun", "11516385": "Moon", "16497032": "Moon",
-        "15996144": "Sun", "12054525": "Sun", "7979635": "Moon", "7298996": "Moon",
-        "1727336": "Sun", "11648388": "Sun", "11529501": "Moon", "3937721": "Moon",
-        "6554196": "Sun", "19300504": "Sun", "12993192": "Moon", "1240639": "Moon",
-        "12600393": "Sun", "3324298": "Sun", "3763091": "Moon", "15985931": "Moon",
-        "1930701": "Sun", "3446240": "Sun", "9561066": "Moon", "12581309": "Moon",
-        "15140100": "Sun", "9556439": "Sun", "1191427": "Moon", "3571729": "Moon",
-        "11939697": "Sun", "11042149": "Sun", "9076185": "Moon", "12672252": "Moon",
-        "11306195": "Sun", "12451416": "Sun", "11597010": "Moon", "3550420": "Moon",
-        "15238376": "Sun", "11434627": "Sun", "1434504": "Moon", "537109": "Moon",
-        "3453241": "Sun", "12909862": "Sun", "11042696": "Moon", "11491223": "Moon",
-        "18032877": "Sun", "13255722": "Sun", "16053174": "Moon", "20773329": "Moon",
-        "14249731": "Sun", "15988260": "Sun", "16024377": "Moon", "5751068": "Moon",
-        "15500649": "Sun", "20781093": "Moon", "15976283": "Moon"
-    }
     
     try:
         season, window, unknown = split_args(args, SEASON_SHEETS)
@@ -2550,49 +2556,6 @@ async def groupleaderboard(ctx, *args):
             await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
             return
 
-        TEAM_ROSTER = {
-            "1038031": "Sun", "1209648": "Moon", "2554608": "Moon", "1268188": "Sun",
-            "2283588": "Moon", "3668102": "Sun", "11403527": "Sun", "14685384": "Moon",
-            "3238703": "Moon", "1652362": "Sun", "11288601": "Sun", "2771301": "Moon",
-            "2069785": "Moon", "11537218": "Sun", "11399110": "Sun", "2360876": "Moon",
-            "8981467": "Moon", "4562030": "Sun", "1185328": "Sun", "4019235": "Moon",
-            "15384392": "Moon", "14920281": "Sun", "7504081": "Sun", "2176073": "Moon",
-            "2411806": "Moon", "4982945": "Sun", "11371644": "Sun", "5605513": "Moon",
-            "3569766": "Moon", "3452794": "Sun", "1301820": "Sun", "1178290": "Moon",
-            "3600529": "Moon", "4781116": "Sun", "3730372": "Moon", "1355903": "Moon",
-            "17409364": "Moon", "12907861": "Sun", "8617664": "Sun", "6409636": "Moon",
-            "11372964": "Moon", "14893533": "Sun", "4112915": "Sun", "14721147": "Moon",
-            "16633476": "Moon", "3383792": "Sun", "3521913": "Sun", "14721627": "Moon",
-            "1890674": "Moon", "1191528": "Sun", "11589778": "Sun", "15529642": "Moon",
-            "12121490": "Moon", "14625955": "Sun", "1903216": "Sun", "1421566": "Moon",
-            "1379913": "Moon", "2217685": "Sun", "1442822": "Sun", "11769711": "Moon",
-            "16322115": "Moon", "15719441": "Sun", "11312335": "Sun", "93496": "Moon",
-            "16007668": "Moon", "1327811": "Sun", "4942439": "Sun", "11487055": "Moon",
-            "11659353": "Moon", "3005418": "Sun", "8365897": "Sun", "3154267": "Moon",
-            "3884083": "Moon", "12913373": "Sun", "8167052": "Sun", "1358230": "Moon",
-            "15168167": "Moon", "8344083": "Sun", "12867862": "Sun", "5710153": "Moon",
-            "1475373": "Sun", "1896011": "Sun", "3665158": "Sun", "8498158": "Moon",
-            "1480794": "Moon", "7871135": "Sun", "14855893": "Sun", "12239902": "Moon",
-            "921581": "Moon", "10026132": "Sun", "12391559": "Sun", "11018782": "Moon",
-            "11409242": "Moon", "12861502": "Sun", "3911741": "Sun", "8654500": "Moon",
-            "15406991": "Sun", "1201472": "Sun", "2102190": "Moon", "2355170": "Moon",
-            "12426797": "Sun", "12049853": "Sun", "15203473": "Moon", "2899559": "Moon",
-            "1159399": "Sun", "12049278": "Sun", "7514081": "Moon", "1955276": "Moon",
-            "11599446": "Sun", "14892554": "Sun", "11516385": "Moon", "16497032": "Moon",
-            "15996144": "Sun", "12054525": "Sun", "7979635": "Moon", "7298996": "Moon",
-            "1727336": "Sun", "11648388": "Sun", "11529501": "Moon", "3937721": "Moon",
-            "6554196": "Sun", "19300504": "Sun", "12993192": "Moon", "1240639": "Moon",
-            "12600393": "Sun", "3324298": "Sun", "3763091": "Moon", "15985931": "Moon",
-            "1930701": "Sun", "3446240": "Sun", "9561066": "Moon", "12581309": "Moon",
-            "15140100": "Sun", "9556439": "Sun", "1191427": "Moon", "3571729": "Moon",
-            "11939697": "Sun", "11042149": "Sun", "9076185": "Moon", "12672252": "Moon",
-            "11306195": "Sun", "12451416": "Sun", "11597010": "Moon", "3550420": "Moon",
-            "15238376": "Sun", "11434627": "Sun", "1434504": "Moon", "537109": "Moon",
-            "3453241": "Sun", "12909862": "Sun", "11042696": "Moon", "11491223": "Moon",
-            "18032877": "Sun", "13255722": "Sun", "16053174": "Moon", "20773329": "Moon",
-            "14249731": "Sun", "15988260": "Sun", "16024377": "Moon", "5751068": "Moon",
-            "15500649": "Sun", "20781093": "Moon", "15976283": "Moon"
-        }
 
         try:
             season, window, unknown = split_args(args, SEASON_SHEETS)
@@ -2643,7 +2606,7 @@ async def groupleaderboard(ctx, *args):
             em, _ = await export_rows(season, window)
 
             inf_map = {}
-            if em is None:
+            if em is None and bot_cache.get("375_data"):
                 data_375 = bot_cache["375_data"]
                 headers_375 = data_375[0]
                 id_col_375 = headers_375.index("Character ID")
@@ -2761,100 +2724,6 @@ async def groupleaderboard(ctx, *args):
         except Exception as e:
             await ctx.send(f"❌ **Error:** {e}")
         
-@bot.command()
-async def kills(ctx, lord_id: str, season: str = DEFAULT_SEASON):
-    try:
-        season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
-            return
-
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Not enough sheets to compare.")
-            return
-
-        latest = tabs[-1]
-        previous = tabs[-2]
-
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
-
-        id_index = headers.index("lord_id")
-        name_index = 1
-        alliance_index = 3
-        power_index = 12
-
-        total_idx = 9    # Column J
-        t5_idx = 36      # Column AK
-        t4_idx = 37      # Column AL
-        t3_idx = 38      # Column AM
-        t2_idx = 39      # Column AN
-        t1_idx = 40      # Column AO
-
-        def to_int(val):
-            try:
-                return int(val.replace(',', '').replace('-', '').strip())
-            except:
-                return 0
-
-        def find_row(data):
-            for row in data[1:]:
-                if row[id_index] == lord_id:
-                    return row
-            return None
-
-        row_latest = find_row(data_latest)
-        row_prev = find_row(data_prev)
-
-        if not row_latest or not row_prev:
-            await ctx.send("❌ Lord ID not found in both sheets.")
-            return
-
-        power = to_int(row_latest[power_index])
-        if power < 25_000_000:
-            await ctx.send("❌ Player is below 25M power.")
-            return
-
-        name = row_latest[name_index].strip()
-        alliance = row_latest[alliance_index].strip()
-        tag = f"[{alliance}] {name}"
-
-        def get_diff(idx):
-            return to_int(row_latest[idx]) - to_int(row_prev[idx])
-
-        def get_now(idx):
-            return to_int(row_latest[idx])
-
-        total = get_now(total_idx)
-        total_diff = get_diff(total_idx)
-        t5 = get_now(t5_idx)
-        t5_diff = get_diff(t5_idx)
-        t4 = get_now(t4_idx)
-        t4_diff = get_diff(t4_idx)
-        t3 = get_now(t3_idx)
-        t3_diff = get_diff(t3_idx)
-        t2 = get_now(t2_idx)
-        t2_diff = get_diff(t2_idx)
-        t1 = get_now(t1_idx)
-        t1_diff = get_diff(t1_idx)
-
-        await ctx.send(
-            f"📊 **Kill Stats for `{tag}`**\n"
-            f"`{previous.title}` → `{latest.title}`\n\n"
-            f"⚔️ **Total:** {total:,} (+{total_diff:,})\n"
-            f"T5: {t5:,} (+{t5_diff:,})\n"
-            f"T4: {t4:,} (+{t4_diff:,})\n"
-            f"T3: {t3:,} (+{t3_diff:,})\n"
-            f"T2: {t2:,} (+{t2_diff:,})\n"
-            f"T1: {t1:,} (+{t1_diff:,})"
-        )
-
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
-
 @bot.command(aliases=['xppvsraz', 'duel2'])
 async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
     """Custom asymmetric 1v1 Challenge: xpp vs raz"""
