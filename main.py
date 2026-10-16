@@ -3595,8 +3595,7 @@ async def progress(ctx, *args):
                     name="Utility",
                     value="\n".join([
                         _stat_line("❤️", "T5 Healed", profile["t5_heal"]),
-                        _stat_line("❤️", "T4 Healed", profile["t4_heal"]),
-                        f"💧 **Heal mana:** {lb.fmt(profile['heal_mana'][0])}"
+                        f"💧 **Mana used:** {lb.fmt(profile['heal_mana'][0])}"
                         + (f" `#{profile['heal_mana'][1]}`" if profile['heal_mana'][1] else ""),
                         _stat_line("🔨", "Build",     profile["build"]),
                         _stat_line("🧨", "Destroy",   profile["destroy"]),
