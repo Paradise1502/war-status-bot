@@ -3275,6 +3275,9 @@ async def get_merits_profile(server, lord_id, window=None, min_power=50_000_000,
         "traded":    stat(traded),
         "t4_heal":   stat("T4 Healed"),
         "t5_heal":   stat("T5 Healed"),
+        # mana spent healing, same rates as !toprssheal and !matchups
+        "heal_mana": stat(lambda get: int(get("T5 Healed") * MANA_PER_T5
+                                          + get("T4 Healed") * MANA_PER_T4)),
         "build":     stat("Build Time"),
         "destroy":   stat("Destruction Time"),
         "t4_dead":   stat("T4 Deaths"),
@@ -3593,6 +3596,8 @@ async def progress(ctx, *args):
                     value="\n".join([
                         _stat_line("❤️", "T5 Healed", profile["t5_heal"]),
                         _stat_line("❤️", "T4 Healed", profile["t4_heal"]),
+                        f"💧 **Heal mana:** {lb.fmt(profile['heal_mana'][0])}"
+                        + (f" `#{profile['heal_mana'][1]}`" if profile['heal_mana'][1] else ""),
                         _stat_line("🔨", "Build",     profile["build"]),
                         _stat_line("🧨", "Destroy",   profile["destroy"]),
                     ]),
