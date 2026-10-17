@@ -342,9 +342,10 @@ def _load_state():
             "alliances": data.get("alliances", []),
             "buff": data.get("buff", False),
             "status_message_id": data.get("status_message_id"),
+            "buff_auto": data.get("buff_auto", {}),   # {shell: active_until} set by the dashboard
         }
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"alliances": [], "buff": False, "status_message_id": None}
+        return {"alliances": [], "buff": False, "status_message_id": None, "buff_auto": {}}
 
 
 shell_state = _load_state()
@@ -395,11 +396,12 @@ def build_embed():
         embed.add_field(name="Priority order", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="Priority order", value="No active shell builds", inline=False)
-    embed.add_field(
-        name="Build buff",
-        value="⚡ **ACTIVE**" if buff_on else "❌ Off",
-        inline=False,
-    )
+    auto = shell_state.get("buff_auto") or {}
+    if buff_on and auto:
+        buff_text = "⚡ **ACTIVE** · " + " · ".join(f"**{t}** until <t:{e}:t> (<t:{e}:R>)" for t, e in auto.items())
+    else:
+        buff_text = "⚡ **ACTIVE**" if buff_on else "❌ Off"
+    embed.add_field(name="Build buff", value=buff_text, inline=False)
     embed.set_footer(text="Send builders from farm accounts in priority order")
     embed.timestamp = discord.utils.utcnow()
     return embed
@@ -475,6 +477,37 @@ async def _apply_change(guild, action, member):
     log = guild.get_channel(SHELL_LOG_CHANNEL_ID)
     if log:
         await log.send(f"{action} by **{member.display_name}**")
+
+
+async def dashboard_build_buff(active):
+    """Called by dashboard.py whenever the set of shells with an ACTIVE Build Buff changes.
+    active = {shell_tag: active_until_timestamp}. Turns ⚡ on, and off again when the hour is over."""
+    active = {str(k): int(v) for k, v in (active or {}).items()}
+    prev = shell_state.get("buff_auto") or {}
+    if active == prev:
+        return
+    shell_state["buff_auto"] = active
+    if active:
+        shell_state["buff"] = True
+    elif prev:
+        shell_state["buff"] = False      # the dashboard switched it on → switch it off again
+    _save_state()
+    channel = bot.get_channel(SHELL_CHANNEL_ID)
+    if channel is None:
+        return
+    guild = channel.guild
+    await update_status_message(guild)
+    schedule_rename(guild)
+    log = guild.get_channel(SHELL_LOG_CHANNEL_ID)
+    if log:
+        if active:
+            text = "⚡ Build buff turned **ON** from the alliance dashboard · " + ", ".join(active)
+        else:
+            text = "⚡ Build buff turned **OFF** – the active hour is over"
+        await log.send(text)
+
+
+bot.dashboard_build_buff = dashboard_build_buff
 
 
 # ── Reaction added ───────────────────────────────────────────
@@ -560,6 +593,7 @@ async def shell_reaction_remove(payload):
         if not shell_state["buff"]:
             return
         shell_state["buff"] = False
+        shell_state["buff_auto"] = {}
         action = "⚡ Build buff turned **OFF**"
 
     elif emoji in SHELL_ALLIANCES:
@@ -586,6 +620,7 @@ async def shell_reset(ctx):
 
     shell_state["alliances"] = []
     shell_state["buff"] = False
+    shell_state["buff_auto"] = {}
     _save_state()
 
     channel = ctx.guild.get_channel(SHELL_REACTION_CHANNEL_ID)
