@@ -2,15 +2,19 @@
 NVR Alliance Dashboard
 ======================
 Two messages:
-  • Dashboard (!setup_dashboard) – read-only overview for everyone, grouped by ability:
-    which shells have Bastion / Build Buff / Storm / Fog ready right now.
-  • Officer panel (!setup_panel) – one button per shell. Tap the shell → tap what was used.
+  • Dashboard (!setup_dashboard) – overview for everyone, grouped by ability. Alerts are posted here too.
+  • Officer panel (!setup_panel) – one button per shell. Tap the shell → tap what happened.
+
+Life cycle of every ability:
+  🔴 on cooldown  →  🟡 needs donations  →  (💰 Donated)  →  🟢 ready to use  →  (used)  →  🔴 …
+  Build Buff is 🟠 active for its first hour, and switches ⚡ on in the shell builds channel.
 
 What happens automatically:
-  • Cooldowns turn 🟢 on the dashboard by themselves when they run out.
-  • The bot posts a 🟢 "ready again" alert (optionally pinging a role).
-  • The officer panel stays at the bottom of its channel.
-  • Everything is saved on the /data volume, so deploys don't reset timers.
+  • ⏰ heads-up 15 min before something comes off cooldown, then a 🟡 "needs donations" alert
+  • Build Buff turns ⚡ on in the shell builds channel and off again when the hour is over
+  • Dashboard + officer panel stay at the bottom of their channels
+  • Who pressed what is saved (📜 Log) and shown on each shell card
+  • Everything is saved on the /data volume, so deploys don't reset timers
 """
 import asyncio
 import json
@@ -30,27 +34,35 @@ ALLIANCES = [
     "[NOIR] Shell", "[-GG-] Shell",
 ]
 
-# key → (emoji, name, cooldown in seconds, button text)
+# key → (emoji, name, cooldown in seconds, "used" button text)
 ABILITIES = {
     "bastion":    ("🏰", "Bastion",        12 * 3600, "Bastion removed"),
     "build_buff": ("🔨", "Build Buff",     72 * 3600, "Build Buff used"),
     "storm":      ("⚡", "Storm Vanguard", 36 * 3600, "Storm used"),
     "fog":        ("🌫️", "Fog of War",     48 * 3600, "Fog used"),
 }
+# Which abilities have to be donated to after the cooldown before they can be used again
+NEEDS_DONATION = {"bastion": True, "build_buff": True, "storm": True, "fog": True}
 BUILD_BUFF_ACTIVE = 1 * 3600         # build buff is active for the first hour of its 72h cooldown
 
-LOG_CHANNEL_ID = 1527938722987900978  # who pressed what (None = off)
-ALERT_CHANNEL_ID = None              # where "🟢 ready again" alerts go (None = the officer panel channel)
-ALERT_ROLE_ID = None                 # role to ping with alerts, e.g. your officer role (None = no ping)
-ALERT_DELETE_AFTER = 6 * 3600        # alerts delete themselves after 6h (None = keep)
-ALERT_BUILD_BUFF_END = True          # also announce when a build buff's active hour is over
+LOG_CHANNEL_ID = 1527938722987900978  # also post every click here (None = off)
+ALERT_CHANNEL_ID = None              # where alerts go (None = the dashboard channel)
+ALERT_ROLE_ID = None                 # ⬅️ role to ping with alerts, e.g. your R4/officer role (None = no ping)
+HEADS_UP_BEFORE = 15 * 60            # ⏰ heads-up this long before a cooldown ends (None = off)
+HEADS_UP_DELETE_AFTER = 20 * 60      # heads-up messages delete themselves after 20 min
+ALERT_DELETE_AFTER = 3 * 3600        # "needs donations" / "build buff over" alerts delete after 3h (None = keep)
+ALERT_BUILD_BUFF_END = True          # announce when a build buff's active hour is over
 OFFICER_ROLE_IDS = []                # only these roles may use the panel ([] = anyone who can see it)
-STICKY_PANEL = True                  # keep the officer panel as the last message in its channel
-STICKY_DELAY = 5                     # seconds of quiet before the panel moves down
+STICKY = True                        # keep dashboard + panel as the last message in their channels
+STICKY_DELAY = 5                     # seconds of quiet before they move down
+HISTORY_KEEP = 500                   # how many log entries to keep
 
 _DATA_DIR = os.getenv("DATA_DIR") or ("/data" if os.path.isdir("/data") else ".")
 DATA_FILE = os.path.join(_DATA_DIR, "dashboard_data.json")
 _OLD_DATA_FILE = "dashboard_data.json"   # where older versions saved it (lost on every deploy)
+
+DASH_TITLE = "🛡️ NVR ALLIANCE DASHBOARD"
+PANEL_TITLE = "🛠️ OFFICER PANEL"
 
 
 # ── DATA ─────────────────────────────────────────────────────
@@ -65,15 +77,13 @@ def load_data():
                 data = json.load(f)
         except (json.JSONDecodeError, OSError):
             data = {}
-    data.setdefault("dashboard_channel_id", None)
-    data.setdefault("dashboard_message_id", None)
-    data.setdefault("panel_channel_id", None)
-    data.setdefault("panel_message_id", None)
-    data.setdefault("cooldowns", {})
-    data.setdefault("alerted", {})
-    for a in ALLIANCES:
-        data["cooldowns"].setdefault(a, {})
-        data["alerted"].setdefault(a, {})
+    for k in ("dashboard_channel_id", "dashboard_message_id", "panel_channel_id", "panel_message_id"):
+        data.setdefault(k, None)
+    for k in ("cooldowns", "donated", "alerted", "last"):
+        data.setdefault(k, {})
+        for a in ALLIANCES:
+            data[k].setdefault(a, {})
+    data.setdefault("history", [])
     return data
 
 
@@ -89,30 +99,34 @@ def tag(alliance):
     return m.group(1) if m else alliance
 
 
-def by_tag(t):
-    return next((a for a in ALLIANCES if tag(a) == t), None)
+def _end(db, alliance, key):
+    return int(db["cooldowns"].get(alliance, {}).get(key, 0) or 0)
 
 
 def state(db, alliance, key, now=None):
-    """('ready'|'active'|'cooldown', end_timestamp)"""
+    """('cooldown'|'active'|'donate'|'ready', timestamp)"""
     now = now or int(time.time())
-    end = int(db["cooldowns"].get(alliance, {}).get(key, 0) or 0)
-    if end <= now:
+    end = _end(db, alliance, key)
+    if end > now:
+        if key == "build_buff":
+            active_end = end - ABILITIES["build_buff"][2] + BUILD_BUFF_ACTIVE
+            if now < active_end:
+                return "active", active_end
+        return "cooldown", end
+    if not NEEDS_DONATION.get(key, False):
         return "ready", 0
-    if key == "build_buff":
-        active_end = end - ABILITIES["build_buff"][2] + BUILD_BUFF_ACTIVE
-        if now < active_end:
-            return "active", active_end
-    return "cooldown", end
+    donated = int(db["donated"].get(alliance, {}).get(key, 0) or 0)
+    return ("ready", 0) if donated else ("donate", 0)
 
 
 def status_text(db, alliance, key):
     s, t = state(db, alliance, key)
-    if s == "ready":
-        return "🟢 **Ready**"
-    if s == "active":
-        return f"🟠 **Active** · ends <t:{t}:R>"
-    return f"🔴 Ready <t:{t}:R>"
+    return {
+        "ready": "🟢 **Ready to use**",
+        "donate": "🟡 **Needs donations**",
+        "active": f"🟠 **Active** · ends <t:{t}:R>",
+        "cooldown": f"🔴 Off cooldown <t:{t}:R>",
+    }[s]
 
 
 def parse_duration(text):
@@ -134,71 +148,93 @@ def parse_duration(text):
 
 def fmt_duration(seconds):
     h, m = divmod(max(seconds, 0) // 60, 60)
-    return f"{h}h {m:02d}m" if h else f"{m}m"
+    return f"{h}h{m:02d}m" if h else f"{m}m"
 
 
 # ── EMBEDS ───────────────────────────────────────────────────
 def generate_dashboard_embed(db):
     now = int(time.time())
-    embed = discord.Embed(title="🛡️ NVR ALLIANCE DASHBOARD", color=discord.Color.gold())
+    embed = discord.Embed(title=DASH_TITLE, color=discord.Color.gold())
 
     active = [(tag(a), state(db, a, "build_buff", now)[1]) for a in ALLIANCES
               if state(db, a, "build_buff", now)[0] == "active"]
-    top = []
     if active:
-        top.append("🔨 **BUILD BUFF ACTIVE:** " + " · ".join(f"`{t}` ends <t:{e}:R>" for t, e in active))
+        embed.description = ("🔨 **BUILD BUFF ACTIVE:** "
+                             + " · ".join(f"`{t}` ends <t:{e}:R>" for t, e in active) + "\n​")
     else:
-        top.append("*No build buff active right now.*")
-    embed.description = "\n".join(top) + "\n​"
+        embed.description = "*No build buff active right now.*\n​"
 
     for key, (emoji, name, cd, _) in ABILITIES.items():
-        ready, busy = [], []
+        groups = {"ready": [], "donate": []}
+        busy = []
         for a in ALLIANCES:
             s, t = state(db, a, key, now)
-            if s == "ready":
-                ready.append(f"`{tag(a)}`")
+            if s in groups:
+                groups[s].append(f"`{tag(a)}`")
             elif s == "active":
                 busy.append((t, f"🟠 `{tag(a)}` active, ends <t:{t}:R>"))
             else:
                 busy.append((t, f"🔴 `{tag(a)}` <t:{t}:R>"))
         lines = []
-        if ready:
-            lines.append("🟢 " + " ".join(ready))
-        for _, line in sorted(busy):
-            lines.append(line)
+        if groups["ready"]:
+            lines.append("🟢 " + " ".join(groups["ready"]))
+        if groups["donate"]:
+            lines.append("🟡 " + " ".join(groups["donate"]))
+        lines += [line for _, line in sorted(busy)]
         embed.add_field(name=f"{emoji} {name} · {cd // 3600}h", value="\n".join(lines)[:1024] or "–",
                         inline=False)
 
-    embed.set_footer(text="🟢 ready · 🔴 on cooldown · 🟠 active · turns green by itself")
+    embed.set_footer(text="🟢 ready to use · 🟡 needs donations · 🔴 cooldown · 🟠 active")
     embed.timestamp = discord.utils.utcnow()
     return embed
 
 
 def panel_embed():
     e = discord.Embed(
-        title="🛠️ OFFICER PANEL",
-        description=("**Tap the shell → tap what was used.** That's it.\n"
-                     "The timer starts right away and the dashboard updates for everyone.\n\n"
-                     "Forgot to press it in time? Open the shell and use **✏️ Fix timers** "
-                     "to enter how much time is left."),
+        title=PANEL_TITLE,
+        description=("**Tap the shell → tap what happened.** That's it.\n"
+                     "💰 **Donated** when a skill is funded · **…used** when it was used.\n"
+                     "The dashboard updates for everyone right away.\n\n"
+                     "Forgot to press it in time? Open the shell → **✏️ Fix timers**."),
         color=discord.Color.gold(),
     )
-    e.set_footer(text="You'll get a 🟢 alert when something is ready again.")
+    e.set_footer(text="⏰ The dashboard channel gets a heads-up 15 min before something is off cooldown.")
     return e
+
+
+def _last_line(db, alliance, key):
+    last = db["last"].get(alliance, {}).get(key)
+    if not last:
+        return ""
+    return f"\n　╰ *{last['what']} by **{last['by']}** <t:{last['t']}:R>*"
 
 
 def shell_embed(db, alliance, header=None):
     e = discord.Embed(title=f"🛡️ {alliance}", color=discord.Color.gold())
-    lines = [f"{emoji} **{name}** — {status_text(db, alliance, key)}"
+    lines = [f"{emoji} **{name}** — {status_text(db, alliance, key)}{_last_line(db, alliance, key)}"
              for key, (emoji, name, _, _) in ABILITIES.items()]
     e.description = ((header + "\n\n") if header else "") + "\n".join(lines)
-    e.set_footer(text="Tap what was used · greyed out = still on cooldown")
+    e.set_footer(text="Row 1: used · Row 2: donated · greyed out = not possible right now")
+    return e
+
+
+def log_embed(db, alliance=None, limit=20):
+    entries = [h for h in db["history"] if not alliance or h["a"] == alliance][-limit:]
+    title = f"📜 Log · {tag(alliance)}" if alliance else "📜 Log · all shells"
+    e = discord.Embed(title=title, color=discord.Color.dark_gold())
+    if entries:
+        e.description = "\n".join(
+            f"<t:{h['t']}:t> **{h['by']}** · {h['what']}" + ("" if alliance else f" · `{tag(h['a'])}`")
+            for h in reversed(entries))[:4096]
+    else:
+        e.description = "*Nothing logged yet.*"
+    e.set_footer(text=f"Last {len(entries)} actions · newest first")
     return e
 
 
 # ── VIEWS ────────────────────────────────────────────────────
 class OfficerPanel(View):
-    """Persistent panel: one button per shell + an overview button."""
+    """Persistent panel: one button per shell + overview + log."""
 
     def __init__(self, cog):
         super().__init__(timeout=None)
@@ -213,7 +249,11 @@ class OfficerPanel(View):
         ov = Button(label="Overview", emoji="📋", style=discord.ButtonStyle.success,
                     custom_id="dash:overview", row=4)
         ov.callback = self._overview
+        lg = Button(label="Log", emoji="📜", style=discord.ButtonStyle.secondary,
+                    custom_id="dash:log", row=4)
+        lg.callback = self._log
         self.add_item(ov)
+        self.add_item(lg)
 
     def _open(self, alliance):
         async def cb(interaction: discord.Interaction):
@@ -228,58 +268,83 @@ class OfficerPanel(View):
     async def _overview(self, interaction: discord.Interaction):
         await interaction.response.send_message(embed=generate_dashboard_embed(self.cog.db), ephemeral=True)
 
+    async def _log(self, interaction: discord.Interaction):
+        await interaction.response.send_message(embed=log_embed(self.cog.db), ephemeral=True)
+
 
 class ShellCard(View):
-    """Private card for one shell: the 4 ability buttons + undo / fix / reset."""
+    """Private card for one shell: used buttons, donated buttons, undo / fix / log / reset."""
 
-    def __init__(self, cog, alliance, user_id, undo_ready=False):
+    def __init__(self, cog, alliance, user_id):
         super().__init__(timeout=900)
         self.cog, self.alliance, self.user_id = cog, alliance, user_id
         db = cog.db
         for key, (emoji, name, cd, label) in ABILITIES.items():
             s, _ = state(db, alliance, key)
-            b = Button(label=label, emoji=emoji, row=0,
-                       style=discord.ButtonStyle.success if s == "ready" else discord.ButtonStyle.secondary,
-                       disabled=(s != "ready"))
-            b.callback = self._use(key)
-            self.add_item(b)
+            use = Button(label=label, emoji=emoji, row=0,
+                         style=discord.ButtonStyle.success if s == "ready" else discord.ButtonStyle.secondary,
+                         disabled=s not in ("ready", "donate"))
+            use.callback = self._use(key)
+            self.add_item(use)
+        for key, (emoji, name, cd, label) in ABILITIES.items():
+            s, _ = state(db, alliance, key)
+            short = label.rsplit(" ", 1)[0]          # "Bastion", "Build Buff", "Storm", "Fog"
+            don = Button(label=f"{short} donated", emoji="💰", row=1,
+                         style=discord.ButtonStyle.primary if s == "donate" else discord.ButtonStyle.secondary,
+                         disabled=(s != "donate"))
+            don.callback = self._donate(key)
+            self.add_item(don)
 
         last = cog.last_action.get(user_id)
-        undo = Button(label="Undo", emoji="↩️", style=discord.ButtonStyle.secondary, row=1,
+        undo = Button(label="Undo", emoji="↩️", style=discord.ButtonStyle.secondary, row=2,
                       disabled=not (last and last[0] == alliance))
         undo.callback = self._undo
-        fix = Button(label="Fix timers", emoji="✏️", style=discord.ButtonStyle.secondary, row=1)
+        fix = Button(label="Fix timers", emoji="✏️", style=discord.ButtonStyle.secondary, row=2)
         fix.callback = self._fix
-        reset = Button(label="Reset shell", emoji="🔄", style=discord.ButtonStyle.danger, row=1)
+        hist = Button(label="Log", emoji="📜", style=discord.ButtonStyle.secondary, row=2)
+        hist.callback = self._history
+        reset = Button(label="Reset shell", emoji="🔄", style=discord.ButtonStyle.danger, row=2)
         reset.callback = self._reset
-        for b in (undo, fix, reset):
+        for b in (undo, fix, hist, reset):
             self.add_item(b)
+
+    async def _refresh(self, interaction, header):
+        await interaction.response.edit_message(embed=shell_embed(self.cog.db, self.alliance, header),
+                                                view=ShellCard(self.cog, self.alliance, self.user_id))
 
     def _use(self, key):
         async def cb(interaction: discord.Interaction):
-            emoji, name, cd, _ = ABILITIES[key]
-            if state(self.cog.db, self.alliance, key)[0] != "ready":
-                return await interaction.response.edit_message(
-                    embed=shell_embed(self.cog.db, self.alliance,
-                                      f"⚠️ **{name}** is already running – someone else just pressed it."),
-                    view=ShellCard(self.cog, self.alliance, self.user_id))
+            emoji, name, cd, label = ABILITIES[key]
+            s, _ = state(self.cog.db, self.alliance, key)
+            if s not in ("ready", "donate"):
+                return await self._refresh(interaction,
+                                           f"⚠️ **{name}** is already running – someone else just pressed it.")
             ready_at = int(time.time()) + cd
-            await self.cog.set_timer(interaction.user, self.alliance, key, ready_at, f"{emoji} **{name}**")
-            extra = (f"Active for 1h, then on cooldown until <t:{ready_at}:f>."
-                     if key == "build_buff" else f"Ready again <t:{ready_at}:R>.")
-            await interaction.response.edit_message(
-                embed=shell_embed(self.cog.db, self.alliance, f"✅ {emoji} **{name}** started. {extra}"),
-                view=ShellCard(self.cog, self.alliance, self.user_id))
+            await self.cog.record(interaction.user, self.alliance, key, f"{emoji} {label}",
+                                  cooldown=ready_at, donated=0)
+            extra = (f"Active for 1h (⚡ is on in the shell builds channel), then on cooldown until "
+                     f"<t:{ready_at}:f>." if key == "build_buff" else f"Off cooldown <t:{ready_at}:R>.")
+            await self._refresh(interaction, f"✅ {emoji} **{name}** used. {extra}")
+        return cb
+
+    def _donate(self, key):
+        async def cb(interaction: discord.Interaction):
+            emoji, name, _, _ = ABILITIES[key]
+            if state(self.cog.db, self.alliance, key)[0] != "donate":
+                return await self._refresh(interaction, f"ℹ️ **{name}** doesn't need donations right now.")
+            await self.cog.record(interaction.user, self.alliance, key, f"💰 {name} donated",
+                                  donated=int(time.time()))
+            await self._refresh(interaction, f"💰 **{name}** donated – it's 🟢 ready to use.")
         return cb
 
     async def _undo(self, interaction: discord.Interaction):
-        msg = await self.cog.undo(interaction.user)
-        await interaction.response.edit_message(
-            embed=shell_embed(self.cog.db, self.alliance, msg),
-            view=ShellCard(self.cog, self.alliance, self.user_id))
+        await self._refresh(interaction, await self.cog.undo(interaction.user))
 
     async def _fix(self, interaction: discord.Interaction):
         await interaction.response.send_modal(FixTimersModal(self.cog, self.alliance))
+
+    async def _history(self, interaction: discord.Interaction):
+        await interaction.response.send_message(embed=log_embed(self.cog.db, self.alliance), ephemeral=True)
 
     async def _reset(self, interaction: discord.Interaction):
         confirm = View(timeout=60)
@@ -289,13 +354,10 @@ class ShellCard(View):
 
         async def do_reset(i: discord.Interaction):
             await self.cog.reset_shell(i.user, self.alliance)
-            await i.response.edit_message(
-                embed=shell_embed(self.cog.db, self.alliance, "🔄 All timers reset – everything is ready."),
-                view=ShellCard(self.cog, self.alliance, self.user_id))
+            await self._refresh(i, "🔄 All timers reset – everything is off cooldown and 🟡 needs donations.")
 
         async def cancel(i: discord.Interaction):
-            await i.response.edit_message(embed=shell_embed(self.cog.db, self.alliance),
-                                          view=ShellCard(self.cog, self.alliance, self.user_id))
+            await self._refresh(i, None)
         yes.callback, no.callback = do_reset, cancel
         confirm.add_item(yes)
         confirm.add_item(no)
@@ -313,12 +375,11 @@ class FixTimersModal(Modal):
         self.fields, self.defaults = {}, {}
         now = int(time.time())
         for key, (emoji, name, cd, _) in ABILITIES.items():
-            end = int(cog.db["cooldowns"].get(alliance, {}).get(key, 0) or 0)
-            left = max(end - now, 0)
+            left = max(_end(cog.db, alliance, key) - now, 0)
             label = f"{name} · time left" + (" (cooldown, max 72h)" if key == "build_buff" else "")
-            shown = fmt_duration(left).replace(" ", "") if left else ""
+            shown = fmt_duration(left) if left else ""
             field = TextInput(label=label[:45], required=False, max_length=12,
-                              placeholder="e.g. 5h30m · 0 = ready · empty = ready",
+                              placeholder="e.g. 5h30m · 0 or empty = off cooldown",
                               default=shown or None)
             self.fields[key], self.defaults[key] = field, shown
             self.add_item(field)
@@ -331,9 +392,7 @@ class FixTimersModal(Modal):
             emoji, name, cd, _ = ABILITIES[key]
             if raw == self.defaults[key]:
                 continue                      # left as it was
-            if not raw:
-                raw = "0"                     # cleared a pre-filled value → ready
-            secs = parse_duration(raw)
+            secs = parse_duration(raw or "0")
             if secs is None:
                 errors.append(f"❌ {name}: couldn't read `{raw}` (try `5h30m`)")
                 continue
@@ -341,12 +400,14 @@ class FixTimersModal(Modal):
                 errors.append(f"❌ {name}: `{raw}` is longer than its {cd // 3600}h cooldown")
                 continue
             new_end = now + secs if secs else 0
-            await self.cog.set_timer(interaction.user, self.alliance, key, new_end,
-                                     f"{emoji} **{name}**", fixed=True, save=False)
-            changes.append(f"{emoji} {name} → " + (f"ready <t:{new_end}:R>" if new_end else "🟢 ready"))
+            what = f"✏️ {name} timer fixed to " + (fmt_duration(secs) if secs else "0")
+            await self.cog.record(interaction.user, self.alliance, key, what, cooldown=new_end,
+                                  donated=0 if secs else None, refresh=False)
+            changes.append(f"{emoji} {name} → " + (f"off cooldown <t:{new_end}:R>" if new_end
+                                                    else "off cooldown now"))
         if changes:
             save_data(self.cog.db)
-            await self.cog.refresh_dashboard()
+            await self.cog.after_change()
         header = "\n".join((["✏️ **Timers updated:**"] + changes if changes else ["ℹ️ Nothing changed."]) + errors)
         await interaction.response.send_message(
             embed=shell_embed(self.cog.db, self.alliance, header),
@@ -354,7 +415,7 @@ class FixTimersModal(Modal):
 
 
 class LegacyPanel(View):
-    """Catches clicks on the OLD panel (dropdown + buttons) and turns that message into the new panel."""
+    """Catches clicks on the very old panel (dropdown + buttons) and turns it into the new panel."""
 
     def __init__(self, cog):
         super().__init__(timeout=None)
@@ -381,8 +442,8 @@ class AllianceDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = load_data()
-        self.last_action = {}          # user_id → (alliance, key, previous_end, label)
-        self._sticky_task = None
+        self.last_action = {}          # user_id → (alliance, key, prev_cooldown, prev_donated, prev_last, what)
+        self._sticky_tasks = {}
         self._sticky_lock = asyncio.Lock()
         self._mark_expired_as_alerted()
 
@@ -406,14 +467,16 @@ class AllianceDashboard(commands.Cog):
         """Don't spam alerts for timers that ran out while the bot was offline / before this version."""
         now = int(time.time())
         for a in ALLIANCES:
+            al = self.db["alerted"][a]
             for key in ABILITIES:
-                end = int(self.db["cooldowns"][a].get(key, 0) or 0)
+                end = _end(self.db, a, key)
                 if 0 < end <= now:
-                    self.db["alerted"][a][key] = end
-            s, _ = state(self.db, a, "build_buff", now)
-            end = int(self.db["cooldowns"][a].get("build_buff", 0) or 0)
-            if end and s != "active":
-                self.db["alerted"][a]["build_buff_active"] = end
+                    al[key] = end
+                if 0 < end <= now + (HEADS_UP_BEFORE or 0):
+                    al[key + "_soon"] = end
+            end = _end(self.db, a, "build_buff")
+            if end and state(self.db, a, "build_buff", now)[0] != "active":
+                al["build_buff_active"] = end
 
     async def log(self, text):
         if LOG_CHANNEL_ID:
@@ -424,33 +487,58 @@ class AllianceDashboard(commands.Cog):
                 except discord.HTTPException:
                     pass
 
-    async def set_timer(self, user, alliance, key, new_end, label, fixed=False, save=True):
-        timers = self.db["cooldowns"].setdefault(alliance, {})
-        self.last_action[user.id] = (alliance, key, int(timers.get(key, 0) or 0), label)
-        timers[key] = int(new_end)
-        if save:
+    def _history(self, user, alliance, key, what):
+        now = int(time.time())
+        name = getattr(user, "display_name", str(user))
+        self.db["history"].append({"t": now, "by": name, "a": alliance, "k": key, "what": what})
+        del self.db["history"][:-HISTORY_KEEP]
+        self.db["last"][alliance][key] = {"t": now, "by": name, "what": what}
+
+    async def record(self, user, alliance, key, what, cooldown=None, donated=None, refresh=True):
+        """Change a timer and/or donation flag, remember it for undo, log it."""
+        cds, dons = self.db["cooldowns"][alliance], self.db["donated"][alliance]
+        self.last_action[user.id] = (alliance, key, cds.get(key, 0), dons.get(key, 0),
+                                     self.db["last"][alliance].get(key), what)
+        if cooldown is not None:
+            cds[key] = int(cooldown)
+        if donated is not None:
+            dons[key] = int(donated)
+        self._history(user, alliance, key, what)
+        await self.log(f"**{user.display_name}** · {what} · **{alliance}**")
+        if refresh:
             save_data(self.db)
-            await self.refresh_dashboard()
-        verb = "fixed the timer of" if fixed else "used"
-        await self.log(f"✅ **{user.display_name}** {verb} {label} for **{alliance}**.")
+            await self.after_change()
 
     async def undo(self, user):
         last = self.last_action.pop(user.id, None)
         if not last:
             return "❌ Nothing to undo."
-        alliance, key, prev, label = last
-        self.db["cooldowns"][alliance][key] = prev
+        alliance, key, prev_cd, prev_don, prev_last, what = last
+        self.db["cooldowns"][alliance][key] = prev_cd
+        self.db["donated"][alliance][key] = prev_don
+        self.db["history"].append({"t": int(time.time()), "by": user.display_name, "a": alliance,
+                                   "k": key, "what": f"↩️ undid: {what}"})
+        if prev_last:
+            self.db["last"][alliance][key] = prev_last
+        else:
+            self.db["last"][alliance].pop(key, None)
         save_data(self.db)
-        await self.refresh_dashboard()
-        await self.log(f"↩️ **{user.display_name}** undid {label} for **{alliance}**.")
-        return f"↩️ Undid {label}."
+        await self.after_change()
+        await self.log(f"**{user.display_name}** · ↩️ undid: {what} · **{alliance}**")
+        return f"↩️ Undid: {what}"
 
     async def reset_shell(self, user, alliance):
         self.db["cooldowns"][alliance] = {}
+        self.db["donated"][alliance] = {}
         self.last_action.pop(user.id, None)
+        self._history(user, alliance, "_reset", "🔄 reset all timers")
         save_data(self.db)
+        await self.after_change()
+        await self.log(f"**{user.display_name}** · 🔄 reset all timers · **{alliance}**")
+
+    async def after_change(self):
         await self.refresh_dashboard()
-        await self.log(f"🔄 **{user.display_name}** reset all timers for **{alliance}**.")
+        await self.sync_shell_buff()
 
     async def refresh_dashboard(self):
         ch_id, msg_id = self.db.get("dashboard_channel_id"), self.db.get("dashboard_message_id")
@@ -459,58 +547,97 @@ class AllianceDashboard(commands.Cog):
         try:
             await self.bot.get_partial_messageable(ch_id).get_partial_message(msg_id).edit(
                 embed=generate_dashboard_embed(self.db))
+        except discord.NotFound:
+            await self._repost("dashboard")
         except discord.HTTPException:
             pass
 
-    # ── background: turn things green + alert ──
+    async def sync_shell_buff(self):
+        """Tell the shell builds channel which shells have an active build buff (⚡ on/off)."""
+        hook = getattr(self.bot, "dashboard_build_buff", None)
+        if not hook:
+            return
+        now = int(time.time())
+        active = {tag(a): state(self.db, a, "build_buff", now)[1] for a in ALLIANCES
+                  if state(self.db, a, "build_buff", now)[0] == "active"}
+        try:
+            await hook(active)
+        except Exception as e:
+            print(f"[dashboard] couldn't update the shell builds channel: {e!r}")
+
+    async def _send_alert(self, lines, delete_after):
+        ch_id = ALERT_CHANNEL_ID or self.db.get("dashboard_channel_id") or self.db.get("panel_channel_id")
+        if not ch_id or not lines:
+            return
+        ping = f"<@&{ALERT_ROLE_ID}>\n" if ALERT_ROLE_ID else ""
+        try:
+            await self.bot.get_partial_messageable(ch_id).send(
+                ping + "\n".join(lines)[:1900], delete_after=delete_after,
+                allowed_mentions=discord.AllowedMentions(
+                    roles=[discord.Object(ALERT_ROLE_ID)] if ALERT_ROLE_ID else False))
+        except discord.HTTPException:
+            pass
+
+    # ── background: heads-up, turn things yellow/green, alerts ──
     @tasks.loop(seconds=30)
     async def watch(self):
         now = int(time.time())
-        alerts = []
+        soon, over = [], []
         for a in ALLIANCES:
-            timers, alerted = self.db["cooldowns"].get(a, {}), self.db["alerted"].setdefault(a, {})
+            al = self.db["alerted"].setdefault(a, {})
             for key, (emoji, name, _, _) in ABILITIES.items():
-                end = int(timers.get(key, 0) or 0)
-                if 0 < end <= now and alerted.get(key) != end:
-                    alerted[key] = end
-                    alerts.append(f"🟢 {emoji} **{name}** is ready again · `{tag(a)}`")
-            end = int(timers.get("build_buff", 0) or 0)
+                end = _end(self.db, a, key)
+                donate = NEEDS_DONATION.get(key, False)
+                if HEADS_UP_BEFORE and now < end <= now + HEADS_UP_BEFORE and al.get(key + "_soon") != end:
+                    al[key + "_soon"] = end
+                    todo = "get donations ready!" if donate else "get ready!"
+                    soon.append(f"⏰ {emoji} **{name}** · `{tag(a)}` off cooldown <t:{end}:R> – {todo}")
+                if 0 < end <= now and al.get(key) != end:
+                    al[key] = end
+                    al[key + "_soon"] = end
+                    if donate:
+                        over.append(f"🟡 {emoji} **{name}** · `{tag(a)}` is off cooldown – **needs donations!**")
+                    else:
+                        over.append(f"🟢 {emoji} **{name}** · `{tag(a)}` is ready again")
+            end = _end(self.db, a, "build_buff")
             if end > now and state(self.db, a, "build_buff", now)[0] == "cooldown" \
-                    and alerted.get("build_buff_active") != end:
-                alerted["build_buff_active"] = end
+                    and al.get("build_buff_active") != end:
+                al["build_buff_active"] = end
                 if ALERT_BUILD_BUFF_END:
-                    alerts.append(f"🔨 **Build Buff** is over · `{tag(a)}` (next one <t:{end}:R>)")
-        if not alerts:
+                    over.append(f"🔨 **Build Buff** is over · `{tag(a)}` (next one <t:{end}:R>)")
+                await self.sync_shell_buff()
+        if not (soon or over):
             return
         save_data(self.db)
         await self.refresh_dashboard()
-        ch_id = ALERT_CHANNEL_ID or self.db.get("panel_channel_id")
-        if ch_id:
-            ping = f"<@&{ALERT_ROLE_ID}> " if ALERT_ROLE_ID else ""
-            try:
-                await self.bot.get_partial_messageable(ch_id).send(
-                    ping + "\n".join(alerts)[:1900], delete_after=ALERT_DELETE_AFTER,
-                    allowed_mentions=discord.AllowedMentions(
-                        roles=[discord.Object(ALERT_ROLE_ID)] if ALERT_ROLE_ID else False))
-            except discord.HTTPException:
-                pass
+        await self._send_alert(soon, HEADS_UP_DELETE_AFTER)
+        await self._send_alert(over, ALERT_DELETE_AFTER)
 
     @watch.before_loop
     async def _before_watch(self):
         await self.bot.wait_until_ready()
+        await self.sync_shell_buff()
 
-    # ── sticky panel ──
-    async def _repost_panel(self):
+    # ── sticky dashboard + panel ──
+    def _sticky_cfg(self, which):
+        if which == "dashboard":
+            return "dashboard_channel_id", "dashboard_message_id", lambda: {
+                "embed": generate_dashboard_embed(self.db)}
+        return "panel_channel_id", "panel_message_id", lambda: {
+            "embed": panel_embed(), "view": OfficerPanel(self)}
+
+    async def _repost(self, which):
+        ch_key, msg_key, content = self._sticky_cfg(which)
         async with self._sticky_lock:
-            ch_id, old_id = self.db.get("panel_channel_id"), self.db.get("panel_message_id")
+            ch_id, old_id = self.db.get(ch_key), self.db.get(msg_key)
             channel = self.bot.get_channel(ch_id) if ch_id else None
             if not channel or (old_id and channel.last_message_id == old_id):
                 return
             try:
-                new = await channel.send(embed=panel_embed(), view=OfficerPanel(self))
+                new = await channel.send(**content())
             except discord.HTTPException:
                 return
-            self.db["panel_message_id"] = new.id
+            self.db[msg_key] = new.id
             save_data(self.db)
             if old_id:
                 try:
@@ -518,22 +645,25 @@ class AllianceDashboard(commands.Cog):
                 except discord.HTTPException:
                     pass
 
-    async def _sticky_later(self):
+    async def _sticky_later(self, which):
         await asyncio.sleep(STICKY_DELAY)
-        await self._repost_panel()
+        await self._repost(which)
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if not STICKY_PANEL or message.channel.id != self.db.get("panel_channel_id"):
+        if not STICKY:
             return
-        if message.id == self.db.get("panel_message_id"):
-            return
-        if message.author.id == self.bot.user.id and message.embeds \
-                and message.embeds[0].title == "🛠️ OFFICER PANEL":
-            return
-        if self._sticky_task and not self._sticky_task.done():
-            self._sticky_task.cancel()
-        self._sticky_task = asyncio.create_task(self._sticky_later())
+        for which in ("dashboard", "panel"):
+            ch_key, msg_key, _ = self._sticky_cfg(which)
+            if message.channel.id != self.db.get(ch_key) or message.id == self.db.get(msg_key):
+                continue
+            if message.author.id == self.bot.user.id and message.embeds \
+                    and message.embeds[0].title in (DASH_TITLE, PANEL_TITLE):
+                continue
+            task = self._sticky_tasks.get(which)
+            if task and not task.done():
+                task.cancel()
+            self._sticky_tasks[which] = asyncio.create_task(self._sticky_later(which))
 
     # ── setup commands ──
     async def _replace(self, ctx, ch_key, msg_key, **send_kwargs):
@@ -554,7 +684,7 @@ class AllianceDashboard(commands.Cog):
     @commands.command()
     @commands.has_permissions(administrator=True)
     async def setup_dashboard(self, ctx):
-        """Run this in #alliance-dashboard to post the read-only overview."""
+        """Run this in #alliance-dashboard to post the overview."""
         await self._replace(ctx, "dashboard_channel_id", "dashboard_message_id",
                             embed=generate_dashboard_embed(self.db))
 
