@@ -376,10 +376,24 @@ def to_bold(text):
     return "".join(out)
 
 
+def build_order():
+    """Shells with an active Build Buff (from the alliance dashboard) go first, then the builders' picks.
+    Returns [(tag, buff_until or None), ...]"""
+    auto = shell_state.get("buff_auto") or {}
+    buffed = sorted(auto.items(), key=lambda kv: kv[1])
+    rest = [(t, None) for t in shell_state["alliances"] if t not in auto]
+    return buffed + rest
+
+
 def build_channel_name():
-    tags = shell_state["alliances"]
-    body = "｜".join(to_bold(t) for t in tags) if tags else to_bold("NO-BUILDS")
-    buff = f"｜{BUFF_EMOJI}" if shell_state["buff"] else ""
+    order = build_order()
+    auto = shell_state.get("buff_auto") or {}
+    if order:
+        body = "｜".join((BUFF_EMOJI if until else "") + to_bold(t) for t, until in order)
+    else:
+        body = to_bold("NO-BUILDS")
+    # ⚡ at the end only when it was switched on by hand (no shell attached to it)
+    buff = f"｜{BUFF_EMOJI}" if shell_state["buff"] and not auto else ""
     return f"🏗️｜{body}{buff}"[:100]
 
 
@@ -389,18 +403,24 @@ def build_embed():
         title="🏗️ Current Shell Builds",
         color=discord.Color.gold() if buff_on else discord.Color.blurple(),
     )
-    numbers = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣"]
-    tags = shell_state["alliances"]
-    if tags:
-        lines = [f"{numbers[i]} **{tag}**" for i, tag in enumerate(tags)]
+    numbers = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
+    order = build_order()
+    if order:
+        lines = []
+        for i, (t, until) in enumerate(order):
+            num = numbers[i] if i < len(numbers) else f"{i + 1}."
+            if until:
+                lines.append(f"{num} {BUFF_EMOJI} **{t}** · build buff until <t:{until}:t> (<t:{until}:R>)")
+            else:
+                lines.append(f"{num} **{t}**")
         embed.add_field(name="Priority order", value="\n".join(lines), inline=False)
     else:
         embed.add_field(name="Priority order", value="No active shell builds", inline=False)
     auto = shell_state.get("buff_auto") or {}
     if buff_on and auto:
-        buff_text = "⚡ **ACTIVE** · " + " · ".join(f"**{t}** until <t:{e}:t> (<t:{e}:R>)" for t, e in auto.items())
+        buff_text = f"{BUFF_EMOJI} **ACTIVE** on " + ", ".join(f"**{t}**" for t in auto) + " – build there first!"
     else:
-        buff_text = "⚡ **ACTIVE**" if buff_on else "❌ Off"
+        buff_text = f"{BUFF_EMOJI} **ACTIVE**" if buff_on else "❌ Off"
     embed.add_field(name="Build buff", value=buff_text, inline=False)
     embed.set_footer(text="Send builders from farm accounts in priority order")
     embed.timestamp = discord.utils.utcnow()
@@ -508,6 +528,26 @@ async def dashboard_build_buff(active):
 
 
 bot.dashboard_build_buff = dashboard_build_buff
+
+_shell_refreshed = False
+
+
+@bot.listen("on_ready")
+async def _shell_refresh_on_start():
+    """After a deploy: make the shell builds channel match the current state (name + message)."""
+    global _shell_refreshed
+    if _shell_refreshed:
+        return
+    _shell_refreshed = True
+    channel = bot.get_channel(SHELL_CHANNEL_ID)
+    if channel is None:
+        return
+    try:
+        await update_status_message(channel.guild)
+    except discord.HTTPException:
+        pass
+    if channel.name != build_channel_name():
+        schedule_rename(channel.guild)
 
 
 # ── Reaction added ───────────────────────────────────────────
