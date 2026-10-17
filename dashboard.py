@@ -79,6 +79,7 @@ def load_data():
             data = {}
     for k in ("dashboard_channel_id", "dashboard_message_id", "panel_channel_id", "panel_message_id"):
         data.setdefault(k, None)
+    data.setdefault("undo", {})          # str(user_id) → last action, for Undo
     for k in ("cooldowns", "donated", "alerted", "last"):
         data.setdefault(k, {})
         for a in ALLIANCES:
@@ -97,6 +98,10 @@ def save_data(data):
 def tag(alliance):
     m = re.match(r"\[(.+?)\]", alliance)
     return m.group(1) if m else alliance
+
+
+def by_tag(t):
+    return next((a for a in ALLIANCES if tag(a) == t), None)
 
 
 def _end(db, alliance, key):
@@ -273,97 +278,45 @@ class OfficerPanel(View):
 
 
 class ShellCard(View):
-    """Private card for one shell: used buttons, donated buttons, undo / fix / log / reset."""
+    """Private card for one shell: used buttons, donated buttons, undo / fix / log / reset.
+    The buttons only carry IDs – clicks are handled by AllianceDashboard.on_interaction,
+    so cards keep working even after the bot restarts or redeploys."""
 
     def __init__(self, cog, alliance, user_id):
-        super().__init__(timeout=900)
-        self.cog, self.alliance, self.user_id = cog, alliance, user_id
+        super().__init__(timeout=1)
+        t = tag(alliance)
         db = cog.db
         for key, (emoji, name, cd, label) in ABILITIES.items():
             s, _ = state(db, alliance, key)
-            use = Button(label=label, emoji=emoji, row=0,
-                         style=discord.ButtonStyle.success if s == "ready" else discord.ButtonStyle.secondary,
-                         disabled=s not in ("ready", "donate"))
-            use.callback = self._use(key)
-            self.add_item(use)
+            self.add_item(Button(
+                label=label, emoji=emoji, row=0, custom_id=f"dashc:use:{t}:{key}",
+                style=discord.ButtonStyle.success if s == "ready" else discord.ButtonStyle.secondary,
+                disabled=s not in ("ready", "donate")))
         for key, (emoji, name, cd, label) in ABILITIES.items():
             s, _ = state(db, alliance, key)
             short = label.rsplit(" ", 1)[0]          # "Bastion", "Build Buff", "Storm", "Fog"
-            don = Button(label=f"{short} donated", emoji="💰", row=1,
-                         style=discord.ButtonStyle.primary if s == "donate" else discord.ButtonStyle.secondary,
-                         disabled=(s != "donate"))
-            don.callback = self._donate(key)
-            self.add_item(don)
+            self.add_item(Button(
+                label=f"{short} donated", emoji="💰", row=1, custom_id=f"dashc:don:{t}:{key}",
+                style=discord.ButtonStyle.primary if s == "donate" else discord.ButtonStyle.secondary,
+                disabled=(s != "donate")))
+        last = cog.db["undo"].get(str(user_id))
+        self.add_item(Button(label="Undo", emoji="↩️", style=discord.ButtonStyle.secondary, row=2,
+                             custom_id=f"dashc:undo:{t}", disabled=not (last and last[0] == alliance)))
+        self.add_item(Button(label="Fix timers", emoji="✏️", style=discord.ButtonStyle.secondary, row=2,
+                             custom_id=f"dashc:fix:{t}"))
+        self.add_item(Button(label="Log", emoji="📜", style=discord.ButtonStyle.secondary, row=2,
+                             custom_id=f"dashc:log:{t}"))
+        self.add_item(Button(label="Reset shell", emoji="🔄", style=discord.ButtonStyle.danger, row=2,
+                             custom_id=f"dashc:reset:{t}"))
 
-        last = cog.last_action.get(user_id)
-        undo = Button(label="Undo", emoji="↩️", style=discord.ButtonStyle.secondary, row=2,
-                      disabled=not (last and last[0] == alliance))
-        undo.callback = self._undo
-        fix = Button(label="Fix timers", emoji="✏️", style=discord.ButtonStyle.secondary, row=2)
-        fix.callback = self._fix
-        hist = Button(label="Log", emoji="📜", style=discord.ButtonStyle.secondary, row=2)
-        hist.callback = self._history
-        reset = Button(label="Reset shell", emoji="🔄", style=discord.ButtonStyle.danger, row=2)
-        reset.callback = self._reset
-        for b in (undo, fix, hist, reset):
-            self.add_item(b)
 
-    async def _refresh(self, interaction, header):
-        await interaction.response.edit_message(embed=shell_embed(self.cog.db, self.alliance, header),
-                                                view=ShellCard(self.cog, self.alliance, self.user_id))
-
-    def _use(self, key):
-        async def cb(interaction: discord.Interaction):
-            emoji, name, cd, label = ABILITIES[key]
-            s, _ = state(self.cog.db, self.alliance, key)
-            if s not in ("ready", "donate"):
-                return await self._refresh(interaction,
-                                           f"⚠️ **{name}** is already running – someone else just pressed it.")
-            ready_at = int(time.time()) + cd
-            await self.cog.record(interaction.user, self.alliance, key, f"{emoji} {label}",
-                                  cooldown=ready_at, donated=0)
-            extra = (f"Active for 1h (⚡ is on in the shell builds channel), then on cooldown until "
-                     f"<t:{ready_at}:f>." if key == "build_buff" else f"Off cooldown <t:{ready_at}:R>.")
-            await self._refresh(interaction, f"✅ {emoji} **{name}** used. {extra}")
-        return cb
-
-    def _donate(self, key):
-        async def cb(interaction: discord.Interaction):
-            emoji, name, _, _ = ABILITIES[key]
-            if state(self.cog.db, self.alliance, key)[0] != "donate":
-                return await self._refresh(interaction, f"ℹ️ **{name}** doesn't need donations right now.")
-            await self.cog.record(interaction.user, self.alliance, key, f"💰 {name} donated",
-                                  donated=int(time.time()))
-            await self._refresh(interaction, f"💰 **{name}** donated – it's 🟢 ready to use.")
-        return cb
-
-    async def _undo(self, interaction: discord.Interaction):
-        await self._refresh(interaction, await self.cog.undo(interaction.user))
-
-    async def _fix(self, interaction: discord.Interaction):
-        await interaction.response.send_modal(FixTimersModal(self.cog, self.alliance))
-
-    async def _history(self, interaction: discord.Interaction):
-        await interaction.response.send_message(embed=log_embed(self.cog.db, self.alliance), ephemeral=True)
-
-    async def _reset(self, interaction: discord.Interaction):
-        confirm = View(timeout=60)
-        yes = Button(label=f"Yes, reset all timers for {tag(self.alliance)}", emoji="🔄",
-                     style=discord.ButtonStyle.danger)
-        no = Button(label="Cancel", style=discord.ButtonStyle.secondary)
-
-        async def do_reset(i: discord.Interaction):
-            await self.cog.reset_shell(i.user, self.alliance)
-            await self._refresh(i, "🔄 All timers reset – everything is off cooldown and 🟡 needs donations.")
-
-        async def cancel(i: discord.Interaction):
-            await self._refresh(i, None)
-        yes.callback, no.callback = do_reset, cancel
-        confirm.add_item(yes)
-        confirm.add_item(no)
-        await interaction.response.edit_message(
-            embed=shell_embed(self.cog.db, self.alliance,
-                              f"⚠️ Reset **all** timers for **{tag(self.alliance)}**?"), view=confirm)
+def reset_confirm_view(alliance):
+    t = tag(alliance)
+    v = View(timeout=1)
+    v.add_item(Button(label=f"Yes, reset all timers for {t}", emoji="🔄", style=discord.ButtonStyle.danger,
+                      custom_id=f"dashc:resetyes:{t}"))
+    v.add_item(Button(label="Cancel", style=discord.ButtonStyle.secondary, custom_id=f"dashc:cancel:{t}"))
+    return v
 
 
 class FixTimersModal(Modal):
@@ -442,7 +395,6 @@ class AllianceDashboard(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.db = load_data()
-        self.last_action = {}          # user_id → (alliance, key, prev_cooldown, prev_donated, prev_last, what)
         self._sticky_tasks = {}
         self._sticky_lock = asyncio.Lock()
         self._mark_expired_as_alerted()
@@ -497,8 +449,8 @@ class AllianceDashboard(commands.Cog):
     async def record(self, user, alliance, key, what, cooldown=None, donated=None, refresh=True):
         """Change a timer and/or donation flag, remember it for undo, log it."""
         cds, dons = self.db["cooldowns"][alliance], self.db["donated"][alliance]
-        self.last_action[user.id] = (alliance, key, cds.get(key, 0), dons.get(key, 0),
-                                     self.db["last"][alliance].get(key), what)
+        self.db["undo"][str(user.id)] = [alliance, key, cds.get(key, 0), dons.get(key, 0),
+                                         self.db["last"][alliance].get(key), what]
         if cooldown is not None:
             cds[key] = int(cooldown)
         if donated is not None:
@@ -510,7 +462,7 @@ class AllianceDashboard(commands.Cog):
             await self.after_change()
 
     async def undo(self, user):
-        last = self.last_action.pop(user.id, None)
+        last = self.db["undo"].pop(str(user.id), None)
         if not last:
             return "❌ Nothing to undo."
         alliance, key, prev_cd, prev_don, prev_last, what = last
@@ -530,7 +482,7 @@ class AllianceDashboard(commands.Cog):
     async def reset_shell(self, user, alliance):
         self.db["cooldowns"][alliance] = {}
         self.db["donated"][alliance] = {}
-        self.last_action.pop(user.id, None)
+        self.db["undo"].pop(str(user.id), None)
         self._history(user, alliance, "_reset", "🔄 reset all timers")
         save_data(self.db)
         await self.after_change()
@@ -617,6 +569,65 @@ class AllianceDashboard(commands.Cog):
     async def _before_watch(self):
         await self.bot.wait_until_ready()
         await self.sync_shell_buff()
+
+    # ── shell card clicks (handled here so they survive restarts) ──
+    async def _card_refresh(self, interaction, alliance, header):
+        await interaction.response.edit_message(embed=shell_embed(self.db, alliance, header),
+                                                view=ShellCard(self, alliance, interaction.user.id))
+
+    @commands.Cog.listener()
+    async def on_interaction(self, interaction: discord.Interaction):
+        if interaction.type != discord.InteractionType.component:
+            return
+        cid = (interaction.data or {}).get("custom_id", "")
+        if not cid.startswith("dashc:"):
+            return
+        parts = cid.split(":")
+        action, t = parts[1], parts[2]
+        key = parts[3] if len(parts) > 3 else None
+        alliance = by_tag(t)
+        user = interaction.user
+        if alliance is None:
+            return await interaction.response.send_message("❌ That shell isn't on the dashboard anymore.",
+                                                           ephemeral=True)
+        if not self.allowed(user):
+            return await interaction.response.send_message("❌ Only officers can use this.", ephemeral=True)
+
+        if action == "use" and key in ABILITIES:
+            emoji, name, cd, label = ABILITIES[key]
+            if state(self.db, alliance, key)[0] not in ("ready", "donate"):
+                return await self._card_refresh(
+                    interaction, alliance, f"⚠️ **{name}** is already running – someone else just pressed it.")
+            ready_at = int(time.time()) + cd
+            await self.record(user, alliance, key, f"{emoji} {label}", cooldown=ready_at, donated=0)
+            extra = (f"Active for 1h (⚡ is on in the shell builds channel), then on cooldown until "
+                     f"<t:{ready_at}:f>." if key == "build_buff" else f"Off cooldown <t:{ready_at}:R>.")
+            return await self._card_refresh(interaction, alliance, f"✅ {emoji} **{name}** used. {extra}")
+
+        if action == "don" and key in ABILITIES:
+            emoji, name, _, _ = ABILITIES[key]
+            if state(self.db, alliance, key)[0] != "donate":
+                return await self._card_refresh(interaction, alliance,
+                                                f"ℹ️ **{name}** doesn't need donations right now.")
+            await self.record(user, alliance, key, f"💰 {name} donated", donated=int(time.time()))
+            return await self._card_refresh(interaction, alliance, f"💰 **{name}** donated – it's 🟢 ready to use.")
+
+        if action == "undo":
+            return await self._card_refresh(interaction, alliance, await self.undo(user))
+        if action == "fix":
+            return await interaction.response.send_modal(FixTimersModal(self, alliance))
+        if action == "log":
+            return await interaction.response.send_message(embed=log_embed(self.db, alliance), ephemeral=True)
+        if action == "reset":
+            return await interaction.response.edit_message(
+                embed=shell_embed(self.db, alliance, f"⚠️ Reset **all** timers for **{t}**?"),
+                view=reset_confirm_view(alliance))
+        if action == "resetyes":
+            await self.reset_shell(user, alliance)
+            return await self._card_refresh(
+                interaction, alliance, "🔄 All timers reset – everything is off cooldown and 🟡 needs donations.")
+        if action == "cancel":
+            return await self._card_refresh(interaction, alliance, None)
 
     # ── sticky dashboard + panel ──
     def _sticky_cfg(self, which):
