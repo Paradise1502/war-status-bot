@@ -313,7 +313,7 @@ class ShellCard(View):
 def reset_confirm_view(alliance):
     t = tag(alliance)
     v = View(timeout=1)
-    v.add_item(Button(label=f"Yes, reset all timers for {t}", emoji="🔄", style=discord.ButtonStyle.danger,
+    v.add_item(Button(label=f"Yes, make everything ready for {t}", emoji="🔄", style=discord.ButtonStyle.danger,
                       custom_id=f"dashc:resetyes:{t}"))
     v.add_item(Button(label="Cancel", style=discord.ButtonStyle.secondary, custom_id=f"dashc:cancel:{t}"))
     return v
@@ -479,14 +479,19 @@ class AllianceDashboard(commands.Cog):
         await self.log(f"**{user.display_name}** · ↩️ undid: {what} · **{alliance}**")
         return f"↩️ Undid: {what}"
 
-    async def reset_shell(self, user, alliance):
+    def _make_ready(self, alliance):
+        """Every skill off cooldown AND donated → 🟢 ready to use."""
+        now = int(time.time())
         self.db["cooldowns"][alliance] = {}
-        self.db["donated"][alliance] = {}
+        self.db["donated"][alliance] = {key: now for key in ABILITIES}
+
+    async def reset_shell(self, user, alliance):
+        self._make_ready(alliance)
         self.db["undo"].pop(str(user.id), None)
-        self._history(user, alliance, "_reset", "🔄 reset all timers")
+        self._history(user, alliance, "_reset", "🔄 reset – everything ready")
         save_data(self.db)
         await self.after_change()
-        await self.log(f"**{user.display_name}** · 🔄 reset all timers · **{alliance}**")
+        await self.log(f"**{user.display_name}** · 🔄 reset – everything ready · **{alliance}**")
 
     async def after_change(self):
         await self.refresh_dashboard()
@@ -620,12 +625,12 @@ class AllianceDashboard(commands.Cog):
             return await interaction.response.send_message(embed=log_embed(self.db, alliance), ephemeral=True)
         if action == "reset":
             return await interaction.response.edit_message(
-                embed=shell_embed(self.db, alliance, f"⚠️ Reset **all** timers for **{t}**?"),
+                embed=shell_embed(self.db, alliance,
+                                  f"⚠️ Reset **{t}**? Every skill becomes 🟢 ready to use (timers cleared)."),
                 view=reset_confirm_view(alliance))
         if action == "resetyes":
             await self.reset_shell(user, alliance)
-            return await self._card_refresh(
-                interaction, alliance, "🔄 All timers reset – everything is off cooldown and 🟡 needs donations.")
+            return await self._card_refresh(interaction, alliance, "🔄 Reset – every skill is 🟢 ready to use.")
         if action == "cancel":
             return await self._card_refresh(interaction, alliance, None)
 
@@ -691,6 +696,22 @@ class AllianceDashboard(commands.Cog):
                 await self.bot.get_partial_messageable(old_ch).get_partial_message(old_msg).delete()
             except discord.HTTPException:
                 pass
+
+    @commands.command()
+    @commands.has_permissions(administrator=True)
+    async def resetshells(self, ctx):
+        """Admins: !resetshells – every skill on every shell becomes 🟢 ready to use."""
+        for a in ALLIANCES:
+            self._make_ready(a)
+            self._history(ctx.author, a, "_reset", "🔄 reset – everything ready (all shells)")
+        save_data(self.db)
+        await self.after_change()
+        await self.log(f"**{ctx.author.display_name}** · 🔄 reset **all shells** – everything ready")
+        await ctx.send("🔄 All shells reset – every skill is 🟢 ready to use.", delete_after=15)
+        try:
+            await ctx.message.delete()
+        except discord.HTTPException:
+            pass
 
     @commands.command()
     @commands.has_permissions(administrator=True)
