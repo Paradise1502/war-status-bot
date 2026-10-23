@@ -2063,9 +2063,11 @@ async def lowmage(ctx, *args):
 
 
 def _healing_detail(e):
-    return (f"   └ 5️⃣ T5 `{lb.fmt(e.get('t5', 0))}` · "
-            f"4️⃣ T4 `{lb.fmt(e.get('t4', 0))}` · "
-            f"💧 `{lb.fmt(e['value'])}` mana")
+    """One quiet line under each player: units healed. T4 only when they healed any."""
+    parts = [f"{lb.fmt(e.get('t5', 0))} T5"]
+    if e.get("t4"):
+        parts.append(f"{lb.fmt(e['t4'])} T4")
+    return f"-# └ ❤️ {' · '.join(parts)} healed"
 
 
 def _healing_mana(get):
