@@ -27,7 +27,7 @@ DB_PATH = os.getenv("ACTIVITY_DB_PATH", "/data/activity_checks.db")
 DASHBOARD_CHANNEL_ID = 1544402126539591753
 
 # Roles you are allowed to send activity checks to (same OPSEC guard as your broadcasts)
-ALLOWED_ROLES = ["Test", "NVR Member", "NVR Sunrise"]
+ALLOWED_ROLES = ["Test", "NVR Member", "NVR Sunrise", "NVR Sunset"]
 
 # Add the per-user OPSEC fingerprint to activity check DMs too?
 # Set to False if you don't care about leak-tracing these messages.
