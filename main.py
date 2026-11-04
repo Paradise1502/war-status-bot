@@ -3112,97 +3112,160 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
         except Exception as e:
             await ctx.send(f"❌ **Error generating duel:** {e}")
 
-@bot.command()
-async def allmana(ctx, season: str = DEFAULT_SEASON):
-    """Shows the total mana gathered by the entire alliance and its dollar value."""
+MANA_DOLLARS_PER_250M = 100   # same rate as !mana: $100 per 250M mana
+
+
+def mana_dollars(amount):
+    return round(amount / 250_000_000 * MANA_DOLLARS_PER_250M)
+
+
+def mana_by_alliance(gains):
+    """
+    Sum mana gathered per alliance (by alliance_id, so equal tags on different
+    servers never merge) and per home server.
+    Returns (alliances sorted desc, servers sorted desc).
+    """
+    headers = [str(h).strip() for h in gains[0]]
+    lower = [h.lower() for h in headers]
+
+    def col(name):
+        return lower.index(name) if name in lower else None
+
+    i_aid, i_tag = col("alliance_id"), col("alliance_tag")
+    i_srv, i_mana = col("home_server"), col("mana")
+    if i_mana is None or i_srv is None:
+        raise ValueError("This scan has no mana or home_server column.")
+
+    def cell(row, i):
+        return str(row[i]).strip() if i is not None and i < len(row) else ""
+
+    alliances, servers = {}, {}
+    for row in gains[1:]:
+        mana = lb.to_int(cell(row, i_mana))
+        srv = "".join(ch for ch in cell(row, i_srv) if ch.isdigit())
+        if not srv:
+            continue
+        s = servers.setdefault(srv, {"server": srv, "mana": 0, "gatherers": 0})
+        s["mana"] += mana
+        s["gatherers"] += 1 if mana > 0 else 0
+
+        aid, tag = cell(row, i_aid), cell(row, i_tag)
+        if aid in ("", "-") or tag in ("", "-"):
+            continue                       # no alliance: counts for the server only
+        a = alliances.setdefault(aid, {"tag": tag, "mana": 0, "gatherers": 0,
+                                       "members": 0, "home": {}})
+        a["mana"] += mana
+        a["members"] += 1
+        a["gatherers"] += 1 if mana > 0 else 0
+        a["home"][srv] = a["home"].get(srv, 0) + 1
+
+    for a in alliances.values():
+        a["server"] = max(a["home"], key=a["home"].get)   # where most members are from
+
+    by_mana = lambda d: d["mana"]
+    return (sorted((a for a in alliances.values() if a["mana"] > 0), key=by_mana, reverse=True),
+            sorted((s for s in servers.values() if s["mana"] > 0), key=by_mana, reverse=True))
+
+
+@bot.command(aliases=["manarace", "alliancemana"])
+async def allmana(ctx, *args):
+    """
+    Mana gathered per alliance, who's leading, and what each server gathered in $.
+
+        !allmana            every alliance in the scan, season to date
+        !allmana 375        only alliances from 375
+        !allmana 7d 20      last 7 days, top 20
+    """
+    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
+        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        return
+
     async with ctx.typing():
-        
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            # This creates a nicely formatted string of clickable channel links for the error message
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
-    try:
-        season = season.lower()
-        sheet_name = SEASON_SHEETS.get(season)
-        if not sheet_name:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+        opts, unknown = lb.parse_args(args, SEASON_SHEETS, DEFAULT_SEASON,
+                                      default_server=None, default_limit=10,
+                                      max_limit=25)
+        if unknown:
+            await ctx.send(
+                f"❌ Didn't understand `{unknown[0]}`. "
+                f"Try `!allmana`, `!allmana 375`, `!allmana 7d` or `!allmana 20`."
+            )
             return
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
-        if len(tabs) < 2:
-            await ctx.send("❌ Need at least two tabs to calculate gain.")
+        win = await get_window_data(opts["season"], opts["window"])
+        if win is None:
+            await ctx.send(await season_not_ready_msg(opts["season"]))
             return
 
-        latest = tabs[-1]
-        previous = tabs[-2]
-        
-        data_latest = latest.get_all_values()
-        data_prev = previous.get_all_values()
-        headers = data_latest[0]
+        gains = lb.materialize_gains(win["latest"], win["prev"], id_col="lord_id")
+        try:
+            alliances, servers = mana_by_alliance(gains)
+        except ValueError as e:
+            await ctx.send(f"❌ {e}")
+            return
 
-        # Find the Mana column (Change "S" to your actual column letter if different)
-        def col_to_idx(col):
-            return sum((ord(c) - 64) * 26**i for i, c in enumerate(reversed(col.upper()))) - 1
-            
-        id_idx = headers.index("lord_id")
-        mana_idx = col_to_idx("AA")
-        serv_idx = col_to_idx("F")
+        only = opts["server"]
+        if only:
+            alliances = [a for a in alliances if a["server"] == only]
+            servers = [s for s in servers if s["server"] == only]
+        if not alliances:
+            await ctx.send("📭 No alliance gathered any mana in that window.")
+            return
 
-        # Map previous data for quick lookup
-        prev_map = {row[id_idx]: row[mana_idx] for row in data_prev[1:] if len(row) > mana_idx}
+        home = season_cfg(opts["season"])["home"]
+        lead = alliances[0]
+        runner = alliances[1] if len(alliances) > 1 else None
 
-        total_mana_gain = 0
-        player_count = 0
+        lines = []
+        lead_line = (f"👑 **[{lead['tag']}]** from **{lb.server_label(lead['server'])}** leads with "
+                     f"**{lb.fmt(lead['mana'])}** mana (≈ **${mana_dollars(lead['mana']):,}**)")
+        if runner:
+            lead_line += f", {lb.fmt(lead['mana'] - runner['mana'])} ahead of [{runner['tag']}]"
+        lines.append(lead_line)
+        lines.append("")
 
-        for row in data_latest[1:]:
-            # 1. Basic length check
-            if len(row) <= mana_idx or len(row) <= serv_idx: 
-                continue
-            
-            # 2. STRICT LATEST SERVER FILTER: Only proceed if they are 375 NOW
-            server_val = str(row[serv_idx]).strip()
-            if server_val != "375":
-                continue
+        shown = alliances[:opts["limit"]]
+        for i, a in enumerate(shown, 1):
+            ours = " ⭐" if a["server"] == home else ""
+            lines.append(
+                f"{lb.rank_icon(i)} `[{a['tag']}]` **{lb.fmt(a['mana'])}** · "
+                f"${mana_dollars(a['mana']):,}{ours}\n"
+                f"-# └ {lb.server_label(a['server'])} · {a['gatherers']} gatherers"
+            )
 
-            lid = row[id_idx].strip()
-            
-            # 3. GAIN CALCULATION
-            # If they were in the previous sheet, we subtract. 
-            # If they are new to the alliance, we count their gain as 0 (to be safe)
-            if lid in prev_map:
-                try:
-                    curr_mana = int(str(row[mana_idx]).replace(",", "").strip() or 0)
-                    old_mana = int(str(prev_map[lid]).replace(",", "").strip() or 0)
-                    
-                    gain = curr_mana - old_mana
-                    if gain > 0:
-                        total_mana_gain += gain
-                        player_count += 1
-                except ValueError:
-                    continue
+        # Where does our main alliance sit if it's off the page?
+        ours = next(((i, a) for i, a in enumerate(alliances, 1)
+                     if a["server"] == home), None)
+        if ours and ours[0] > len(shown):
+            i, a = ours
+            lines.append(f"…\n`{i:>2}.` `[{a['tag']}]` **{lb.fmt(a['mana'])}** · "
+                         f"${mana_dollars(a['mana']):,} ⭐")
 
-        # Calculate Dollar Value ($100 per 250M)
-        total_value = round((total_mana_gain / 250_000_000) * 100)
-
-        # Build the Embed
         embed = discord.Embed(
-            title=f"🏰 Alliance Mana Report: {season.upper()}",
-            description=f"Gain From **{previous.title}** to **{latest.title}**",
-            color=discord.Color.blue()
+            title=f"💧 Mana Race — {season_cfg(opts['season'])['label']}",
+            description=(f"**{lb.server_label(only)}** · {win['label']}\n\n"
+                         + "\n".join(lines))[:4096],
+            color=lb.server_color(only or home),
         )
-        
-        embed.add_field(name="💧 Total Mana Gathered", value=f"**{total_mana_gain:,}**", inline=False)
-        embed.add_field(
-            name="💰 Value", 
-            value=f"The alliance gathered mana worth **{total_value:,}$**", 
-            inline=False
-        )
-        
+
+        if servers:
+            total = sum(s["mana"] for s in servers)
+            srv_lines = []
+            for i, s in enumerate(servers, 1):
+                star = " ⭐" if s["server"] == home else ""
+                srv_lines.append(
+                    f"{lb.rank_icon(i)} **{lb.server_label(s['server'])}** — "
+                    f"{lb.fmt(s['mana'])} · **${mana_dollars(s['mana']):,}**{star}"
+                )
+            if len(servers) > 1:
+                srv_lines.append(f"-# Everyone together: {lb.fmt(total)} · "
+                                 f"${mana_dollars(total):,}")
+            embed.add_field(name="💰 Money gathered per server",
+                            value="\n".join(srv_lines)[:1024], inline=False)
+
+        embed.set_footer(text=f"$100 per 250M mana · {win['prev_title']} → {win['latest_title']}")
         await ctx.send(embed=embed)
 
-    except Exception as e:
-        await ctx.send(f"❌ Error calculating alliance mana: {e}")
 
 @bot.command(aliases=['checkfarm', 'farm'])
 async def farmcheck(ctx, farm_id: str):
@@ -6511,8 +6574,12 @@ def _help_embed(key, is_admin=False):
             "Sun vs Moon team totals.\n\n"
             "**`!duel`** · **`!duel2`**\n"
             "The running 1v1 challenges.\n\n"
-            "**`!allmana`**\n"
-            "Alliance-wide mana gathered."
+            "**`!allmana`**  ·  alias `!manarace`\n"
+            "Mana race: every alliance ranked by mana gathered, who leads, "
+            "and how much money each server gathered ($100 per 250M).\n"
+            "```\n!allmana            all alliances, season to date\n"
+            "!allmana 375        only 375's alliances\n"
+            "!allmana 7d 20      last 7 days, top 20\n```"
         )
 
     elif key == "args":
@@ -6683,6 +6750,9 @@ COMMAND_HELP = {
                  "breakdown. No ID needed after `!link`.\n"
                  "`!progress` · `!progress 7d` · `!progress 11659353 7d`\n"
                  "`!progress 11659353 on:2026-09-02`"),
+    "allmana": ("💧 !allmana [server] [window] [count]",
+                "Mana race: alliances ranked by mana gathered, the leader, and $ per server.\n"
+                "`!allmana` · `!allmana 375` · `!allmana 7d 20`"),
     "mana": ("💧 !mana <lord_id> [season]",
              "Mana gathered this season, with rank."),
     "topmerits": ("🧠 !topmerits [server] [count] [window]",
