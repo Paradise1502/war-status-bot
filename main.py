@@ -3170,11 +3170,10 @@ def mana_by_alliance(gains):
 @bot.command(aliases=["manarace", "alliancemana"])
 async def allmana(ctx, *args):
     """
-    Mana race per server (its alliances listed together), who's leading,
-    and what each server gathered in $.
+    Mana race per server: who's leading and what each server gathered in $.
 
         !allmana            every server in the scan, season to date
-        !allmana 375        only 375, with all its alliances
+        !allmana 375        only 375
         !allmana 7d 20      last 7 days, top 20
     """
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
@@ -3215,11 +3214,6 @@ async def allmana(ctx, *args):
 
         home = season_cfg(opts["season"])["home"]
 
-        # One entry per server, its alliances listed underneath
-        per_server = {}
-        for a in alliances:
-            per_server.setdefault(a["server"], []).append(a)
-
         lead = servers[0]
         runner = servers[1] if len(servers) > 1 else None
         lead_line = (f"👑 **{lb.server_label(lead['server'])}** leads with "
@@ -3235,10 +3229,7 @@ async def allmana(ctx, *args):
                 f"{lb.rank_icon(i)} **{lb.server_label(srv['server'])}** — "
                 f"**{lb.fmt(srv['mana'])}** · ${mana_dollars(srv['mana']):,}{star}"
             )
-            parts = [f"[{a['tag']}] {lb.fmt(a['mana'])}"
-                     for a in per_server.get(srv["server"], [])[:10 if only else 3]]
-            parts.append(f"{srv['gatherers']} gatherers")
-            lines.append(f"-# └ {' · '.join(parts)}")
+            lines.append(f"-# └ {srv['gatherers']} gatherers")
 
         if len(servers) > 1:
             total = sum(s["mana"] for s in servers)
@@ -6564,10 +6555,10 @@ def _help_embed(key, is_admin=False):
             "**`!duel`** · **`!duel2`**\n"
             "The running 1v1 challenges.\n\n"
             "**`!allmana`**  ·  alias `!manarace`\n"
-            "Mana race: servers ranked by mana gathered (their alliances "
-            "listed together), who leads, and the money each gathered ($100 per 250M).\n"
+            "Mana race: servers ranked by mana gathered, who leads, "
+            "and the money each gathered ($100 per 250M).\n"
             "```\n!allmana            all servers, season to date\n"
-            "!allmana 375        only 375, every alliance\n"
+            "!allmana 375        only 375\n"
             "!allmana 7d 20      last 7 days, top 20\n```"
         )
 
@@ -6740,7 +6731,7 @@ COMMAND_HELP = {
                  "`!progress` · `!progress 7d` · `!progress 11659353 7d`\n"
                  "`!progress 11659353 on:2026-09-02`"),
     "allmana": ("💧 !allmana [server] [window] [count]",
-                "Mana race: servers ranked by mana gathered, alliances listed together, $ per server.\n"
+                "Mana race: servers ranked by mana gathered, with $ per server.\n"
                 "`!allmana` · `!allmana 375` · `!allmana 7d 20`"),
     "mana": ("💧 !mana <lord_id> [season]",
              "Mana gathered this season, with rank."),
