@@ -3170,10 +3170,11 @@ def mana_by_alliance(gains):
 @bot.command(aliases=["manarace", "alliancemana"])
 async def allmana(ctx, *args):
     """
-    Mana gathered per alliance, who's leading, and what each server gathered in $.
+    Mana race per server (its alliances listed together), who's leading,
+    and what each server gathered in $.
 
-        !allmana            every alliance in the scan, season to date
-        !allmana 375        only alliances from 375
+        !allmana            every server in the scan, season to date
+        !allmana 375        only 375, with all its alliances
         !allmana 7d 20      last 7 days, top 20
     """
     if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
@@ -3208,38 +3209,41 @@ async def allmana(ctx, *args):
         if only:
             alliances = [a for a in alliances if a["server"] == only]
             servers = [s for s in servers if s["server"] == only]
-        if not alliances:
-            await ctx.send("📭 No alliance gathered any mana in that window.")
+        if not servers:
+            await ctx.send("📭 Nobody gathered any mana in that window.")
             return
 
         home = season_cfg(opts["season"])["home"]
-        lead = alliances[0]
-        runner = alliances[1] if len(alliances) > 1 else None
 
-        lines = []
-        lead_line = (f"👑 **[{lead['tag']}]** from **{lb.server_label(lead['server'])}** leads with "
+        # One entry per server, its alliances listed underneath
+        per_server = {}
+        for a in alliances:
+            per_server.setdefault(a["server"], []).append(a)
+
+        lead = servers[0]
+        runner = servers[1] if len(servers) > 1 else None
+        lead_line = (f"👑 **{lb.server_label(lead['server'])}** leads with "
                      f"**{lb.fmt(lead['mana'])}** mana (≈ **${mana_dollars(lead['mana']):,}**)")
         if runner:
-            lead_line += f", {lb.fmt(lead['mana'] - runner['mana'])} ahead of [{runner['tag']}]"
-        lines.append(lead_line)
-        lines.append("")
+            lead_line += (f", {lb.fmt(lead['mana'] - runner['mana'])} ahead of "
+                          f"{lb.server_label(runner['server'])}")
+        lines = [lead_line, ""] if len(servers) > 1 else []
 
-        shown = alliances[:opts["limit"]]
-        for i, a in enumerate(shown, 1):
-            ours = " ⭐" if a["server"] == home else ""
+        for i, srv in enumerate(servers[:opts["limit"]], 1):
+            star = " ⭐" if srv["server"] == home else ""
             lines.append(
-                f"{lb.rank_icon(i)} `[{a['tag']}]` **{lb.fmt(a['mana'])}** · "
-                f"${mana_dollars(a['mana']):,}{ours}\n"
-                f"-# └ {lb.server_label(a['server'])} · {a['gatherers']} gatherers"
+                f"{lb.rank_icon(i)} **{lb.server_label(srv['server'])}** — "
+                f"**{lb.fmt(srv['mana'])}** · ${mana_dollars(srv['mana']):,}{star}"
             )
+            parts = [f"[{a['tag']}] {lb.fmt(a['mana'])}"
+                     for a in per_server.get(srv["server"], [])[:10 if only else 3]]
+            parts.append(f"{srv['gatherers']} gatherers")
+            lines.append(f"-# └ {' · '.join(parts)}")
 
-        # Where does our main alliance sit if it's off the page?
-        ours = next(((i, a) for i, a in enumerate(alliances, 1)
-                     if a["server"] == home), None)
-        if ours and ours[0] > len(shown):
-            i, a = ours
-            lines.append(f"…\n`{i:>2}.` `[{a['tag']}]` **{lb.fmt(a['mana'])}** · "
-                         f"${mana_dollars(a['mana']):,} ⭐")
+        if len(servers) > 1:
+            total = sum(s["mana"] for s in servers)
+            lines += ["", f"💰 **Everyone together:** {lb.fmt(total)} · "
+                          f"**${mana_dollars(total):,}**"]
 
         embed = discord.Embed(
             title=f"💧 Mana Race — {season_cfg(opts['season'])['label']}",
@@ -3247,21 +3251,6 @@ async def allmana(ctx, *args):
                          + "\n".join(lines))[:4096],
             color=lb.server_color(only or home),
         )
-
-        if servers:
-            total = sum(s["mana"] for s in servers)
-            srv_lines = []
-            for i, s in enumerate(servers, 1):
-                star = " ⭐" if s["server"] == home else ""
-                srv_lines.append(
-                    f"{lb.rank_icon(i)} **{lb.server_label(s['server'])}** — "
-                    f"{lb.fmt(s['mana'])} · **${mana_dollars(s['mana']):,}**{star}"
-                )
-            if len(servers) > 1:
-                srv_lines.append(f"-# Everyone together: {lb.fmt(total)} · "
-                                 f"${mana_dollars(total):,}")
-            embed.add_field(name="💰 Money gathered per server",
-                            value="\n".join(srv_lines)[:1024], inline=False)
 
         embed.set_footer(text=f"$100 per 250M mana · {win['prev_title']} → {win['latest_title']}")
         await ctx.send(embed=embed)
@@ -6575,10 +6564,10 @@ def _help_embed(key, is_admin=False):
             "**`!duel`** · **`!duel2`**\n"
             "The running 1v1 challenges.\n\n"
             "**`!allmana`**  ·  alias `!manarace`\n"
-            "Mana race: every alliance ranked by mana gathered, who leads, "
-            "and how much money each server gathered ($100 per 250M).\n"
-            "```\n!allmana            all alliances, season to date\n"
-            "!allmana 375        only 375's alliances\n"
+            "Mana race: servers ranked by mana gathered (their alliances "
+            "listed together), who leads, and the money each gathered ($100 per 250M).\n"
+            "```\n!allmana            all servers, season to date\n"
+            "!allmana 375        only 375, every alliance\n"
             "!allmana 7d 20      last 7 days, top 20\n```"
         )
 
@@ -6751,7 +6740,7 @@ COMMAND_HELP = {
                  "`!progress` · `!progress 7d` · `!progress 11659353 7d`\n"
                  "`!progress 11659353 on:2026-09-02`"),
     "allmana": ("💧 !allmana [server] [window] [count]",
-                "Mana race: alliances ranked by mana gathered, the leader, and $ per server.\n"
+                "Mana race: servers ranked by mana gathered, alliances listed together, $ per server.\n"
                 "`!allmana` · `!allmana 375` · `!allmana 7d 20`"),
     "mana": ("💧 !mana <lord_id> [season]",
              "Mana gathered this season, with rank."),
