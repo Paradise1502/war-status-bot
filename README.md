@@ -10,7 +10,7 @@ A Discord bot for running an alliance during a Call of Dragons season: war stats
 | `db.py` | Postgres storage for scans and merits exports, exclusions, settings and `!link` |
 | `lb.py` | Shared leaderboard engine: argument parsing, ranking, paged embeds |
 | `dashboard.py` | Alliance ability dashboard and officer panel (cog) |
-| `activity_checks.py` | DM activity checks with buttons and a live dashboard (cog) |
+| `activity_checks.py` | DM checks with buttons and a live dashboard (cog): `!activitycheck` (attending / not / maybe) and `!seasoncheck` (staying / leaving or quitting / don't know yet) |
 | `spydetect.py` | Fingerprinted broadcasts and leak attribution (cog) |
 
 ## Environment variables

@@ -1,5 +1,9 @@
 """
-activity_checks.py — DM-based activity checks (RSVP) with buttons + live dashboard.
+activity_checks.py — DM-based checks with buttons + live dashboard.
+
+Two kinds, same machinery (DMs, dashboard, reminders, export):
+    !activitycheck @Role Title | details    attending / not attending / maybe
+    !seasoncheck   @Role Title | details    staying / leaving or quitting / don't know yet
 
 Drop this file next to your spy detector cog and load it like any other cog:
     await bot.load_extension("activity_checks")
@@ -41,12 +45,49 @@ except Exception as _e:  # the checks still work, just without the fingerprint
     OPSEC_AVAILABLE = False
 
 STATUS_META = {
+    # activity checks
     "yes":       ("✅", "Attending"),
     "no":        ("❌", "Not attending"),
     "maybe":     ("❔", "Maybe"),
+    # next-season checks
+    "stay":      ("✅", "I'm staying"),
+    "leave":     ("👋", "I'm leaving/quitting"),
+    "unsure":    ("❔", "I don't know yet"),
+    # both
     "pending":   ("⏳", "No response yet"),
     "dm_failed": ("🚫", "DMs closed"),
 }
+
+# What each kind of check asks, and which answers it offers (in button order)
+KINDS = {
+    "activity": {
+        "answers": ["yes", "no", "maybe"],
+        "dm_title": "📋 Activity Check",
+        "dash_title": "📊 Activity Check",
+        "question": "Are you able to join?",
+        "explain": None,
+        "colours": {},
+    },
+    "season": {
+        "answers": ["stay", "leave", "unsure"],
+        "dm_title": "🗓️ Next Season",
+        "dash_title": "🗓️ Next Season Check",
+        "question": "Are you staying with us next season?",
+        "explain": "Pick one below. You can change your answer any time.",
+        "colours": {
+            "stay": discord.Colour.green(),
+            "leave": discord.Colour.red(),
+            "unsure": discord.Colour.light_grey(),
+        },
+    },
+}
+
+
+def event_kind(event):
+    try:
+        return event["kind"] if event["kind"] in KINDS else "activity"
+    except (IndexError, KeyError):
+        return "activity"
 
 
 # ---------------------------------------------------------------------------
@@ -100,6 +141,9 @@ class ActivityDB:
                 SELECT dm_message_id, event_id, user_id FROM targets
                 WHERE dm_message_id IS NOT NULL;
         """)
+        cols = {r["name"] for r in self.conn.execute("PRAGMA table_info(events)")}
+        if "kind" not in cols:   # older databases: every existing check is an activity check
+            self.conn.execute("ALTER TABLE events ADD COLUMN kind TEXT DEFAULT 'activity'")
         self.conn.commit()
 
     def _remember_dm(self, event_id, user_id, dm_message_id):
@@ -110,12 +154,13 @@ class ActivityDB:
             )
 
     # --- events -----------------------------------------------------------
-    def create_event(self, guild_id, role_id, role_name, title, description, author_id):
+    def create_event(self, guild_id, role_id, role_name, title, description, author_id,
+                     kind="activity"):
         cur = self.conn.execute(
-            "INSERT INTO events (guild_id, role_id, role_name, title, description, created_by, created_at)"
-            " VALUES (?,?,?,?,?,?,?)",
+            "INSERT INTO events (guild_id, role_id, role_name, title, description, created_by,"
+            " created_at, kind) VALUES (?,?,?,?,?,?,?,?)",
             (guild_id, role_id, role_name, title, description, author_id,
-             datetime.now(timezone.utc).isoformat(timespec="seconds")),
+             datetime.now(timezone.utc).isoformat(timespec="seconds"), kind),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -214,7 +259,7 @@ class ActivityDB:
                 t.user_id,
                 MAX(t.user_name)                                       AS user_name,
                 COUNT(*)                                               AS sent,
-                SUM(CASE WHEN t.status IN ('yes','no','maybe')
+                SUM(CASE WHEN t.status NOT IN ('pending','dm_failed')
                          THEN 1 ELSE 0 END)                            AS answered,
                 SUM(CASE WHEN t.status = 'pending'  THEN 1 ELSE 0 END)  AS pending,
                 SUM(CASE WHEN t.status = 'dm_failed' THEN 1 ELSE 0 END) AS dm_failed,
@@ -262,6 +307,32 @@ class ActivityView(discord.ui.View):
         await self.cog.handle_response(interaction, "maybe")
 
 
+class SeasonView(discord.ui.View):
+    """Buttons for !seasoncheck. Persistent, like ActivityView."""
+
+    def __init__(self, cog: "ActivityChecks"):
+        super().__init__(timeout=None)
+        self.cog = cog
+
+    @discord.ui.button(label="I'm staying", emoji="✅",
+                       style=discord.ButtonStyle.success,
+                       custom_id="seasoncheck:stay")
+    async def stay(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_response(interaction, "stay")
+
+    @discord.ui.button(label="I'm leaving/quitting", emoji="👋",
+                       style=discord.ButtonStyle.danger,
+                       custom_id="seasoncheck:leave")
+    async def leave(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_response(interaction, "leave")
+
+    @discord.ui.button(label="I don't know yet", emoji="❔",
+                       style=discord.ButtonStyle.secondary,
+                       custom_id="seasoncheck:unsure")
+    async def unsure(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await self.cog.handle_response(interaction, "unsure")
+
+
 # ---------------------------------------------------------------------------
 # THE COG
 # ---------------------------------------------------------------------------
@@ -273,8 +344,12 @@ class ActivityChecks(commands.Cog):
         self._locks = {}   # per-event lock so dashboard edits don't race
 
     async def cog_load(self):
-        # Re-register the button view so clicks still work after a restart
+        # Re-register the button views so clicks still work after a restart
         self.bot.add_view(ActivityView(self))
+        self.bot.add_view(SeasonView(self))
+
+    def view_for(self, event):
+        return SeasonView(self) if event_kind(event) == "season" else ActivityView(self)
 
     def _lock(self, event_id):
         return self._locks.setdefault(event_id, asyncio.Lock())
@@ -282,11 +357,19 @@ class ActivityChecks(commands.Cog):
     # -- message building --------------------------------------------------
 
     def build_dm_embed(self, event, user_id, status="pending"):
+        kind = KINDS[event_kind(event)]
         emoji, label = STATUS_META.get(status, STATUS_META["pending"])
+        if status == "pending":
+            colour = discord.Colour.blurple()
+        else:
+            colour = kind["colours"].get(status, discord.Colour.green())
+        description = event["description"] or kind["question"]
+        if kind["explain"]:
+            description += "\n\n" + kind["explain"]
         e = discord.Embed(
-            title=f"📋 Activity Check — {event['title']}",
-            description=event["description"] or "Are you able to join?",
-            colour=discord.Colour.blurple() if status == "pending" else discord.Colour.green(),
+            title=f"{kind['dm_title']} — {event['title']}",
+            description=description,
+            colour=colour,
         )
         e.add_field(name="Your answer", value=f"{emoji} **{label}**", inline=False)
         e.set_footer(text=f"Check #{event['event_id']} • You can change your answer any time")
@@ -297,12 +380,13 @@ class ActivityChecks(commands.Cog):
         return e
 
     def build_dashboard_embed(self, event, guild):
+        kind = KINDS[event_kind(event)]
         c = self.db.counts(event["event_id"])
         total = sum(c.values())
-        answered = c["yes"] + c["no"] + c["maybe"]
+        answered = sum(c[s] for s in kind["answers"])
 
         e = discord.Embed(
-            title=f"📊 Activity Check #{event['event_id']} — {event['title']}",
+            title=f"{kind['dash_title']} #{event['event_id']} — {event['title']}",
             description=event["description"] or "",
             colour=discord.Colour.dark_grey() if event["closed"] else discord.Colour.blurple(),
         )
@@ -316,11 +400,11 @@ class ActivityChecks(commands.Cog):
             inline=False,
         )
 
-        e.add_field(name="✅ Attending", value=str(c["yes"]), inline=True)
-        e.add_field(name="❌ Not attending", value=str(c["no"]), inline=True)
-        e.add_field(name="❔ Maybe", value=str(c["maybe"]), inline=True)
+        for status in kind["answers"]:
+            emoji, label = STATUS_META[status]
+            e.add_field(name=f"{emoji} {label}", value=str(c[status]), inline=True)
 
-        for status in ("yes", "no", "maybe", "pending", "dm_failed"):
+        for status in kind["answers"] + ["pending", "dm_failed"]:
             rows = self.db.targets(event["event_id"], status)
             if not rows:
                 continue
@@ -353,14 +437,24 @@ class ActivityChecks(commands.Cog):
         row = self.db.target_by_dm(interaction.message.id)
         if not row:
             await interaction.response.send_message(
-                "This activity check is no longer tracked. Please ping an officer.",
+                "This check is no longer tracked. Please ping an officer.",
             )
             return
 
         event = self.db.get_event(row["event_id"])
+        if event is None:
+            await interaction.response.send_message(
+                "This check is no longer tracked. Please ping an officer.",
+            )
+            return
         if event["closed"]:
             await interaction.response.send_message(
-                "⛔ This activity check has already been closed.",
+                "⛔ This check has already been closed.",
+            )
+            return
+        if answer not in KINDS[event_kind(event)]["answers"]:
+            await interaction.response.send_message(
+                "That button doesn't belong to this check. Please ping an officer.",
             )
             return
 
@@ -368,7 +462,7 @@ class ActivityChecks(commands.Cog):
 
         await interaction.response.edit_message(
             embed=self.build_dm_embed(event, row["user_id"], answer),
-            view=ActivityView(self),
+            view=self.view_for(event),
         )
         await self.refresh_dashboard(event["event_id"])
 
@@ -393,14 +487,25 @@ class ActivityChecks(commands.Cog):
     @commands.has_permissions(administrator=True)
     async def activitycheck(self, ctx, role: discord.Role, *, text: str):
         """!activitycheck @Role Title | optional details"""
+        await self._start_check(ctx, role, text, "activity")
+
+    @commands.command(name="seasoncheck", aliases=["nextseason", "stayorgo"])
+    @commands.has_permissions(administrator=True)
+    async def seasoncheck(self, ctx, role: discord.Role, *, text: str = ""):
+        """!seasoncheck @Role [Title | optional details] — staying / leaving or quitting / don't know yet"""
+        await self._start_check(ctx, role, text or "Next season", "season")
+
+    async def _start_check(self, ctx, role, text, kind):
         if role.is_default() or role.name not in ALLOWED_ROLES:
             await ctx.send(
-                f"🚨 **OPSEC ALERT:** Activity checks are restricted to: `{', '.join(ALLOWED_ROLES)}`"
+                f"🚨 **OPSEC ALERT:** Checks are restricted to: `{', '.join(ALLOWED_ROLES)}`"
             )
             return
 
         title, _, description = text.partition("|")
         title, description = title.strip(), description.strip()
+        if not title:
+            title = "Next season" if kind == "season" else "Activity check"
 
         if not ctx.guild.chunked:
             await ctx.guild.chunk()
@@ -411,18 +516,19 @@ class ActivityChecks(commands.Cog):
             return
 
         event_id = self.db.create_event(
-            ctx.guild.id, role.id, role.name, title, description, ctx.author.id
+            ctx.guild.id, role.id, role.name, title, description, ctx.author.id, kind
         )
         event = self.db.get_event(event_id)
+        noun = "next-season check" if kind == "season" else "activity check"
 
-        status_msg = await ctx.send(f"Sending activity check **#{event_id}** to {len(members)} members…")
+        status_msg = await ctx.send(f"Sending {noun} **#{event_id}** to {len(members)} members…")
 
         sent = failed = 0
         for member in members:
             try:
                 dm = await member.send(
                     embed=self.build_dm_embed(event, member.id),
-                    view=ActivityView(self),
+                    view=self.view_for(event),
                 )
                 self.db.add_target(event_id, member.id, member.name, dm.id, "pending")
                 sent += 1
@@ -436,7 +542,7 @@ class ActivityChecks(commands.Cog):
         self.db.set_dashboard(event_id, dash.channel.id, dash.id)
 
         await status_msg.edit(
-            content=f"✅ Activity check **#{event_id}** sent to **{sent}** members "
+            content=f"✅ {noun.capitalize()} **#{event_id}** sent to **{sent}** members "
                     f"({failed} had DMs closed).\nLive dashboard: {dash.jump_url}"
         )
 
@@ -552,10 +658,10 @@ class ActivityChecks(commands.Cog):
         lines = []
         for ev in events:
             c = self.db.counts(ev["event_id"])
-            lines.append(
-                f"**#{ev['event_id']}** — {ev['title']} "
-                f"(✅{c['yes']} ❌{c['no']} ❔{c['maybe']} ⏳{c['pending']})"
-            )
+            kind = event_kind(ev)
+            tally = " ".join(f"{STATUS_META[s][0]}{c[s]}" for s in KINDS[kind]["answers"] + ["pending"])
+            icon = "🗓️ " if kind == "season" else ""
+            lines.append(f"{icon}**#{ev['event_id']}** — {ev['title']} ({tally})")
         await ctx.send("\n".join(lines))
 
     @commands.command(name="activitypending", aliases=["acpending"])
@@ -598,7 +704,7 @@ class ActivityChecks(commands.Cog):
                 dm = await member.send(
                     content="⏰ **Reminder** — we still need your answer:",
                     embed=self.build_dm_embed(event, member.id),
-                    view=ActivityView(self),
+                    view=self.view_for(event),
                 )
                 self.db.update_dm_message(event_id, member.id, dm.id)
                 sent += 1
@@ -622,10 +728,9 @@ class ActivityChecks(commands.Cog):
         self.db.close_event(event_id)
         await self.refresh_dashboard(event_id)
         c = self.db.counts(event_id)
-        await ctx.send(
-            f"🔒 Check **#{event_id}** closed. Final: ✅{c['yes']} ❌{c['no']} "
-            f"❔{c['maybe']} ⏳{c['pending']} 🚫{c['dm_failed']}"
-        )
+        tally = " ".join(f"{STATUS_META[s][0]}{c[s]}"
+                         for s in KINDS[event_kind(event)]["answers"] + ["pending", "dm_failed"])
+        await ctx.send(f"🔒 Check **#{event_id}** closed. Final: {tally}")
 
     @commands.command(name="activityexport", aliases=["acexport"])
     @commands.has_permissions(administrator=True)
@@ -637,11 +742,12 @@ class ActivityChecks(commands.Cog):
             return
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow(["user_id", "username", "display_name", "status", "responded_at"])
+        w.writerow(["user_id", "username", "display_name", "status", "answer", "responded_at"])
         for r in rows:
             m = ctx.guild.get_member(r["user_id"])
-            w.writerow([r["user_id"], r["user_name"],
-                        m.display_name if m else "", r["status"], r["responded_at"] or ""])
+            label = STATUS_META.get(r["status"], ("", r["status"]))[1]
+            w.writerow([r["user_id"], r["user_name"], m.display_name if m else "",
+                        r["status"], label, r["responded_at"] or ""])
         buf.seek(0)
         await ctx.send(file=discord.File(io.BytesIO(buf.getvalue().encode()),
                                          filename=f"activity_check_{event_id}.csv"))
@@ -649,6 +755,7 @@ class ActivityChecks(commands.Cog):
     # -- error handling ----------------------------------------------------
 
     @activitycheck.error
+    @seasoncheck.error
     @activitystatus.error
     @activityremind.error
     @activityclose.error
