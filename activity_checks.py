@@ -5,8 +5,10 @@ Two kinds, same machinery (DMs, dashboard, reminders, export):
     !activitycheck @Role Title | details    attending / not attending / maybe
     !seasoncheck   @Role Title | details    staying / leaving or quitting / don't know yet
 
-Drop this file next to your spy detector cog and load it like any other cog:
+Loaded as a cog from main.py:
     await bot.load_extension("activity_checks")
+
+These DMs carry no leak-tracing fingerprint (spydetect is not used here).
 
 Requires: discord.py 2.x, members intent + message content intent (you already have both).
 """
@@ -30,19 +32,8 @@ DB_PATH = os.getenv("ACTIVITY_DB_PATH", "/data/activity_checks.db")
 # Where the live dashboard message gets posted (same log channel you already use)
 DASHBOARD_CHANNEL_ID = 1544402126539591753
 
-# Roles you are allowed to send activity checks to (same OPSEC guard as your broadcasts)
+# Roles you are allowed to send checks to (keeps them from going to the whole server)
 ALLOWED_ROLES = ["Test", "NVR Member", "NVR Sunrise", "NVR Sunset"]
-
-# Add the per-user OPSEC fingerprint to activity check DMs too?
-# Set to False if you don't care about leak-tracing these messages.
-USE_OPSEC_WATERMARK = True
-
-try:
-    from spydetect import MODES as OPSEC_MODES, encode_watermark, generate_signoff  # noqa
-    OPSEC_AVAILABLE = True
-except Exception as _e:  # the checks still work, just without the fingerprint
-    print(f"[activity_checks] OPSEC fingerprint unavailable: {_e!r}")
-    OPSEC_AVAILABLE = False
 
 STATUS_META = {
     # activity checks
@@ -373,10 +364,6 @@ class ActivityChecks(commands.Cog):
         )
         e.add_field(name="Your answer", value=f"{emoji} **{label}**", inline=False)
         e.set_footer(text=f"Check #{event['event_id']} • You can change your answer any time")
-
-        if USE_OPSEC_WATERMARK and OPSEC_AVAILABLE:
-            signoff = generate_signoff(user_id, OPSEC_MODES["tactical"])
-            e.description = f"{e.description}\n\n{encode_watermark(signoff, user_id)}"
         return e
 
     def build_dashboard_embed(self, event, guild):
