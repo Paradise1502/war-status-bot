@@ -33,11 +33,11 @@ ALLOWED_ROLES = ["Test", "NVR Member", "NVR Sunrise", "NVR Sunset"]
 # Set to False if you don't care about leak-tracing these messages.
 USE_OPSEC_WATERMARK = True
 
-# Change "spydetector" to whatever your existing file/module is actually called.
 try:
-    from spydetector import generate_signoff, encode_watermark  # noqa
+    from spydetect import MODES as OPSEC_MODES, encode_watermark, generate_signoff  # noqa
     OPSEC_AVAILABLE = True
-except Exception:
+except Exception as _e:  # the checks still work, just without the fingerprint
+    print(f"[activity_checks] OPSEC fingerprint unavailable: {_e!r}")
     OPSEC_AVAILABLE = False
 
 STATUS_META = {
@@ -87,8 +87,27 @@ class ActivityDB:
 
             CREATE INDEX IF NOT EXISTS idx_targets_dm
                 ON targets (dm_message_id);
+
+            -- Every DM sent for a check (the first one and each reminder), so the
+            -- buttons on an older DM keep working after a reminder was sent.
+            CREATE TABLE IF NOT EXISTS dm_messages (
+                dm_message_id INTEGER PRIMARY KEY,
+                event_id      INTEGER NOT NULL,
+                user_id       INTEGER NOT NULL
+            );
+
+            INSERT OR IGNORE INTO dm_messages (dm_message_id, event_id, user_id)
+                SELECT dm_message_id, event_id, user_id FROM targets
+                WHERE dm_message_id IS NOT NULL;
         """)
         self.conn.commit()
+
+    def _remember_dm(self, event_id, user_id, dm_message_id):
+        if dm_message_id is not None:
+            self.conn.execute(
+                "INSERT OR IGNORE INTO dm_messages (dm_message_id, event_id, user_id) VALUES (?,?,?)",
+                (dm_message_id, event_id, user_id),
+            )
 
     # --- events -----------------------------------------------------------
     def create_event(self, guild_id, role_id, role_name, title, description, author_id):
@@ -130,6 +149,7 @@ class ActivityDB:
             " VALUES (?,?,?,?,?)",
             (event_id, user_id, user_name, dm_message_id, status),
         )
+        self._remember_dm(event_id, user_id, dm_message_id)
         self.conn.commit()
 
     def update_dm_message(self, event_id, user_id, dm_message_id):
@@ -137,9 +157,17 @@ class ActivityDB:
             "UPDATE targets SET dm_message_id=? WHERE event_id=? AND user_id=?",
             (dm_message_id, event_id, user_id),
         )
+        self._remember_dm(event_id, user_id, dm_message_id)
         self.conn.commit()
 
     def target_by_dm(self, dm_message_id):
+        row = self.conn.execute(
+            "SELECT t.* FROM dm_messages m JOIN targets t"
+            " ON t.event_id = m.event_id AND t.user_id = m.user_id"
+            " WHERE m.dm_message_id=?", (dm_message_id,)
+        ).fetchone()
+        if row:
+            return row
         return self.conn.execute(
             "SELECT * FROM targets WHERE dm_message_id=?", (dm_message_id,)
         ).fetchone()
@@ -264,7 +292,7 @@ class ActivityChecks(commands.Cog):
         e.set_footer(text=f"Check #{event['event_id']} • You can change your answer any time")
 
         if USE_OPSEC_WATERMARK and OPSEC_AVAILABLE:
-            signoff = generate_signoff(user_id, mode="tactical")
+            signoff = generate_signoff(user_id, OPSEC_MODES["tactical"])
             e.description = f"{e.description}\n\n{encode_watermark(signoff, user_id)}"
         return e
 
@@ -398,7 +426,7 @@ class ActivityChecks(commands.Cog):
                 )
                 self.db.add_target(event_id, member.id, member.name, dm.id, "pending")
                 sent += 1
-            except discord.Forbidden:
+            except discord.HTTPException:   # DMs closed, or Discord refused this one
                 self.db.add_target(event_id, member.id, member.name, None, "dm_failed")
                 failed += 1
             await asyncio.sleep(0.6)   # gentle on the DM rate limit
@@ -576,6 +604,8 @@ class ActivityChecks(commands.Cog):
                 sent += 1
             except discord.Forbidden:
                 self.db.set_status(event_id, member.id, "dm_failed")
+            except discord.HTTPException as e:   # one failure shouldn't stop the rest
+                print(f"[activity_checks] reminder to {member} failed: {e}")
             await asyncio.sleep(0.6)
 
         await self.refresh_dashboard(event_id)

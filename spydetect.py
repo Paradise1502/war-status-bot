@@ -7,12 +7,13 @@ Each recipient of a broadcast gets:
   2. A zero-width watermark carrying their user ID plus a checksum, spread
      across word boundaries. This survives copy-paste, not screenshots.
 
-Required environment variables:
-  OPSEC_FINGERPRINT_SECRET   long random string; the whole system's security
-  OPSEC_LOG_CHANNEL_ID       channel ID for audit logs
-  OPSEC_ROLES_TACTICAL       comma-separated role IDs allowed for !warbroadcast
-  OPSEC_ROLES_ROW            comma-separated role IDs allowed for !rowbroadcast
-  OPSEC_ROLES_CASUAL         comma-separated role IDs allowed for !socialbroadcast
+Configuration:
+  OPSEC_FINGERPRINT_SECRET   environment variable, long random string; the whole
+                             system's security. Falls back to the built-in value
+                             below when unset. Changing it changes every phrase,
+                             so older broadcasts can only be traced with the old one.
+  LOG_CHANNEL_ID             channel ID for audit logs (below)
+  ALLOWED_ROLE_IDS           role IDs allowed per broadcast mode (below)
 
 Anyone who can read the log channel, or who holds the secret, can forge or
 decode every fingerprint. Restrict both accordingly.
@@ -38,7 +39,12 @@ from discord.ext import commands
 # Configuration
 # --------------------------------------------------------------------------
 
-FINGERPRINT_SECRET = "No8qa3i03ns5D42Atni0MbOxHW2SaTt3w78Vz2am0iaKchIr".encode()
+# Read from the environment when set. The fallback is the value the bot has
+# always used, so existing fingerprints keep decoding until a new secret is set.
+FINGERPRINT_SECRET = (
+    os.getenv("OPSEC_FINGERPRINT_SECRET", "").strip()
+    or "No8qa3i03ns5D42Atni0MbOxHW2SaTt3w78Vz2am0iaKchIr"
+).encode()
 
 LOG_CHANNEL_ID = 1527938722987900978
 
@@ -586,7 +592,7 @@ class SpyDetector(commands.Cog):
         if not allowed:
             await ctx.send(
                 f"No roles are configured for `{mode.key}` broadcasts. "
-                f"Set `OPSEC_ROLES_{mode.key.upper()}` before using this."
+                f"Add them to `ALLOWED_ROLE_IDS` in spydetect.py before using this."
             )
             return
 
@@ -854,7 +860,7 @@ async def setup(bot: commands.Bot) -> None:
     if len(FINGERPRINT_SECRET) < 16:
         raise RuntimeError("OPSEC_FINGERPRINT_SECRET should be at least 16 characters.")
     if not LOG_CHANNEL_ID:
-        raise RuntimeError("OPSEC_LOG_CHANNEL_ID is not set.")
+        raise RuntimeError("LOG_CHANNEL_ID is not set in spydetect.py.")
     for mode_key, group_set in ((m.key, m.groups) for m in MODES.values()):
         for index, group in enumerate(group_set):
             if len(set(group)) != len(group):

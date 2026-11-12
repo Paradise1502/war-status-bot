@@ -1,17 +1,22 @@
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from string import ascii_uppercase
-import os
+import asyncio
+import datetime as _dt  # alias for the RSS queue, so it never clashes with "from datetime import datetime"
 import json
-import discord
-import db
-import lb
+import os
 import re
+import time
+import traceback
+from datetime import datetime, timedelta, UTC, timezone, date
+from zoneinfo import ZoneInfo
+
+import aiohttp
+import discord
+import gspread
 from discord.ext import commands
 from discord.ext import tasks
-from datetime import datetime, timedelta, UTC, timezone, date
-import asyncio
-import unicodedata
+from oauth2client.service_account import ServiceAccountCredentials
+
+import db
+import lb
 
 # Google Sheets 
 scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
@@ -19,10 +24,6 @@ creds_json = os.getenv("CREDENTIALS_JSON")
 creds_dict = json.loads(creds_json)
 creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
 client = gspread.authorize(creds)
-
-EVENT_SHEET_NAME = "Event Schedule"      # The spreadsheet name
-EVENT_TAB_NAME = "events"               # The tab name
-ANNOUNCE_CHANNEL_ID = 1383515877793595435  # 👈 set your daily-announcement channel
 
 # Season sheet
 SEASON_SHEETS = {
@@ -41,7 +42,7 @@ SERVER_375_SHEET = "Call of Dragons - Server 375 Stats"
 DEFAULT_SEASON = "sos8"
 
 # =============================================================================
-# SEASON CONFIG — put this near the top of main.py, after SEASON_SHEETS
+# SEASON CONFIG
 # =============================================================================
 # Everything that changes between seasons lives here. Next season you add one
 # entry and change DEFAULT_SEASON. You do not touch any command code.
@@ -191,11 +192,56 @@ TEAM_ROSTER = {
 }
 
 
+def dead_requirement_text():
+    """'200M+ → 5.6M · 150M–200M → 3.1M · under 150M → 1.6M', from DEAD_REQUIREMENTS."""
+    def short(n):
+        return f"{n / 1e9:g}B" if n >= 1e9 else f"{n / 1e6:g}M"
+
+    parts, upper = [], None
+    for threshold, req in DEAD_REQUIREMENTS:
+        if threshold == 0:
+            band = f"under {short(upper)}" if upper else "everyone"
+        elif upper is None:
+            band = f"{short(threshold)}+"
+        else:
+            band = f"{short(threshold)}–{short(upper)}"
+        parts.append(f"{band} → {short(req)}")
+        upper = threshold
+    return " · ".join(parts)
+
+
 def dead_requirement(highest_power):
     for threshold, req in DEAD_REQUIREMENTS:
         if highest_power >= threshold:
             return req
     return DEAD_REQUIREMENTS[-1][1] if DEAD_REQUIREMENTS else None
+
+def save_json_atomic(path, data):
+    """Write JSON to a temp file, then swap it in. A crash or deploy mid-write
+    leaves the previous file intact instead of a half-written one."""
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def load_json_file(path):
+    """Read a JSON state file. Returns {} when it's missing. A damaged file is
+    kept as <name>.corrupt-<time> (so nothing is lost) and {} is returned."""
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {}
+    except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        backup = f"{path}.corrupt-{int(time.time())}"
+        try:
+            os.replace(path, backup)
+            print(f"⚠️ {path} was unreadable ({e}); kept it as {backup} and started fresh.")
+        except OSError:
+            print(f"⚠️ {path} was unreadable ({e}); starting fresh.")
+        return {}
+
 
 # Global memory bank for background tasks
 bot_cache = {
@@ -233,6 +279,15 @@ WAR_CHANNEL_ID = 1369071691111600168  # ⬅️ replace with your war channel ID
 REACTION_MESSAGE_ID = 1369072129068372008  # ⬅️ replace with your message ID
 ALLOWED_COMMAND_CHANNEL_ID = [1378735765827358791, 1383515877793595435, 1236059889411952690]
 
+
+async def channel_allowed(ctx):
+    """True in a stats channel. Elsewhere, says where commands work and returns False."""
+    if ctx.channel.id in ALLOWED_COMMAND_CHANNEL_ID:
+        return True
+    mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
+    await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    return False
+
 # Emoji → new channel name mapping
 WAR_CHANNEL_REACTIONS = {
     "🔴": "🔴｜𝐅𝐔𝐋𝐋𝐖𝐀𝐑",
@@ -262,9 +317,7 @@ def scan_admin():
 @bot.event
 async def on_raw_reaction_add(payload):
     # This captures the member who reacted
-    user = payload.member 
-    
-    print(f"Reaction detected: emoji={payload.emoji}, user={payload.user_id}, message={payload.message_id}")
+    user = payload.member
 
     if payload.message_id != REACTION_MESSAGE_ID:
         return
@@ -296,12 +349,8 @@ async def on_raw_reaction_add(payload):
         await confirm_channel.send(f"❌ Failed to rename war channel: {e}")
 
 # ─────────────────────────────────────────────────────────────
-#  SHELL BUILD STATUS  –  paste below your war-channel code
-#  (uses the same `bot` object; needs `import asyncio, json, discord`)
+#  SHELL BUILD STATUS
 # ─────────────────────────────────────────────────────────────
-import asyncio
-import json
-import discord
 
 # ── Config ───────────────────────────────────────────────────
 SHELL_CHANNEL_ID = 1551945976812671076              # ⬅️ channel that gets renamed + holds the status embed
@@ -335,25 +384,20 @@ SHELL_ALLIANCES = {
 
 # ── State (saved to disk so it survives restarts) ────────────
 def _load_state():
-    try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {
-            "alliances": data.get("alliances", []),
-            "buff": data.get("buff", False),
-            "status_message_id": data.get("status_message_id"),
-            "buff_auto": data.get("buff_auto", {}),   # {shell: active_until} set by the dashboard
-        }
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {"alliances": [], "buff": False, "status_message_id": None, "buff_auto": {}}
+    data = load_json_file(STATE_FILE)
+    return {
+        "alliances": data.get("alliances", []),
+        "buff": data.get("buff", False),
+        "status_message_id": data.get("status_message_id"),
+        "buff_auto": data.get("buff_auto", {}),   # {shell: active_until} set by the dashboard
+    }
 
 
 shell_state = _load_state()
 
 
 def _save_state():
-    with open(STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(shell_state, f)
+    save_json_atomic(STATE_FILE, shell_state)
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -677,86 +721,6 @@ async def shell_reset(ctx):
     schedule_rename(ctx.guild)
     await ctx.send("✅ Shell builds cleared – ready for today's builds.")
 
-# ============================
-# Parsers / formatters
-# ============================
-
-def to_int_eu(v):
-    """Parse ints from EU/US formats: '21.734.811', '21,734,811', '21 734 811', '-', '' -> 0."""
-    try:
-        s = str(v).replace(".", "").replace(",", "").replace(" ", "").strip()
-        if s in ("", "-"):
-            return 0
-        return int(s)
-    except:
-        return 0
-
-def fmt_int_eu(n: int) -> str:
-    """12345678 -> '12.345.678'."""
-    return f"{n:,}".replace(",", ".")
-
-def fmt_pct(n: float) -> str:
-    return f"{n:.2f}%"
-
-# ---------- card rendering ----------
-
-def player_field_name(p):
-    # "Name (last6id)  •  S375"
-    lid = p.get("lid","")
-    short = lid[-6:] if lid else ""
-    srv = p.get("srv","")
-    base = (p.get("name") or "—").strip()
-    return f"{base} ({short})  •  S{srv}"
-
-def player_field_value(p):
-    # Clean, readable lines (no tables)
-    power = fmt_int_eu(p["power"])
-    meritsΔ = fmt_int_eu(p["merits_gain"])
-    m_pct = fmt_pct(p["merit_ratio"])
-    dead_abs = fmt_int_eu(p["dead_gain"])
-    d_pct = fmt_pct(p["dead_ratio"])
-    tags = []
-    if p.get("flex"):   tags.append("flex")
-    if p.get("abs_ok"): tags.append("abs")
-    tag_str = f" — *{', '.join(tags)}*" if tags else ""
-    return (
-        f"**Power:** {power}\n"
-        f"**MeritsΔ:** {meritsΔ} ({m_pct})\n"
-        f"**Deads:** {dead_abs} ({d_pct}){tag_str}"
-    )
-
-async def send_section_cards(ctx, title: str, emoji: str, color: int, items: list):
-    """
-    Sends paginated embeds where each player is a field (max 25 per embed).
-    """
-    if not items:
-        embed = discord.Embed(
-            title=f"{emoji} {title} — 0",
-            description="No entries.",
-            color=color
-        )
-        await ctx.send(embed=embed)
-        return
-
-    MAX_FIELDS = 25
-    total_pages = (len(items) - 1) // MAX_FIELDS + 1
-    page = 1
-    for i in range(0, len(items), MAX_FIELDS):
-        chunk = items[i:i+MAX_FIELDS]
-        embed = discord.Embed(
-            title=f"{emoji} {title} — {len(items)} (page {page}/{total_pages})",
-            color=color
-        )
-        for p in chunk:
-            embed.add_field(
-                name=player_field_name(p),
-                value=player_field_value(p),
-                inline=False
-            )
-        await ctx.send(embed=embed)
-        page += 1
-
-
 @bot.command(name="ingest")
 @scan_admin()
 async def ingest_scan_cmd(ctx, season: str = DEFAULT_SEASON, scan_date: str = None):
@@ -849,9 +813,7 @@ async def ingest_scan_cmd(ctx, season: str = DEFAULT_SEASON, scan_date: str = No
 async def list_scans_cmd(ctx, season: str = DEFAULT_SEASON, limit: int = 15):
     """Show which scan dates are stored for a season."""
     async with ctx.typing():
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-            await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+        if not await channel_allowed(ctx):
             return
  
         season = season.lower()
@@ -893,13 +855,21 @@ async def delete_scan_cmd(ctx, season: str, scan_date: str):
 async def resync_cmd(ctx):
     """Force an immediate cache refresh."""
     async with ctx.typing():
-        await refresh_season_cache()
+        await refresh_season_cache(reload_sheets=True)
         await ctx.send("✅ Cache refreshed from the database.")
+
+
+async def open_worksheets(sheet_name):
+    """All tabs of a Google Sheet. Both network calls run off the event loop, so
+    the bot keeps answering while Sheets is slow."""
+    sheet = await asyncio.to_thread(client.open, sheet_name)
+    return await asyncio.to_thread(sheet.worksheets)
+
 
 async def _load_season_from_sheets(season_key):
     """The old behaviour — used as a fallback until the DB has data."""
     sheet_name = SEASON_SHEETS[season_key]
-    tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+    tabs = await open_worksheets(sheet_name)
     scan_tabs = [t for t in tabs if t.title.lower() != "roster"]
     if len(scan_tabs) < 2:
         return None
@@ -958,16 +928,22 @@ async def season_not_ready_msg(season):
     return "⏳ The bot is still loading the latest scans. Try again in a minute."
 
 
-async def refresh_season_cache():
+async def refresh_season_cache(reload_sheets=False):
     """
     Prefer the database. Fall back to Google Sheets for any season that isn't
     in the database yet, so the bot never ends up with an empty cache.
+
+    Sheet-backed seasons are finished seasons, so they're read once and then
+    kept; !resync (reload_sheets=True) reads them again.
     """
     for season_key in SEASON_SHEETS:
         try:
             data = await _load_season_from_db(season_key)
             # Seasons without a Google Sheet (None) live only in the database
             if data is None and SEASON_SHEETS.get(season_key):
+                cached = bot_cache["seasons"].get(season_key)
+                if cached and cached.get("source") == "sheets" and not reload_sheets:
+                    continue
                 data = await _load_season_from_sheets(season_key)
                 await asyncio.sleep(2)  # be polite to the Sheets API
             if data:
@@ -1029,7 +1005,7 @@ async def backfill_cmd(ctx, season: str, confirm: str = None):
     )
 
     try:
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+        tabs = await open_worksheets(sheet_name)
     except Exception as e:
         await status.edit(content=f"❌ Could not open `{sheet_name}`: {e}")
         return
@@ -1292,13 +1268,10 @@ def strip_excluded(table, id_col="lord_id"):
     ]
 
 # =============================================================================
-# SERVER 375 EXPORT → DATABASE  (replaces sheet375_ingest.py entirely)
+# SERVER 375 MERITS EXPORT — season-to-date cache
 # =============================================================================
-# Paste into main.py. Requires the db.py additions from db_375.py.
-#
-# Workflow: export from the in-game tool with start = SEASON_START_375 and
-# end = today, then drop the .xlsx into the admin channel with !ingest375.
-# No more pasting into the Google Sheet.
+# The daily export script posts each server's .xlsx in the ingest channel
+# (auto-ingested below); !ingestmerits does the same by hand.
 # =============================================================================
  
  
@@ -1350,67 +1323,6 @@ async def fetch_sheets_background():
         print(f"❌ [Background Task] Critical Error: {e}")
  
  
-# -----------------------------------------------------------------------------
-# 4. WINDOWS — the same window argument drives BOTH datasets
-# -----------------------------------------------------------------------------
- 
-async def get_375_window(window=None):
-    """
-    Return 375 data for a window, in the usual [headers, row, ...] shape.
- 
-    window=None / "season"  -> the latest export as-is (season to date)
-    window="5d"             -> latest MINUS the export from 5 days ago
-    window="2026-08-30"     -> latest MINUS that date's export
- 
-    Returns (data, label) or (None, reason).
-    """
-    parsed = parse_window(window) if window else None
- 
-    dates = await db.get_latest_dates(merits_dataset("375"), n=1)
-    if not dates:
-        return None, "No 375 exports stored yet."
-    end_date = dates[0]
- 
-    if parsed is None or parsed[0] == "season":
-        data = await db.materialize_period(merits_dataset("375"), ID_COLUMN_375, end_date=end_date)
-        return data, "Season to date"
- 
-    if parsed[0] == "days":
-        target = end_date - timedelta(days=parsed[1])
-        label = f"Last {parsed[1]} day{'s' if parsed[1] != 1 else ''}"
-    else:
-        target = parsed[1]
-        label = f"Since {target}"
- 
-    base_date = await db.nearest_date_on_or_before(merits_dataset("375"), target)
- 
-    if base_date is None or base_date == end_date:
-        data = await db.materialize_period(merits_dataset("375"), ID_COLUMN_375, end_date=end_date)
-        return data, "Season to date (not enough 375 history for that window)"
- 
-    data = await db.materialize_period(
-        merits_dataset("375"), ID_COLUMN_375, base_date=base_date, end_date=end_date
-    )
-    return data, f"{label} ({base_date} → {end_date})"
- 
- 
-async def get_combined_window(season, window=None):
-    """
-    One call that resolves BOTH datasets for the same window, so a command can
-    show scan stats and 375 stats over a matching period.
- 
-    Returns a dict, or None if the season data isn't available.
-    """
-    win = await get_window_data(season, window)
-    if win is None:
-        return None
- 
-    data_375, label_375 = await get_375_window(window)
- 
-    win["data_375"] = data_375
-    win["label_375"] = label_375
-    return win
-
 # -------------------------------------------------------------
 # UTC TIME & DATE CHANNEL UPDATER
 # -------------------------------------------------------------
@@ -1446,19 +1358,7 @@ async def before_utc_update():
     await bot.wait_until_ready()
 
 # =============================================================================
-# REBUILT LEADERBOARDS + MULTI-SERVER MERITS SHEETS
-# =============================================================================
-# Paste into main.py. Requires lb.py alongside main.py.
-#
-#     import lb
-#
-# This REPLACES these commands — delete the old versions:
-#     topdeads, lowdeads, totaldeads, topmerits, lowmerits, topkills,
-#     topheal, topmana, topinf, lowinf, topcav, lowcav, toparcher,
-#     lowarcher, topmage, lowmage, toprssheal, lowrssheal, topbuild,
-#     lowbuild, topdest, lowdest, generate_375_leaderboard
-#
-# Also replaces the ingest375 command with a server-aware version.
+# LEADERBOARDS + MULTI-SERVER MERITS EXPORTS  (ranking engine lives in lb.py)
 # =============================================================================
 
 
@@ -1801,9 +1701,7 @@ async def run_scan_leaderboard(ctx, args, *, title, emoji, value, unit="",
     value: column name, list of columns (summed), or callable(get) -> int
     detail: optional fn(entry) -> str, rendered under each line
     """
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -1950,9 +1848,7 @@ async def topefficiency(ctx, *args):
 async def run_merits_leaderboard(ctx, args, *, title, emoji, value, unit="",
                                  top=True, min_power=50_000_000, detail=None,
                                  extra_cols=None):
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -2142,9 +2038,7 @@ async def toptraders(ctx, *args):
         return (f"   └ Total `{lb.fmt(e.get('total', 0))}` · "
                 f"Enemy `{lb.fmt(e.get('enemy', 0))}` · **{pct:.0f}% traded**")
 
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -2250,9 +2144,7 @@ async def unexclude_cmd(ctx, lord_id: str):
 @bot.command(name="excluded", aliases=["exclusions"])
 async def excluded_cmd(ctx):
     """Show the exclusion list."""
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
  
     rows = await db.list_exclusions()
@@ -2285,9 +2177,7 @@ async def deadcheck(ctx, *args, min_power=50_000_000):
         !deadcheck 357       another server
         !deadcheck done      everyone who has met it
     """
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     if not DEAD_REQUIREMENTS:
@@ -2367,7 +2257,7 @@ async def deadcheck(ctx, *args, min_power=50_000_000):
             title=("✅ Requirement met" if show_done else "💀 Behind on dead requirement"),
             subtitle=(f"**{lb.server_label(opts['server'])}** · Season to date\n"
                       f"*{total:,} player(s) ≥{lb.fmt(MIN_POWER_DEADCHECK)} power · "
-                      f"200M+ → 5.6M · 150–200M → 3.1M · under 150M → 1.6M*"),
+                      f"{dead_requirement_text()}*"),
             footer=f"{win['prev_title']} → {win['latest_title']}",
             color=lb.server_color(opts["server"]),
             entries=entries,
@@ -2377,103 +2267,102 @@ async def deadcheck(ctx, *args, min_power=50_000_000):
 
 @bot.command()
 async def mana(ctx, lord_id: str, season: str = DEFAULT_SEASON):
+    if not await channel_allowed(ctx):
+        return
+
     async with ctx.typing():
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
-            
-    try:
-        season = season.lower()
-        if season not in SEASON_SHEETS:
-            await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
-            return
+        try:
+            season = season.lower()
+            lord_id = lord_id.strip()
+            if season not in SEASON_SHEETS:
+                await ctx.send(f"❌ Invalid season. Options: {', '.join(SEASON_SHEETS.keys())}")
+                return
 
-        # CACHE CHECK
-        if season not in bot_cache["seasons"]:
-            await ctx.send(await season_not_ready_msg(season))
-            return
+            cached = bot_cache["seasons"].get(season)
+            if not cached:
+                await ctx.send(await season_not_ready_msg(season))
+                return
 
-        # Load from bot memory (Requires update to background task, see below)
-        data_latest  = bot_cache["seasons"][season]["latest"]
-        data_oldest  = bot_cache["seasons"][season]["oldest"]
-        latest_title = bot_cache["seasons"][season]["latest_title"]
-        oldest_title = bot_cache["seasons"][season]["oldest_title"]
-        
-        headers = data_latest[0]
-        
-        def get_idx(name, default):
-            return headers.index(name) if name in headers else default
+            data_latest  = cached["latest"]
+            data_oldest  = cached["oldest"]
+            latest_title = cached["latest_title"]
+            oldest_title = cached["oldest_title"]
 
-        id_idx = get_idx("lord_id", 0)
-        name_idx = 1
-        alliance_idx = 3
-        mana_idx = 26
-        server_idx = 5 
+            headers = [str(h).strip().lower() for h in data_latest[0]]
 
-        def to_int(val):
-            if not val: return 0
-            try: return int(str(val).replace(',', '').replace('-', '').strip())
-            except: return 0
+            def col(name, fallback):
+                """Column by its header; the old fixed position if the header is missing."""
+                return headers.index(name) if name in headers else fallback
 
-        oldest_lookup = {row[id_idx].strip(): row for row in data_oldest[1:] if len(row) > mana_idx}
+            id_idx       = col("lord_id", 0)
+            name_idx     = col("name", 1)
+            alliance_idx = col("alliance_tag", 3)
+            server_idx   = col("home_server", 5)
+            mana_idx     = col("mana", 26)
 
-        row_latest = next((r for r in data_latest[1:] if len(r) > id_idx and r[id_idx].strip() == lord_id), None)
-        row_oldest = oldest_lookup.get(lord_id)
+            def cell(row, i):
+                return str(row[i]).strip() if i < len(row) else ""
 
-        if not row_latest or not row_oldest:
-            await ctx.send("❌ Lord ID not found in both the start and end of this season.")
-            return
+            oldest_lookup = {cell(r, id_idx): r for r in data_oldest[1:] if len(r) > mana_idx}
+            row_latest = next((r for r in data_latest[1:] if cell(r, id_idx) == lord_id), None)
+            row_oldest = oldest_lookup.get(lord_id)
 
-        s375_gains = []
-        for row in data_latest[1:]:
-            l_id = row[id_idx].strip()
-            if len(row) > server_idx and str(row[server_idx]).strip() == "375":
+            if not row_latest or not row_oldest:
+                await ctx.send("❌ Lord ID not found in both the start and end of this season.")
+                return
+
+            def gain(row, old_row):
+                return lb.to_int(cell(row, mana_idx)) - lb.to_int(cell(old_row, mana_idx))
+
+            # Rank among our own server, leaving out excluded accounts
+            home = home_server(season)
+            home_gains = []
+            for row in data_latest[1:]:
+                l_id = cell(row, id_idx)
+                if l_id in EXCLUDED_IDS and l_id != lord_id:
+                    continue
+                if "".join(ch for ch in cell(row, server_idx) if ch.isdigit()) != home:
+                    continue
                 old_row = oldest_lookup.get(l_id)
                 if old_row:
-                    gain = to_int(row[mana_idx]) - to_int(old_row[mana_idx])
-                    s375_gains.append((l_id, gain))
+                    home_gains.append((l_id, gain(row, old_row)))
 
-        s375_gains.sort(key=lambda x: x[1], reverse=True)
-        rank = next((i+1 for i, (lid, _) in enumerate(s375_gains) if lid == lord_id), None)
+            home_gains.sort(key=lambda x: x[1], reverse=True)
+            rank = next((i + 1 for i, (lid, _) in enumerate(home_gains) if lid == lord_id), None)
 
-        mana_gain = to_int(row_latest[mana_idx]) - to_int(row_oldest[mana_idx])
-        name = row_latest[name_idx].strip()
-        alliance = row_latest[alliance_idx].strip()
+            mana_gain = gain(row_latest, row_oldest)
+            name = cell(row_latest, name_idx)
+            alliance = cell(row_latest, alliance_idx)
+            home_tag = lb.SERVER_NAMES.get(home, home)
 
-        mana_value = round((mana_gain / 250_000_000) * 100)
+            embed = discord.Embed(
+                title=f"🌿 Mana : {season.upper()}",
+                description=f"Total gain from **{oldest_title}** to **{latest_title}**",
+                color=discord.Color.blue()
+            )
+            embed.add_field(name="Lord", value=f"[{alliance}] {name}", inline=True)
+            embed.add_field(
+                name="💧 Mana gathered",
+                value=(f"Total: **{mana_gain:,}**\n"
+                       f"*You gathered mana worth **${mana_dollars(mana_gain):,}*** "),
+                inline=False
+            )
 
-        embed = discord.Embed(
-            title=f"🌿 Mana : {season.upper()}",
-            description=f"Total gain from **{oldest_title}** to **{latest_title}**",
-            color=discord.Color.blue()
-        )
-        embed.add_field(name="Lord", value=f"[{alliance}] {name}", inline=True)
-        
-        embed.add_field(
-            name="💧 Mana gathered", 
-            value=f"Total: **{mana_gain:,}**\n*You gathered mana worth **${mana_value:,}*** ", 
-            inline=False
-        )
-        
-        if rank:
-            embed.add_field(name="🏅 NVR Rank", value=f"#{rank} / {len(s375_gains)}", inline=True)
-        else:
-            embed.set_footer(text="ℹ️ Player is not in NVR.")
+            if rank:
+                embed.add_field(name=f"🏅 {home_tag} Rank", value=f"#{rank} / {len(home_gains)}", inline=True)
+            else:
+                embed.set_footer(text=f"ℹ️ Player is not in {home_tag}.")
 
-        await ctx.send(embed=embed)
+            await ctx.send(embed=embed)
 
-    except Exception as e:
-        await ctx.send(f"❌ Error: {e}")
+        except Exception as e:
+            await ctx.send(f"❌ Error: {e}")
 
 @bot.command()
 async def groupstats(ctx, *args):
-    allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
     
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
-            return
+    if not await channel_allowed(ctx):
+        return
 
     
     try:
@@ -2596,17 +2485,10 @@ async def groupstats(ctx, *args):
             for i, p in enumerate(top_players):
                 raw_name = p['name']
                 display_name = raw_name[:12] + ".." if len(raw_name) > 12 else raw_name
-                
-                if i == 1: rank_icon = "🥈"
-                elif i == 2: rank_icon = "🥉"
-                else: rank_icon = "🥇" # Fix index mapping for medals loop
-                
-                # Using proper medal ordering based on enumerate index
-                medal_icon = medals[i] if i < len(medals) else "▫️"
-
                 top_str += f"{medals[i]} **{display_name}**\n└ `{fmt(p['merits'])}` Merits\n"
 
-            return f"{emoji} __**GROUP {name.upper()}**__", stats_block, top_str
+            # Discord rejects an empty field, e.g. a window where nobody played
+            return f"{emoji} __**GROUP {name.upper()}**__", stats_block, top_str or "—"
 
         # Create Single Embed
         embed = discord.Embed(
@@ -2641,11 +2523,8 @@ async def groupstats(ctx, *args):
 @bot.command(aliases=['grouplb', 'gl'])
 async def groupleaderboard(ctx, *args):
     async with ctx.typing():
-        allowed_channels = {1378735765827358791, 1383515877793595435, 1236059889411952690}
 
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+        if not await channel_allowed(ctx):
             return
 
 
@@ -2819,9 +2698,7 @@ async def groupleaderboard(ctx, *args):
 @bot.command(aliases=['xppvsraz', 'duel2'])
 async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
     """Custom asymmetric 1v1 Challenge: xpp vs raz"""
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        channels_mentions = ", ".join([f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID])
-        await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -2974,9 +2851,7 @@ async def duel_xpp_raz(ctx, season: str = DEFAULT_SEASON):
 @bot.command(aliases=['mage1v1', 'duel', 'challenge'])
 async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
     """Custom 1v1 Challenge: Tinzy vs Balakas"""
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        channels_mentions = ", ".join([f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID])
-        await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -3012,7 +2887,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
             id_col_375 = headers_375.index("Character ID")
             inf_col_375 = headers_375.index("Infantry Only")
             
-            inf_map = {str(r[id_col_375]).strip(): int(str(r[inf_col_375]).replace(",", "").strip() or 0) for r in data_375[1:] if len(r) > inf_col_375}
+            inf_map = {str(r[id_col_375]).strip(): lb.to_int(r[inf_col_375]) for r in data_375[1:] if len(r) > inf_col_375}
 
             # 4. CONTENDERS SETUP
             contenders = {
@@ -3031,8 +2906,7 @@ async def duel_challenge(ctx, season: str = DEFAULT_SEASON):
                     
                     # Math: Merit Gain (1x) + Infantry Total (2x)
                     merit_gain = (export_value(em, lid, "Total Merits") if em is not None
-                                  else int(str(row[merits_idx]).replace(",", "").strip() or 0)
-                                       - int(str(prev_row[merits_idx]).replace(",", "").strip() or 0))
+                                  else lb.to_int(row[merits_idx]) - lb.to_int(prev_row[merits_idx]))
                     inf_total = inf_map.get(lid, 0)
                     
                     score = merit_gain + (inf_total * 2)
@@ -3176,9 +3050,7 @@ async def allmana(ctx, *args):
         !allmana 375        only 375
         !allmana 7d 20      last 7 days, top 20
     """
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -3252,9 +3124,7 @@ async def farmcheck(ctx, farm_id: str):
     async with ctx.typing():
         
         # 1. Channel Restriction Check
-        if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-            channels_mentions = ", ".join([f"<#{channel_id}>" for channel_id in ALLOWED_COMMAND_CHANNEL_ID])
-            await ctx.send(f"❌ Commands are only allowed in {channels_mentions}.")
+        if not await channel_allowed(ctx):
             return
 
         try:
@@ -3265,7 +3135,7 @@ async def farmcheck(ctx, farm_id: str):
                 return
 
             # 3. Fetch Data Asynchronously
-            tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+            tabs = await open_worksheets(sheet_name)
             if not tabs:
                 await ctx.send("❌ No worksheets found in the NVR Farms sheet.")
                 return
@@ -3323,16 +3193,11 @@ async def farmcheck(ctx, farm_id: str):
             await ctx.send(f"❌ Error: {e}")
 
 # =============================================================================
-# REBUILT !
+# !progress — one player's full profile
 # =============================================================================
-# Replaces your existing  command entirely. Delete the old one first.
-#
-# What changed:
-#   - Merits-sheet stats now work for ANY server you have an export for, not
-#     just 375. Looks up the player's home server and pulls that dataset.
-#   - Accepts a window: ! 123456 7d
-#   - Season-to-date by default.
-#   - Cleaner embed layout.
+# Scan stats (power, kills, deads, healed, mana) plus the merits breakdown from
+# the export of whichever server the player is on. Season to date by default,
+# or any window: !progress 123456 7d
 # =============================================================================
 
 
@@ -3445,9 +3310,7 @@ async def progress(ctx, *args):
         !progress 11659353 sos4         a different season
         !progress 11659353 2026-08-30   since a specific date
     """
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     lord_id, args = await resolve_lord_id(ctx, args)
@@ -3740,7 +3603,6 @@ async def progress(ctx, *args):
 
                 total_v = profile["total"][0]
                 enemy_v = profile["enemy"][0]
-                traded_v = profile["traded"][0]
                 pct = (enemy_v / total_v * 100) if total_v else 0
 
                 embed.add_field(
@@ -3783,9 +3645,6 @@ async def progress(ctx, *args):
         except Exception as e:
             await ctx.send(f"❌ **Error:** {e}")
 
-from discord.ext import commands
-import discord
-
 @bot.command()
 async def matchups2(ctx, season: str = "test"):
     allowed_channels = {1515777892016193656}
@@ -3797,15 +3656,15 @@ async def matchups2(ctx, season: str = "test"):
         season = season.lower()
         sheet_name = SEASON_SHEETS.get(season, season)
 
-        tabs = await asyncio.to_thread(client.open(sheet_name).worksheets)
+        tabs = await open_worksheets(sheet_name)
         if len(tabs) < 2:
             await ctx.send("❌ Not enough sheets to compare.")
             return
 
         latest = tabs[-1]
         previous = tabs[-2]
-        data_latest = latest.get_all_values()
-        data_prev   = previous.get_all_values()
+        data_latest = await asyncio.to_thread(latest.get_all_values)
+        data_prev   = await asyncio.to_thread(previous.get_all_values)
         headers = data_latest[0]
 
         # header lookups with safe fallback to known positions (0-based)
@@ -3985,15 +3844,8 @@ async def matchups2(ctx, season: str = "test"):
         await ctx.send(f"❌ Error: {e}")
 
 # =============================================================================
-# REBUILT !matchups  (v3 — power tracking, RSS healing costs, spaced layout)
+# !matchups — head-to-head war comparison (power, combat, RSS healing, merits)
 # =============================================================================
-# Replaces the previous matchups command.
-#
-#     !matchups              all pairings, season to date
-#     !matchups 357          just the pairing involving 357
-#     !matchups 1d           yesterday — power loss, healing spend, the lot
-#     !matchups 357 7d
-#
 # Everything is filtered to accounts at/above 50M HIGHEST power, on both the
 # scan side and the merits side, so the two datasets describe the same players.
 # =============================================================================
@@ -4448,9 +4300,7 @@ async def matchups(ctx, *args):
         !matchups -i- yss 1d        just -I- vs YSS, yesterday
         !matchups nvr+-i- yss+rff   any custom sides, joined with +
     """
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     async with ctx.typing():
@@ -4536,30 +4386,16 @@ async def matchups(ctx, *args):
             await ctx.send(f"❌ **Error:** {e}")
 
 
-import os
 TOKEN = os.getenv("TOKEN")
-
-# Replace with your actual war-status channel ID
-CHANNEL_ID = 1369071691111600168
-
-# Allowed role ID
-ALLOWED_ROLE_ID = 1527800467353112716
-
-# Permission check decorator
-def role_check():
-    async def predicate(ctx):
-        if any(role.id == ALLOWED_ROLE_ID for role in ctx.author.roles):
-            return True
-        await ctx.send("❌ You don’t have permission to use this command.")
-        return False
-    return commands.check(predicate)
 
 
 # =============================================================================
 # AUTOMATION — freshness notes, reminders, !link, daily report
 # =============================================================================
 
-REPORT_HOUR_UTC = 10          # daily report goes out at 10:00 UTC
+REPORT_HOUR_UTC = 10          # daily report: never before this hour (UTC) ...
+REPORT_SETTLE_MINUTES = 10    # ... and once our newest export has been in this long,
+                              # so the other servers' files from the same run are in too
 REMINDER_HOUR_UTC = 15        # reminders checked from 15:00 UTC (after the 14:30 export)
 LORD_ID_RE = re.compile(r"^\d{5,12}$")
 
@@ -4713,9 +4549,7 @@ async def resolve_lord_id(ctx, args):
 @bot.command(name="link")
 async def link_cmd(ctx, lord_id: str = None):
     """!link <lord_id> — remember your account, then !progress works without an ID."""
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
     if not lord_id or not LORD_ID_RE.match(lord_id.strip()):
         current = await db.get_link(ctx.author.id)
@@ -4880,28 +4714,49 @@ async def build_daily_report(season=None):
 
 
 async def post_daily_report_once(today):
-    """Post the scheduled report once per day, if a channel is set."""
-    if await db.get_state("report_last_posted") == today.isoformat():
-        return
+    """
+    Post the report once for every new day of export data, if a channel is set.
+
+    It goes out when the export for a new day arrives (the export script runs
+    in the afternoon), not at a fixed hour, so it always shows yesterday rather
+    than the day before. A day is never reported twice, so a missing export
+    means no report instead of a repeat of the last one.
+    """
     channel_id = await db.get_state("report_channel")
     if not channel_id:
         return
     channel = bot.get_channel(int(channel_id))
     if channel is None:
         return
+    rows = await db.list_scan_dates(merits_dataset(home_server()), limit=1)
+    if not rows:
+        return
+    day, ingested_at = rows[0]["scan_date"], rows[0]["ingested_at"]
+    if ingested_at and datetime.now(UTC) - ingested_at < timedelta(minutes=REPORT_SETTLE_MINUTES):
+        return
+
+    last_day = await db.get_state("report_last_day")
+    if last_day is None:
+        # Before this was tracked, the report went out at 10:00 with the export
+        # from two days earlier; carry on from there without repeating a day.
+        posted = await db.get_state("report_last_posted")
+        if posted:
+            last_day = min(day, date.fromisoformat(posted) - timedelta(days=2)).isoformat()
+    if last_day and day.isoformat() <= last_day:
+        return
+
     embed, _ = await build_daily_report()
     if embed is None:
         return
     await channel.send(embed=embed)
+    await db.set_state("report_last_day", day.isoformat())
     await db.set_state("report_last_posted", today.isoformat())
 
 
 @bot.command(name="report", aliases=["daily"])
 async def report_cmd(ctx):
     """Today's daily report, on demand."""
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
     async with ctx.typing():
         embed, reason = await build_daily_report()
@@ -4911,7 +4766,7 @@ async def report_cmd(ctx):
 @bot.command(name="reportchannel")
 @scan_admin()
 async def reportchannel_cmd(ctx, channel: str = None):
-    """!reportchannel #channel — where the 10:00 UTC daily report goes. 'off' stops it."""
+    """!reportchannel #channel — where the daily report goes. 'off' stops it."""
     if channel and channel.lower() == "off":
         await db.set_state("report_channel", None)
         await ctx.send("🔕 Daily report switched off.")
@@ -4920,59 +4775,89 @@ async def reportchannel_cmd(ctx, channel: str = None):
     if not m:
         current = await db.get_state("report_channel")
         await ctx.send(
-            (f"📰 Daily report goes to <#{current}> at {REPORT_HOUR_UTC}:00 UTC. "
+            (f"📰 Daily report goes to <#{current}> once each day's export is in. "
              if current else "📰 No report channel set. ")
             + "Set it with `!reportchannel #channel`, or `!reportchannel off`."
         )
         return
     await db.set_state("report_channel", m.group(1))
-    await ctx.send(f"✅ Daily report will post in <#{m.group(1)}> every day at "
-                   f"{REPORT_HOUR_UTC}:00 UTC.")
+    await ctx.send(f"✅ Daily report will post in <#{m.group(1)}> every day, once that "
+                   f"day's export is in (not before {REPORT_HOUR_UTC}:00 UTC).")
 
 
 
 @bot.event
-async def on_ready():
-    await db.init_db() 
+async def setup_hook():
+    """
+    Runs once, before the bot connects to Discord. If the database can't be
+    reached the bot stops here with the error in the logs (and the host
+    restarts it), instead of showing as online with nothing working.
+    """
+    await db.init_db()
     await db.upgrade_schema()
     await db.ensure_exclusions_table()
     await db.ensure_state_tables()
     await refresh_exclusions()
-    # on_ready runs again after every reconnect – only load each extension once
     for ext in ("spydetect", "dashboard", "activity_checks"):
-        if ext not in bot.extensions:
-            await bot.load_extension(ext)
+        await bot.load_extension(ext)
+
+    fetch_sheets_background.start()   # caches: exclusions, 375 export, seasons
+    update_utc_channels.start()       # waits for the bot to be ready itself
+    automation_loop.start()           # reminders + daily report (also waits)
+
+
+@bot.event
+async def on_ready():
+    # Runs again after every reconnect, so only light work belongs here
     print(f"✅ Bot is online as {bot.user}")
-    if not fetch_sheets_background.is_running():
-        fetch_sheets_background.start()
 
-    # Start the UTC channel updater loop
-    if not update_utc_channels.is_running():
-        update_utc_channels.start()
 
-    # Reminders and the daily report
-    if not automation_loop.is_running():
-        automation_loop.start()
+@bot.event
+async def on_command_error(ctx, error):
+    """One place for command errors, so typos and refused checks don't fill the
+    logs with tracebacks and people get a hint instead of silence."""
+    # Commands and cogs with their own error handler deal with it themselves
+    if ctx.command and ctx.command.has_error_handler():
+        return
+    if ctx.cog and ctx.cog.has_error_handler():
+        return
+
+    error = getattr(error, "original", error)
+    if isinstance(error, commands.CommandNotFound):
+        return                                  # "!!!", typos, other bots' commands
+    if isinstance(error, (commands.MissingPermissions, commands.MissingRole,
+                          commands.MissingAnyRole)):
+        await ctx.send("❌ You don't have permission to use this command.")
+        return
+    if isinstance(error, commands.CheckFailure):
+        return                                  # our checks already explain themselves
+    if isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"❌ Missing `{error.param.name}`. Usage: `!{ctx.command.qualified_name} "
+                       f"{ctx.command.signature}` · `!help {ctx.command.name}` for more.")
+        return
+    if isinstance(error, (commands.BadArgument, commands.BadUnionArgument)):
+        await ctx.send(f"❌ {error}")
+        return
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send(f"⏳ Try again in {error.retry_after:.0f}s.")
+        return
+
+    print(f"⚠️ Error in !{ctx.command}: {error!r}")
+    traceback.print_exception(type(error), error, error.__traceback__)
+    try:
+        await ctx.send("❌ Something went wrong with that command. It's been logged.")
+    except discord.HTTPException:
+        pass
 
 
 
 # ─────────────────────────────────────────────────────────────
-#  RSS SELLING QUEUE  –  paste below your other bot code
-#  Uses the same `bot` object (commands.Bot) – requires discord.py 2.x
+#  RSS SELLING QUEUE
 #
 #  Buyers:  📥 Join Queue · 📤 Leave Queue · 📊 My Status · ✅ I'm in position
 #  Sellers: ▶️ Call Next (pick what to send + where to go) · 📦 My Deliveries
 #           (✅ Delivered / ❌ Decline per buyer, several buyers at once)
 # ─────────────────────────────────────────────────────────────
-import asyncio
-import datetime as _dt  # alias so it never clashes with "from datetime import datetime"
-import json
-import re
-import time
-from zoneinfo import ZoneInfo
-
-import discord
-from discord.ext import tasks
 
 # ── Config ───────────────────────────────────────────────────
 RSS_SELLER_ROLE_ID = 1553185357095506000                     # ⬅️ role your RSS sellers have (admins can always use it)
@@ -5005,11 +4890,7 @@ def _rss_migrate(entry):
 
 
 def _rss_load():
-    try:
-        with open(RSS_STATE_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        data = {}
+    data = load_json_file(RSS_STATE_FILE)
     data.setdefault("queue", [])        # [{user_id, resources (still to deliver), ign, joined}]
     data.setdefault("deliveries", {})   # {id: {seller_id, user_id, resources, note, ready_at, msgs, ...}}
     data.setdefault("next_id", 1)
@@ -5036,8 +4917,7 @@ rss_lock = asyncio.Lock()
 
 
 def _rss_save():
-    with open(RSS_STATE_FILE, "w", encoding="utf-8") as f:
-        json.dump(rss, f)
+    save_json_atomic(RSS_STATE_FILE, rss)
 
 
 # ── Week helpers ─────────────────────────────────────────────
@@ -5310,10 +5190,6 @@ async def rss_dm(user_id, content=None, **kwargs):
         return await user.send(content, **kwargs)
     except discord.HTTPException:
         return None
-
-
-async def rss_safe_dm(guild, user_id, text):
-    await rss_dm(user_id, text)
 
 
 def _msg(ch_id, msg_id):
@@ -6063,8 +5939,6 @@ async def rss_clear(ctx):
 #   • Auto-translate: non-English messages in chosen channels get an English reply
 #  Uses Google Translate's free web endpoint – no API key needed.
 # ─────────────────────────────────────────────────────────────
-import os
-import aiohttp
 
 # ── Config ───────────────────────────────────────────────────
 AUTO_TRANSLATE_CHANNEL_IDS = []      # ⬅️ channel IDs for auto-translate, e.g. [123, 456]  ([] = off)
@@ -6410,15 +6284,10 @@ async def translate_test(ctx, *, text: str = "rac不是disband了么 没拉点�
 
 
 # =============================================================================
-# REBUILT HELP COMMAND
+# HELP COMMAND  (!help / !commands)
 # =============================================================================
-# Replaces your existing `commands` help command.
-#
-# NOTE THE RENAME: the function is now show_commands, not commands. The old
-# name shadowed `from discord.ext import commands`, which would break any
-# @scan_admin() command defined below it. Users still type !help / !commands.
-#
-# Also delete the `kills` command — it's gone from the help text.
+# The function is called show_commands, not commands: that name would shadow
+# `from discord.ext import commands`.
 # =============================================================================
 
 
@@ -6547,7 +6416,7 @@ def _help_embed(key, is_admin=False):
             "**`!report`**\n"
             "The daily report: yesterday's merits and power change for each "
             "pairing, plus our top merits and biggest power losses. Posted "
-            "automatically every day at 10:00 UTC.\n\n"
+            "automatically every day once the daily export is in.\n\n"
             "**`!groupleaderboard`**  ·  aliases `!gl`, `!grouplb`\n"
             "Sun vs Moon player rankings.\n\n"
             "**`!groupstats`**\n"
@@ -6626,7 +6495,7 @@ def _help_embed(key, is_admin=False):
             "```\n"
             "**📰 Daily report & reminders**\n"
             "```\n"
-            "!reportchannel #channel   where the 10:00 UTC report goes\n"
+            "!reportchannel #channel   where the daily report goes\n"
             "!reportchannel off        stop it\n"
             "```\n"
             "The bot pings this role here after 15:00 UTC if there was no scan "
@@ -6724,7 +6593,7 @@ class HelpView(discord.ui.View):
 
 COMMAND_HELP = {
     "link": ("🔗 !link <lord_id>", "Remember your account so `!progress` needs no ID. `!unlink` to undo."),
-    "report": ("📰 !report", "Yesterday's war summary. Posted automatically at 10:00 UTC."),
+    "report": ("📰 !report", "Yesterday's war summary. Posted automatically once the daily export is in."),
     "progress": ("📊 !progress [lord_id] [window] [season]",
                  "Full profile with totals, window gains, ranks and merit "
                  "breakdown. No ID needed after `!link`.\n"
@@ -6765,9 +6634,7 @@ COMMAND_HELP = {
 @bot.command(name="commands", aliases=["help", "info", "guide"])
 async def show_commands(ctx, query: str = None):
     """Browse the bot's commands."""
-    if ctx.channel.id not in ALLOWED_COMMAND_CHANNEL_ID:
-        mentions = ", ".join(f"<#{c}>" for c in ALLOWED_COMMAND_CHANNEL_ID)
-        await ctx.send(f"❌ Commands are only allowed in {mentions}.")
+    if not await channel_allowed(ctx):
         return
 
     is_admin = any(
