@@ -15,8 +15,10 @@ import io
 import json
 import os
 import re
+from collections import OrderedDict
+from datetime import date
+
 import openpyxl
-from datetime import date, datetime
 
 import asyncpg
 
@@ -345,18 +347,38 @@ async def has_scan(season, scan_date):
         ) is not None
 
 
+# Recently read scans, so commands that read the same day several times (the
+# daily report, !matchups) don't fetch and decode it from Postgres each time.
+# An entry is only used while the scan's ingested_at is unchanged, so a
+# re-upload is picked up immediately. Capped by cell count to bound memory.
+_scan_cache = OrderedDict()        # (season, scan_date) -> (ingested_at, cells, table)
+SCAN_CACHE_MAX_CELLS = 600_000
+
+
+def _copy_table(table):
+    return [list(r) for r in table]
+
+
 async def get_scan(season, scan_date):
     """
     Return one scan as [headers, row, row, ...] — the same shape gspread's
     get_all_values() returns, so existing command code works unchanged.
+    Every call returns a fresh copy, so callers may modify it freely.
     """
+    key = (season, scan_date)
     async with pool().acquire() as conn:
-        headers = await conn.fetchval(
-            "SELECT headers FROM scan_meta WHERE season = $1 AND scan_date = $2",
+        meta = await conn.fetchrow(
+            "SELECT headers, ingested_at FROM scan_meta WHERE season = $1 AND scan_date = $2",
             season, scan_date,
         )
-        if headers is None:
+        if meta is None:
+            _scan_cache.pop(key, None)
             return None
+        hit = _scan_cache.get(key)
+        if hit is not None and hit[0] == meta["ingested_at"]:
+            _scan_cache.move_to_end(key)
+            return _copy_table(hit[2])
+        headers = meta["headers"]
         rows = await conn.fetch(
             """
             SELECT data FROM scans
@@ -370,6 +392,14 @@ async def get_scan(season, scan_date):
     for r in rows:
         d = r["data"]
         out.append([d.get(h, "") for h in headers])
+
+    cells = len(out) * max(len(headers), 1)
+    _scan_cache.pop(key, None)
+    if cells <= SCAN_CACHE_MAX_CELLS:
+        _scan_cache[key] = (meta["ingested_at"], cells, out)
+        while sum(v[1] for v in _scan_cache.values()) > SCAN_CACHE_MAX_CELLS:
+            _scan_cache.popitem(last=False)
+        return _copy_table(out)
     return out
 
 

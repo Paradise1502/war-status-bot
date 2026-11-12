@@ -12,7 +12,7 @@ ranking function and one embed builder serve all of them.
 """
 
 import re
-from datetime import date, timedelta
+from datetime import date
 
 import discord
 
