@@ -4397,6 +4397,8 @@ REPORT_HOUR_UTC = 10          # daily report: never before this hour (UTC) ...
 REPORT_SETTLE_MINUTES = 10    # ... and once our newest export has been in this long,
                               # so the other servers' files from the same run are in too
 REMINDER_HOUR_UTC = 15        # reminders checked from 15:00 UTC (after the 14:30 export)
+SCAN_REMINDER_AFTER_DAYS = 3  # scan reminder once the newest scan is this many days old
+SCAN_REMINDER_USER_ID = 342949093401821195   # who the scan reminder pings
 LORD_ID_RE = re.compile(r"^\d{5,12}$")
 
 
@@ -4445,16 +4447,20 @@ async def automation_loop():
         ping = f"<@&{SCAN_ADMIN_ROLE_ID}>"
         start = season_start()
 
-        # Scans: remind when there was no scan yesterday or today
+        # Scans: remind once the newest scan (or the season start, if there's
+        # none yet) is SCAN_REMINDER_AFTER_DAYS days old
         dates = await db.get_latest_dates(DEFAULT_SEASON, n=1)
         last_scan = dates[0] if dates else None
-        if (today > start and (last_scan is None or last_scan < today - timedelta(days=1))
+        scan_age = (today - (last_scan or start)).days
+        if (scan_age >= SCAN_REMINDER_AFTER_DAYS
                 and await db.get_state("reminded_scan") != today.isoformat()):
-            when = (f"{(today - last_scan).days} days ago ({last_scan})"
+            when = (f"{scan_age} days ago ({last_scan})"
                     if last_scan else "never this season")
             await channel.send(
-                f"{ping} 📸 **Scan reminder** — the last scan was {when}. Deads, kills, "
-                f"healed and mana stay behind until the next `!ingest {DEFAULT_SEASON}`."
+                f"<@{SCAN_REMINDER_USER_ID}> 📸 **Scan reminder** — the last scan was {when}. "
+                f"Deads, kills, healed and mana stay behind until the next `!ingest {DEFAULT_SEASON}`.",
+                allowed_mentions=discord.AllowedMentions(users=[discord.Object(SCAN_REMINDER_USER_ID)],
+                                                         roles=False, everyone=False),
             )
             await db.set_state("reminded_scan", today.isoformat())
 
