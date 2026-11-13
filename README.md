@@ -41,7 +41,7 @@ Use a persistent volume for `/data`, or everything in it resets on each deploy. 
 - **Merits exports:** the export script posts each server's `.xlsx` (named like `375_2026-10-16_2026-10-20.xlsx`) through a webhook in the ingest channel, and the bot stores it automatically. By hand: attach the files to `!ingestmerits`. Always export with the season start as the start date.
 - **Scans:** attach the CSV to `!ingest` (season defaults to the current one).
 - **Daily report:** goes to the channel set with `!reportchannel #channel` once each day's export is in (not before 10:00 UTC).
-- **Reminders:** from 15:00 UTC the bot pings the scan admin role if a scan or export is missing.
+- **Reminders:** from 15:00 UTC, the bot pings `SCAN_REMINDER_USER_ID` once the newest scan is 3 days old (`SCAN_REMINDER_AFTER_DAYS`), and the scan admin role if yesterday's export is missing.
 
 ## New season
 
