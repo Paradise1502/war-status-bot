@@ -103,7 +103,7 @@ SEASON_CONFIG = {
     "sos8": {
         "label": "SoS8",
         "start": date(2026, 10, 16),
-        "end":   date(2026, 11, 23),   # reference only — nothing reads it yet
+        "end":   date(2026, 11, 23),
         "home":  "375",
         "matchups": [
             (["375", "509"], ["357"]),          # NVR + -I-  vs  YSS
@@ -4399,6 +4399,9 @@ REPORT_SETTLE_MINUTES = 10    # ... and once our newest export has been in this 
 REMINDER_HOUR_UTC = 15        # reminders checked from 15:00 UTC (after the 14:30 export)
 SCAN_REMINDER_AFTER_DAYS = 3  # scan reminder once the newest scan is this many days old
 SCAN_REMINDER_USER_ID = 342949093401821195   # who the scan reminder pings
+# Off switch for the daily report and the scan/export reminders. Set to True
+# again (and add the new season to SEASON_CONFIG) when the next season starts.
+AUTOMATION_ENABLED = False
 LORD_ID_RE = re.compile(r"^\d{5,12}$")
 
 
@@ -4433,7 +4436,7 @@ async def automation_loop():
     try:
         now = datetime.now(UTC)
         today = now.date()
-        if not _season_running(today):
+        if not AUTOMATION_ENABLED or not _season_running(today):
             return
 
         if now.hour >= REPORT_HOUR_UTC:
