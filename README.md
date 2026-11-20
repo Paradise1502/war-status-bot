@@ -49,6 +49,10 @@ Use a persistent volume for `/data`, or everything in it resets on each deploy. 
 2. Add a block to `SEASON_CONFIG` with its label, start and end dates, home server and matchups.
 3. Add any new servers to `ALL_SERVERS` and `SERVER_COLORS`.
 4. Change `DEFAULT_SEASON`, and update `TEAM_ROSTER` and `DEAD_REQUIREMENTS` if they change.
+5. Set `AUTOMATION_ENABLED = True` in `main.py` to turn the daily report and reminders back on.
+6. On the export PC, turn the export back on: `Enable-ScheduledTask -TaskName "codexport"` in PowerShell.
+
+Between seasons, set `AUTOMATION_ENABLED = False` and run `Disable-ScheduledTask -TaskName "codexport"`.
 
 ## Commands
 
